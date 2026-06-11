@@ -1,0 +1,1301 @@
+import React, { useState, useRef, useEffect } from 'react';
+import { Stage, Layer, Rect, Circle, Line, Image as KonvaImage, Text } from 'react-konva';
+import useImage from 'use-image';
+import { Layout, Eye, Camera, FileDown, Link as LinkIcon, Check, Copy, X, Tags } from 'lucide-react';
+import { UnitShape, MapVersion } from './types';
+import { cn } from '../../lib/utils';
+import { jsPDF } from 'jspdf';
+import { useSummaryData, generateSizeLabel } from '../../lib/summaryData';
+import { useData } from '../../DataContext';
+import { Calculator, CloudUpload } from 'lucide-react';
+import { uploadFileToDrive } from '../../lib/drive';
+import { initAuth, googleSignIn, getAccessToken } from '../../lib/auth';
+import R2UploadModal from '../R2UploadModal';
+
+interface ReviewTabProps {
+  units: UnitShape[];
+  setUnits: (units: UnitShape[]) => void;
+  versions: MapVersion[];
+  setVersions: (versions: MapVersion[]) => void;
+  activeVersionId: string | null;
+}
+
+const AVAILABLE_LABELS = [
+    'Unit ID', 'Size SQM', 'Floor', 'Brand Code', 'Brand Name', 'Vendor Code',
+    'Name', 'Class Code', 'Update', 'Status', 'MD Status', 'Task', 'Project Status',
+    'Sales', 'Sales By CP', 'Sales By HCM Categ',
+    'Profit', 'Profit By CP', 'Profit By HCM Categ',
+    'Margin', 'Margin By CP', 'HCM Margin',
+    'HCM Sales Effi'
+];
+
+export default function ReviewTab({ units, setUnits, versions, setVersions, activeVersionId: initialActiveVersionId }: ReviewTabProps) {
+  const [activeVersionId, setActiveVersionId] = useState<string | null>(initialActiveVersionId || versions[0]?.id || null);
+  const activeVersion = versions.find(v => v.id === activeVersionId);
+  const summaryData = useSummaryData();
+  const { profits, subFees, mdStatus, projectStatus } = useData();
+
+  const [selectedLabels, setSelectedLabels] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('review_selected_labels');
+      if (saved) return JSON.parse(saved);
+    } catch(e) {}
+    return ['Unit ID', 'Size SQM'];
+  });
+  const [showLabelSettings, setShowLabelSettings] = useState(false);
+
+  useEffect(() => {
+    localStorage.setItem('review_selected_labels', JSON.stringify(selectedLabels));
+  }, [selectedLabels]);
+
+  // Optimize units rendering by pre-calculating styles and filtering
+  const styledUnits = React.useMemo(() => {
+    if (!activeVersion) return [];
+
+    // Pre-map unit IDs to group styles for O(1) lookup
+    const unitToGroupStyle = new Map<string, { color: string; opacity: number }>();
+    activeVersion.groups.forEach(group => {
+      const assignedIds = activeVersion.groupMappings[group.id] || [];
+      assignedIds.forEach(id => {
+        unitToGroupStyle.set(id, {
+          color: group.color,
+          opacity: group.opacity ?? 0.6
+        });
+      });
+    });
+
+    return units
+      .filter(unit => unitToGroupStyle.has(unit.id))
+      .map(unit => {
+        const style = unitToGroupStyle.get(unit.id)!;
+        const uInfo = summaryData.find((s) => s.unit === unit.name);
+        const sizeLabel = generateSizeLabel(unit, uInfo, selectedLabels);
+        return {
+          ...unit,
+          displayColor: style.color,
+          displayOpacity: style.opacity,
+          sizeLabel
+        };
+      });
+  }, [units, activeVersion, summaryData, selectedLabels]);
+
+  const [image] = useImage(activeVersion?.backgroundUrl || '');
+  const [scale, setScale] = useState(activeVersion?.backgroundScale || 1);
+  const [position, setPosition] = useState(activeVersion?.backgroundPos || { x: 0, y: 0 });
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [shareImage, setShareImage] = useState<string | null>(null);
+  const [actualShareLink, setActualShareLink] = useState('');
+  
+  const stageRef = useRef<any>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [canvasSize, setCanvasSize] = useState({ width: 800, height: 600 });
+
+
+  const copyToClipboard = () => {
+      navigator.clipboard.writeText(actualShareLink);
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2000);
+  };
+
+  const handleOpenShareModal = () => {
+      if (!stageRef.current) return;
+      const dataURL = stageRef.current.toDataURL({ pixelRatio: 1, mimeType: 'image/jpeg', quality: 0.8 });
+      setShareImage(dataURL);
+      
+      const isAll = window.confirm('Bạn muốn xuất link cho TẤT CẢ các bản vẽ (OK) hay chỉ bản vẽ HIỆN TẠI (Cancel)?');
+      const linkParam = isAll ? 'all' : (activeVersionId || '');
+      const labelsParam = selectedLabels.length ? `&labels=${encodeURIComponent(selectedLabels.join(','))}` : '';
+      setActualShareLink(`${window.location.origin}${window.location.pathname}?reviewOnly=${linkParam}${labelsParam}`);
+      
+      setShowShareModal(true);
+      setCopiedLink(false);
+  };
+
+  const [exportAllFormat, setExportAllFormat] = useState<'pdf' | 'jpeg' | 'r2_jpeg' | 'drive' | null>(null);
+  const [exportModalVisible, setExportModalVisible] = useState(false);
+  const [exportFormat, setExportFormat] = useState<'pdf' | 'jpeg' | 'r2_jpeg' | 'drive'>('pdf');
+  const [exportPaperSize, setExportPaperSize] = useState<'a4' | 'a3' | 'a2' | 'original'>(() => {
+      return (localStorage.getItem('export_paper_size') as any) || 'a4';
+  });
+  const [exportQuality, setExportQuality] = useState<'high' | 'medium' | 'low'>(() => {
+      return (localStorage.getItem('export_quality') as any) || 'medium';
+  });
+  const [selectedVersionsToExport, setSelectedVersionsToExport] = useState<Record<string, boolean>>({});
+
+  const handleExportAllManagerComplete = async (success: boolean, blob?: Blob) => {
+    if (exportAllFormat === 'r2_jpeg') {
+        if (!success || !blob) {
+            alert('Lỗi tạo ảnh JPEG.');
+            setExportAllFormat(null);
+            setIsUploadingToR2(false);
+            setShowR2Modal(false);
+            return;
+        }
+
+        setIsUploadingToR2(true);
+        try {
+            const accountId = localStorage.getItem('r2_account_id') || '';
+            const accessKeyId = localStorage.getItem('r2_access_key') || '';
+            const secretAccessKey = localStorage.getItem('r2_secret_key') || '';
+            const bucketName = localStorage.getItem('r2_bucket_name') || '';
+
+            try {
+                const response = await fetch('/api/r2-upload', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'image/jpeg',
+                        'x-r2-account-id': accountId,
+                        'x-r2-access-key-id': accessKeyId,
+                        'x-r2-secret-access-key': secretAccessKey,
+                        'x-r2-bucket-name': bucketName,
+                        'x-r2-file-name': 'Data_Mapping_Export.jpeg'
+                    },
+                    body: blob
+                });
+
+                if (!response.ok) {
+                    const errorRes = await response.json().catch(() => ({ error: 'Unknown server error' }));
+                    throw new Error(errorRes.error || `Server response: ${response.status}`);
+                }
+
+                alert('Upload thành công/ghi đè lên Cloudflare R2!');
+            } catch (err: any) {
+                console.error(err);
+                alert('Lỗi upload R2: ' + err.message);
+            } finally {
+                setIsUploadingToR2(false);
+                setShowR2Modal(false);
+                setExportAllFormat(null);
+            }
+        } catch (err: any) {
+            console.error(err);
+            alert('Lỗi chuẩn bị dữ liệu: ' + err.message);
+            setIsUploadingToR2(false);
+            setShowR2Modal(false);
+            setExportAllFormat(null);
+        }
+    } else {
+        setExportAllFormat(null);
+    }
+  };
+
+  const startR2Export = () => {
+      // setShowR2Modal(false) -> We'll hide it after upload is done, so it stays open showing "Uploading..." state.
+      setExportAllFormat('r2_jpeg');
+  };
+  const [showR2Modal, setShowR2Modal] = useState(false);
+  const [isUploadingToR2, setIsUploadingToR2] = useState(false);
+
+  useEffect(() => {
+    const unsubscribe = initAuth();
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+      const savedSelStr = localStorage.getItem('export_selected_versions');
+      let savedSel: Record<string, boolean> = {};
+      try {
+          if (savedSelStr) {
+              savedSel = JSON.parse(savedSelStr);
+          }
+      } catch (e) {
+          console.error(e);
+      }
+
+      const sel: Record<string, boolean> = {};
+      versions.forEach(v => {
+          if (savedSel && typeof savedSel[v.id] === 'boolean') {
+              sel[v.id] = savedSel[v.id];
+          } else {
+              sel[v.id] = true;
+          }
+      });
+      setSelectedVersionsToExport(sel);
+  }, [versions]);
+
+  useEffect(() => {
+      if (Object.keys(selectedVersionsToExport).length > 0) {
+          localStorage.setItem('export_selected_versions', JSON.stringify(selectedVersionsToExport));
+      }
+  }, [selectedVersionsToExport]);
+
+  useEffect(() => {
+      localStorage.setItem('export_paper_size', exportPaperSize);
+  }, [exportPaperSize]);
+
+  useEffect(() => {
+      localStorage.setItem('export_quality', exportQuality);
+  }, [exportQuality]);
+
+  const handleExportClick = async (format: 'pdf' | 'jpeg' | 'r2_jpeg' | 'drive') => {
+      if (format === 'drive') {
+          let token = await getAccessToken();
+          if (!token) {
+              const res = await googleSignIn().catch(() => null);
+              if (res) token = res.accessToken;
+          }
+          if (!token) return; // User closed modal or failed
+      }
+      setExportFormat(format);
+      setExportModalVisible(true);
+  };
+
+  const handleConfirmExport = () => {
+      setExportModalVisible(false);
+      if (exportFormat === 'r2_jpeg') {
+          setShowR2Modal(true);
+      } else {
+          setExportAllFormat(exportFormat);
+      }
+  };
+
+  const handleExportJPEG = () => handleExportClick('jpeg');
+  const handleExportPDF = () => handleExportClick('pdf');
+  const handleExportDrive = () => handleExportClick('drive');
+  const handleExportR2 = () => handleExportClick('r2_jpeg');
+
+  const unitNamesStr = React.useMemo(() => JSON.stringify(units.map(u => ({ id: u.id, name: u.name }))), [units]);
+
+  const aggregatedData = React.useMemo(() => {
+    const dataMap: Record<string, any> = {};
+
+    const parsedUnits = JSON.parse(unitNamesStr);
+    parsedUnits.forEach((u: any) => {
+      dataMap[u.name.toLowerCase()] = {
+        name: u.name,
+        id: u.id,
+        sales: 0,
+        salesByCp: 0,
+        salesByHcmcate: 0,
+        profit: 0,
+        profitByCp: 0,
+        profitByHcmcate: 0,
+        margin: 0,
+        marginByCp: 0,
+        mgmtFee: 0,
+        mdStatus: "",
+        projectStatus: "",
+        vendorCode: "",
+        brandCode: "",
+        brandName: "",
+        classCode: "",
+        floor: "",
+        taskDelegation: "",
+        flowStatus: "",
+        party: "",
+      };
+    });
+
+    summaryData.forEach((sumData) => {
+      const key = sumData.unit?.toLowerCase();
+      if (key && dataMap[key]) {
+        dataMap[key].sales += sumData.salesAmount || 0;
+        dataMap[key].salesByCp += sumData.salesByCp || 0;
+        dataMap[key].salesByHcmcate += sumData.salesByHcmcate || 0;
+        dataMap[key].profitByHcmcate += sumData.profitByHcmcate || 0;
+        dataMap[key].vendorCode = sumData.vendorCode || dataMap[key].vendorCode;
+        dataMap[key].brandCode = sumData.brandCode || dataMap[key].brandCode;
+        dataMap[key].brandName = sumData.brandName || dataMap[key].brandName;
+        dataMap[key].classCode = sumData.classCode || dataMap[key].classCode;
+        dataMap[key].floor = (sumData as any).floor || dataMap[key].floor;
+        if (!dataMap[key].mdStatus) dataMap[key].mdStatus = sumData.mdStatus;
+        if (!dataMap[key].projectStatus) dataMap[key].projectStatus = sumData.projectStatus;
+      }
+    });
+
+    projectStatus.forEach((ps) => {
+      const key = ps.unit?.toLowerCase();
+      if (key && dataMap[key]) {
+        if (!dataMap[key].taskDelegation) dataMap[key].taskDelegation = ps.delegationStatus;
+        if (!dataMap[key].flowStatus) dataMap[key].flowStatus = ps.flowStatus;
+        if (!dataMap[key].party) dataMap[key].party = ps.party;
+      }
+    });
+
+    profits.forEach((p) => {
+      const uInfo = summaryData.find((u) => u.brandCode === p.brandCode);
+      if (uInfo && uInfo.unit) {
+        const key = uInfo.unit.toLowerCase();
+        if (dataMap[key]) {
+          dataMap[key].profit += Number(p.profit) || 0;
+          dataMap[key].profitByCp += Number(p.profitByCp) || 0;
+        }
+      }
+    });
+
+    Object.values(dataMap).forEach((d) => {
+      d.margin = d.sales ? d.profit / d.sales : 0;
+      d.marginByCp = d.salesByCp ? d.profitByCp / d.salesByCp : 0;
+    });
+
+    subFees.forEach((sf) => {
+      const uInfo = summaryData.find((u) => u.brandCode === sf.brandCode);
+      if (uInfo && uInfo.unit) {
+        const key = uInfo.unit.toLowerCase();
+        if (dataMap[key]) {
+          dataMap[key].mgmtFee += Number(sf.managementFee) || 0;
+        }
+      }
+    });
+
+    mdStatus.forEach((m) => {
+      if (m.unit) {
+        const key = m.unit.toLowerCase();
+        if (dataMap[key]) {
+          dataMap[key].mdStatus = m.status;
+        }
+      }
+    });
+
+    projectStatus.forEach((ps) => {
+      if (ps.unit) {
+        const key = ps.unit.toLowerCase();
+        if (dataMap[key]) {
+          dataMap[key].projectStatus = ps.status;
+        }
+      }
+    });
+
+    return dataMap;
+  }, [unitNamesStr, summaryData, profits, subFees, mdStatus, projectStatus]);
+
+  const applyAllDynamicRules = () => {
+    let hasChanges = false;
+    const nextVersions = versions.map(v => {
+      // Treat undefined as true for backwards compatibility
+      const isActive = v.isDynamicActive !== false;
+      if (!isActive) return v;
+
+      let versionChanged = false;
+      const newMappings = { ...v.groupMappings };
+
+      v.groups.forEach((group) => {
+        const matchingUnits = units.filter((u) => {
+          if (!group.rules || group.rules.length === 0) return false;
+          const data = aggregatedData[u.name.toLowerCase()];
+          if (!data) return false;
+
+          return group.rules.every((rule) => {
+            let val = data[rule.field];
+            if (rule.field === "margin" || rule.field === "marginByCp") val = val * 100;
+            const numVal = Number(rule.value);
+            const isNum = !isNaN(numVal) && rule.value.trim() !== "";
+
+            switch (rule.operator) {
+              case ">": return isNum ? Number(val) > numVal : false;
+              case "<": return isNum ? Number(val) < numVal : false;
+              case ">=": return isNum ? Number(val) >= numVal : false;
+              case "<=": return isNum ? Number(val) <= numVal : false;
+              case "=": return String(val || "").toLowerCase().trim() === String(rule.value || "").toLowerCase().trim();
+              case "contains": return String(val || "").toLowerCase().includes(String(rule.value || "").toLowerCase().trim());
+              case "exclude": return !String(val || "").toLowerCase().includes(String(rule.value || "").toLowerCase().trim());
+              default: return false;
+            }
+          });
+        }).map(u => u.id);
+
+        const currentMappings = newMappings[group.id] || [];
+        if (matchingUnits.length !== currentMappings.length || !matchingUnits.every((id) => currentMappings.includes(id))) {
+          newMappings[group.id] = matchingUnits;
+          versionChanged = true;
+          hasChanges = true;
+        }
+      });
+
+      if (versionChanged) {
+        return { ...v, groupMappings: newMappings };
+      }
+      return v;
+    });
+
+    if (hasChanges) {
+      setVersions(nextVersions);
+    }
+    
+    // Update unit styles for the current active version just like in DynamicHierarchyTab
+    if (activeVersion) {
+      const v = nextVersions.find(ver => ver.id === activeVersion.id);
+      if (v) {
+        let colorChanges = false;
+        const nextUnits = [...units];
+        nextUnits.forEach((u, idx) => {
+          let assignedColor = "#3b82f6";
+          v.groups.forEach((g) => {
+            if (v.groupMappings[g.id]?.includes(u.id)) {
+              assignedColor = g.color;
+            }
+          });
+          if (u.fill !== assignedColor) {
+            nextUnits[idx] = { ...u, fill: assignedColor };
+            colorChanges = true;
+          }
+        });
+
+        if (colorChanges) {
+          setUnits(nextUnits);
+        }
+      }
+    }
+
+    if (hasChanges) {
+      alert('Đã áp dụng điều kiện cho tất cả các phiên bản.');
+    } else {
+      alert('Không có thay đổi nào cần cập nhật.');
+    }
+  };
+
+  useEffect(() => {
+    if (activeVersion) {
+        setScale(activeVersion.backgroundScale || 1);
+        setPosition(activeVersion.backgroundPos || { x: 0, y: 0 });
+    }
+  }, [activeVersionId, activeVersion]);
+
+  useEffect(() => {
+    if (containerRef.current) {
+      setCanvasSize({
+        width: containerRef.current.clientWidth,
+        height: containerRef.current.clientHeight
+      });
+    }
+  }, []);
+
+  const handleWheel = (e: any) => {
+    e.evt.preventDefault();
+    const scaleBy = 1.1;
+    const stage = e.target.getStage();
+    const oldScale = stage.scaleX();
+    const pointer = stage.getPointerPosition();
+
+    const mousePointTo = {
+      x: (pointer.x - stage.x()) / oldScale,
+      y: (pointer.y - stage.y()) / oldScale,
+    };
+
+    const newScale = e.evt.deltaY < 0 ? oldScale * scaleBy : oldScale / scaleBy;
+    setScale(newScale);
+    setPosition({
+      x: pointer.x - mousePointTo.x * newScale,
+      y: pointer.y - mousePointTo.y * newScale,
+    });
+  };
+
+  if (!activeVersion) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-slate-500 italic">
+        <Layout size={48} className="mb-4 opacity-20" />
+        <p>Không có phiên bản nào. Hãy tạo phiên bản trong Edit hoặc Hierarchy tab.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col h-full gap-6">
+      {/* Selection Header */}
+      <div className="flex items-center justify-between p-4 bg-slate-900/50 rounded-2xl border border-slate-800/50 glass relative z-50">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 bg-emerald-600/20 text-emerald-400 rounded-lg flex items-center justify-center">
+            <Eye size={18} />
+          </div>
+          <div>
+            <h4 className="text-sm font-bold text-white uppercase tracking-wider">Mapping Review</h4>
+            <p className="text-[10px] text-slate-500 uppercase font-bold tracking-tight">XEM TRƯỚC PHIÊN BẢN THEO NHÓM</p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-4">
+          <button
+            onClick={applyAllDynamicRules}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold uppercase transition-colors shadow-lg shadow-indigo-900/20 box-border border-2 border-indigo-400 mr-2"
+          >
+            <Calculator size={14} /> Apply Rules To All
+          </button>
+          
+          <div className="flex bg-slate-950 border border-slate-800 rounded-lg p-1 mr-4">
+             <button onClick={handleExportJPEG} title="Save to JPEG" className="px-3 py-1.5 hover:bg-slate-800 text-slate-400 hover:text-white rounded flex items-center justify-center transition-colors">
+               <Camera size={14} className="mr-2" /> JPEG
+             </button>
+             <button onClick={handleExportPDF} title="Save to PDF" className="px-3 py-1.5 hover:bg-slate-800 text-slate-400 hover:text-white rounded flex items-center justify-center transition-colors">
+               <FileDown size={14} className="mr-2" /> PDF
+             </button>
+             <button onClick={handleExportDrive} title="Upload to Google Drive" className="px-3 py-1.5 hover:bg-slate-800 text-slate-400 hover:text-blue-400 rounded flex items-center justify-center transition-colors">
+               <CloudUpload size={14} className="mr-2" /> Drive
+             </button>
+             <button onClick={handleExportR2} title="Upload to Cloudflare R2" className="px-3 py-1.5 hover:bg-slate-800 text-slate-400 hover:text-amber-400 rounded flex items-center justify-center transition-colors">
+               <CloudUpload size={14} className="mr-2" /> R2 Cloud
+             </button>
+             <div className="relative">
+                <button 
+                  onClick={() => setShowLabelSettings(!showLabelSettings)} 
+                  className={cn("px-3 py-1.5 rounded flex items-center justify-center transition-colors", showLabelSettings ? "bg-blue-600 text-white" : "hover:bg-slate-800 text-slate-400 hover:text-blue-400")}
+                >
+                  <Tags size={14} className="mr-2" /> Labels
+                </button>
+                {showLabelSettings && (
+                  <div className="absolute top-full right-0 mt-2 bg-slate-900 border border-slate-700 rounded-lg shadow-xl p-3 w-56 z-[9999] flex flex-col gap-2 max-h-[60vh] overflow-y-auto">
+                    <div className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1 sticky top-0 bg-slate-900 py-1 z-10">Select Labels</div>
+                    {AVAILABLE_LABELS.map(label => (
+                      <label key={label} className="flex items-center gap-2 cursor-pointer group">
+                        <input 
+                          type="checkbox" 
+                          className="rounded border-slate-600 bg-slate-800 focus:ring-blue-500"
+                          checked={selectedLabels.includes(label)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedLabels([...selectedLabels, label]);
+                            } else {
+                              setSelectedLabels(selectedLabels.filter(l => l !== label));
+                            }
+                          }}
+                        />
+                        <span className="text-sm text-slate-300 group-hover:text-white transition-colors">{label}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+             </div>
+          </div>
+
+          <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Version:</span>
+          <select 
+            value={activeVersionId || ''} 
+            onChange={(e) => setActiveVersionId(e.target.value)}
+            className="bg-slate-950 border border-slate-800 text-slate-300 text-xs font-bold rounded-lg px-4 py-2 outline-none focus:border-blue-500 transition-all min-w-[160px] uppercase tracking-wider"
+          >
+            {versions.length === 0 && <option value="">No versions available</option>}
+            {versions.map(v => (
+              <option key={v.id} value={v.id}>{v.name}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div className="flex-1 flex gap-6 overflow-hidden">
+        {/* Main Preview Area */}
+        <div className="flex-1 rounded-2xl border border-slate-800/50 glass overflow-hidden relative bg-[#1e1e1e]" ref={containerRef}>
+          <Stage 
+            ref={stageRef}
+            width={canvasSize.width} 
+            height={canvasSize.height}
+            onWheel={handleWheel}
+            scaleX={scale}
+            scaleY={scale}
+            x={position.x}
+            y={position.y}
+            draggable
+          >
+            <Layer>
+              {image && <KonvaImage 
+                image={image} 
+                listening={false} 
+                x={activeVersion?.imagePos?.x || 0}
+                y={activeVersion?.imagePos?.y || 0}
+                scaleX={activeVersion?.imageScale || 1}
+                scaleY={activeVersion?.imageScale || 1}
+              />}
+              {styledUnits.map((unit) => {
+                const { displayColor, displayOpacity } = unit as any;
+                
+                return (
+                  <React.Fragment key={unit.id}>
+                    {unit.type === 'rect' && (
+                      <Rect
+                        x={unit.x}
+                        y={unit.y}
+                        width={unit.width}
+                        height={unit.height}
+                        fill={displayColor}
+                        opacity={displayOpacity}
+                        rotation={unit.rotation || 0}
+                        stroke="#ffffff"
+                        strokeWidth={2 / scale}
+                        shadowBlur={4}
+                        shadowColor="rgba(0,0,0,0.5)"
+                        listening={false}
+                      />
+                    )}
+                    {unit.type === 'circle' && (
+                      <Circle
+                        x={unit.x}
+                        y={unit.y}
+                        radius={unit.radius}
+                        fill={displayColor}
+                        opacity={displayOpacity}
+                        rotation={unit.rotation || 0}
+                        stroke="#ffffff"
+                        strokeWidth={2 / scale}
+                        shadowBlur={4}
+                        shadowColor="rgba(0,0,0,0.5)"
+                        listening={false}
+                      />
+                    )}
+                    {unit.type === 'polygon' && (
+                      <Line
+                        x={unit.x || 0}
+                        y={unit.y || 0}
+                        points={unit.points}
+                        fill={displayColor}
+                        opacity={displayOpacity}
+                        rotation={unit.rotation || 0}
+                        stroke="#ffffff"
+                        strokeWidth={2 / scale}
+                        shadowBlur={4}
+                        shadowColor="rgba(0,0,0,0.5)"
+                        closed
+                        listening={false}
+                      />
+                    )}
+                    
+                    {/* Unit Label - only show if scale is large enough to be readable */}
+                    {scale > 0.3 && (
+                      <Text
+                        text={unit.sizeLabel}
+                        x={unit.type === 'rect' ? unit.x : (unit.type === 'circle' ? unit.x - (unit.radius || 0) : (unit.points ? Math.min(...unit.points.filter((_, i) => i % 2 === 0)) : unit.x))}
+                        y={unit.type === 'rect' ? unit.y : (unit.type === 'circle' ? unit.y - (unit.radius || 0) : (unit.points ? Math.min(...unit.points.filter((_, i) => i % 2 === 1)) : unit.y))}
+                        width={unit.type === 'rect' ? unit.width : (unit.type === 'circle' ? (unit.radius || 0) * 2 : (unit.points ? Math.max(...unit.points.filter((_, i) => i % 2 === 0)) - Math.min(...unit.points.filter((_, i) => i % 2 === 0)) : 100))}
+                        height={unit.type === 'rect' ? unit.height : (unit.type === 'circle' ? (unit.radius || 0) * 2 : (unit.points ? Math.max(...unit.points.filter((_, i) => i % 2 === 1)) - Math.min(...unit.points.filter((_, i) => i % 2 === 1)) : 30))}
+                        rotation={unit.rotation || 0}
+                        align="center"
+                        verticalAlign="middle"
+                        fontSize={10 / scale}
+                        fill="#fff"
+                        fontStyle="bold"
+                        listening={false}
+                        shadowColor="black"
+                        shadowBlur={2}
+                        shadowOpacity={1}
+                        shadowOffset={{ x: 1, y: 1 }}
+                      />
+                    )}
+                  </React.Fragment>
+                );
+              })}
+            </Layer>
+          </Stage>
+        </div>
+
+        {/* Info Legend Right */}
+        <div className="w-80 flex flex-col gap-4 bg-slate-900/50 rounded-2xl border border-slate-800/50 p-4 glass overflow-y-auto">
+          <div className="flex border-b border-slate-800 pb-2 mb-2">
+            <h4 className="text-xs font-bold text-slate-300 uppercase tracking-widest flex-1">Legend / Groups</h4>
+          </div>
+          
+          <div className="space-y-3">
+             {activeVersion?.groups.map(group => {
+               // Only show groups that have units assigned in this version
+               const assignedUnitIds = activeVersion?.groupMappings[group.id] || [];
+               if (assignedUnitIds.length === 0) return null;
+               
+               return (
+                 <div key={group.id} className="p-3 bg-slate-950/50 border border-slate-800 rounded-xl space-y-2">
+                   <div className="flex items-center gap-2">
+                     <div className="w-3 h-3 rounded-full" style={{ backgroundColor: group.color }} />
+                     <span className="text-xs font-bold text-slate-300 uppercase tracking-tight">{group.name}</span>
+                     <span className="ml-auto text-[10px] text-slate-500">{assignedUnitIds.length} units</span>
+                   </div>
+                   <div className="flex flex-wrap gap-1">
+                     {assignedUnitIds.map(uid => {
+                       const u = units.find(x => x.id === uid);
+                       return u ? (
+                         <span key={u.id} className="text-[9px] px-1.5 py-0.5 bg-slate-800 text-slate-400 border border-slate-700/50 rounded">
+                           {u.name}
+                         </span>
+                       ) : null;
+                     })}
+                   </div>
+                 </div>
+               );
+             })}
+          </div>
+        </div>
+      </div>
+
+      {showShareModal && (
+        <div className="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-md flex items-center justify-center p-6">
+            <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl relative overflow-hidden">
+                <button onClick={() => setShowShareModal(false)} className="absolute top-4 right-4 p-2 bg-slate-800 text-slate-400 hover:text-white rounded-lg z-10 transition-colors">
+                    <X size={20} />
+                </button>
+                <div className="p-6 border-b border-slate-800 flex items-center gap-4">
+                    <div className="w-10 h-10 rounded-xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400">
+                        <LinkIcon size={20} />
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-bold text-white">Share Review Viewer</h3>
+                      <p className="text-sm text-slate-400">Copy this link to share the current view.</p>
+                    </div>
+                </div>
+                
+                <div className="flex-1 overflow-auto p-6 bg-[#0F1115] flex justify-center items-center">
+                    {shareImage && <img src={shareImage} alt="Share preview" className="max-w-full max-h-full object-contain rounded-xl border border-slate-800 shadow-xl" />}
+                </div>
+
+                <div className="p-4 border-t border-slate-800 bg-slate-900/50 flex gap-3">
+                    <input 
+                        type="text" 
+                        readOnly 
+                        value={actualShareLink} 
+                        className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-4 py-3 text-slate-300 font-mono text-sm outline-none" 
+                    />
+                    <button 
+                      onClick={copyToClipboard}
+                      className="px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg flex items-center gap-2 transition-colors"
+                    >
+                      {copiedLink ? <Check size={18} /> : <Copy size={18} />} 
+                      {copiedLink ? 'Copied' : 'Copy Link'}
+                    </button>
+                </div>
+            </div>
+        </div>
+      )}
+      
+      {exportAllFormat && (
+          <ExportAllManager 
+             versions={versions.filter(v => selectedVersionsToExport[v.id])} 
+             units={units} 
+             summaryData={summaryData} 
+             format={exportAllFormat} 
+             paperSize={exportPaperSize}
+             quality={exportQuality}
+             selectedLabels={selectedLabels}
+             onComplete={handleExportAllManagerComplete} 
+          />
+      )}
+
+      <R2UploadModal 
+          isOpen={showR2Modal} 
+          onClose={() => {
+              setShowR2Modal(false);
+              setExportAllFormat(null);
+          }}
+          onStartExport={startR2Export}
+          uploading={isUploadingToR2}
+          uploadProgress={0}
+      />
+
+      {exportModalVisible && (
+        <div className="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-md flex items-center justify-center p-6">
+            <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg flex flex-col shadow-2xl relative overflow-hidden max-h-[90vh]">
+                <button onClick={() => setExportModalVisible(false)} className="absolute top-4 right-4 p-2 bg-slate-800 text-slate-400 hover:text-white rounded-lg z-10 transition-colors">
+                    <X size={20} />
+                </button>
+                <div className="p-6 border-b border-slate-800 shrink-0">
+                    <h3 className="text-xl font-bold text-white uppercase tracking-wider">
+                        {exportFormat === 'drive' ? 'Upload to Drive' : exportFormat === 'r2_jpeg' ? 'Upload to Cloud R2' : `Export ${exportFormat.toUpperCase()}`}
+                    </h3>
+                    <p className="text-sm text-slate-400">Select which versions to include in the export.</p>
+                    
+                    <div className="mt-4 flex flex-col gap-3 relative">
+                        <div className="flex items-center justify-between">
+                            {(exportFormat === 'pdf' || exportFormat === 'drive' || exportFormat === 'r2_jpeg') ? (
+                                <div className="flex items-center gap-3">
+                                    <label className="text-sm font-medium text-slate-300">Paper Size:</label>
+                                    <select 
+                                        value={exportPaperSize}
+                                        onChange={(e) => setExportPaperSize(e.target.value as any)}
+                                        className="bg-slate-950 text-white text-sm px-3 py-1.5 rounded-lg border border-slate-700 outline-none"
+                                    >
+                                        <option value="a4">A4</option>
+                                        <option value="a3">A3</option>
+                                        <option value="a2">A2</option>
+                                        <option value="original">Original Dimensions</option>
+                                    </select>
+                                </div>
+                            ) : <div></div>}
+                            
+                            <div className="flex justify-end gap-2 shrink-0 pr-6">
+                                <button 
+                                  onClick={() => setExportModalVisible(false)}
+                                  className="px-3 py-1.5 text-xs hover:bg-slate-800 text-slate-300 font-bold rounded-lg transition-colors"
+                                >
+                                  Cancel
+                                </button>
+                                <button 
+                                  onClick={handleConfirmExport}
+                                  disabled={!Object.values(selectedVersionsToExport).some(v => v)}
+                                  className="px-4 py-1.5 text-xs bg-amber-600 hover:bg-amber-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold rounded-lg flex items-center transition-colors"
+                                >
+                                  {exportFormat === 'drive' ? 'Upload Selected' : exportFormat === 'r2_jpeg' ? 'Xác nhận & Tiếp tục' : 'Export Selected'}
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                            <label className="text-sm font-medium text-slate-300">Quality / File Size:</label>
+                            <select 
+                                value={exportQuality}
+                                onChange={(e) => setExportQuality(e.target.value as any)}
+                                className="bg-slate-950 text-white text-sm px-3 py-1.5 rounded-lg border border-slate-700 outline-none w-64"
+                            >
+                                <option value="high">High (4x resolution, large size)</option>
+                                <option value="medium">Medium (2x resolution, medium size)</option>
+                                <option value="low">Low (1x resolution, small size)</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                
+                <div className="p-6 flex-1 overflow-y-auto min-h-0 flex flex-col gap-3">
+                    <label className="flex items-center gap-3 p-3 rounded-lg border border-slate-700 bg-slate-800/50 cursor-pointer hover:bg-slate-800 transition-colors">
+                        <input 
+                            type="checkbox" 
+                            checked={versions.length > 0 && versions.every(v => selectedVersionsToExport[v.id])} 
+                            onChange={(e) => {
+                                const newSel: Record<string, boolean> = {};
+                                versions.forEach(v => newSel[v.id] = e.target.checked);
+                                setSelectedVersionsToExport(newSel);
+                            }}
+                            className="w-5 h-5 rounded bg-slate-900 border-slate-600 focus:ring-blue-500"
+                        />
+                        <span className="text-white font-bold">Select All</span>
+                    </label>
+                    <div className="h-px bg-slate-800 my-1"></div>
+                    {versions.map(v => (
+                        <label key={v.id} className="flex items-center gap-3 p-3 rounded-lg border border-slate-800 bg-slate-950 cursor-pointer hover:bg-slate-900 transition-colors">
+                            <input 
+                                type="checkbox" 
+                                checked={!!selectedVersionsToExport[v.id]} 
+                                onChange={(e) => {
+                                    setSelectedVersionsToExport(prev => ({ ...prev, [v.id]: e.target.checked }));
+                                }}
+                                className="w-5 h-5 rounded bg-slate-900 border-slate-600 focus:ring-blue-500"
+                            />
+                            <span className="text-slate-300">{v.name}</span>
+                        </label>
+                    ))}
+                </div>
+            </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const HiddenExportStage = ({ version, units, summaryData, selectedLabels, onReady, index }: any) => {
+  const styledUnits = React.useMemo(() => {
+    const unitToGroupStyle = new Map<string, { color: string; opacity: number }>();
+    version.groups.forEach((group: any) => {
+      const assignedIds = version.groupMappings[group.id] || [];
+      assignedIds.forEach((id: string) => {
+        unitToGroupStyle.set(id, {
+          color: group.color,
+          opacity: group.opacity ?? 0.6
+        });
+      });
+    });
+
+    return units
+      .filter((unit: any) => unitToGroupStyle.has(unit.id))
+      .map((unit: any) => {
+        const style = unitToGroupStyle.get(unit.id)!;
+        const uInfo = summaryData.find((s: any) => s.unit === unit.name);
+        const sizeLabel = generateSizeLabel(unit, uInfo, selectedLabels);
+        return {
+          ...unit,
+          displayColor: style.color,
+          displayOpacity: style.opacity,
+          sizeLabel
+        };
+      });
+  }, [units, version, summaryData, selectedLabels]);
+
+  const [image, status] = useImage(version.backgroundUrl || '');
+  const stageRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (status === 'loaded' || status === 'failed') {
+      setTimeout(() => {
+        if (stageRef.current) {
+          onReady(index, stageRef.current);
+        } else {
+          onReady(index, null);
+        }
+      }, 500); // Give Konva a moment to render
+    }
+  }, [status, index, onReady]);
+
+  if (status !== 'loaded' && status !== 'failed') {
+    return null; // Wait for image
+  }
+
+  let minX = image ? (version?.imagePos?.x || 0) : 0;
+  let minY = image ? (version?.imagePos?.y || 0) : 0;
+  let maxX = image ? minX + (image.naturalWidth || image.width) * (version?.imageScale || 1) : 800;
+  let maxY = image ? minY + (image.naturalHeight || image.height) * (version?.imageScale || 1) : 600;
+
+  styledUnits.forEach((unit: any) => {
+    if (unit.type === 'rect') {
+      minX = Math.min(minX, unit.x);
+      minY = Math.min(minY, unit.y);
+      maxX = Math.max(maxX, unit.x + unit.width);
+      maxY = Math.max(maxY, unit.y + unit.height);
+    } else if (unit.type === 'circle') {
+      minX = Math.min(minX, unit.x - (unit.radius || 0));
+      minY = Math.min(minY, unit.y - (unit.radius || 0));
+      maxX = Math.max(maxX, unit.x + (unit.radius || 0));
+      maxY = Math.max(maxY, unit.y + (unit.radius || 0));
+    } else if (unit.type === 'polygon' && unit.points) {
+      for(let i = 0; i < unit.points.length; i += 2) {
+        minX = Math.min(minX, unit.points[i]);
+        minY = Math.min(minY, unit.points[i+1]);
+        maxX = Math.max(maxX, unit.points[i]);
+        maxY = Math.max(maxY, unit.points[i+1]);
+      }
+    }
+  });
+
+  minX -= 20;
+  minY -= 20;
+  maxX += 20;
+  maxY += 20;
+
+  const logicalWidth = maxX - minX;
+  const logicalHeight = maxY - minY;
+
+  const MAX_DIM = 3000;
+  let stageScale = 1;
+  const maxLogical = Math.max(logicalWidth, logicalHeight);
+  
+  if (maxLogical > MAX_DIM) {
+      stageScale = MAX_DIM / maxLogical;
+  } else if (maxLogical < 500 && maxLogical > 0) {
+      stageScale = 1000 / maxLogical;
+  }
+
+  const exportWidth = logicalWidth * stageScale;
+  const exportHeight = logicalHeight * stageScale;
+
+  return (
+    <Stage 
+      ref={stageRef}
+      width={exportWidth} 
+      height={exportHeight}
+      scaleX={stageScale}
+      scaleY={stageScale}
+    >
+      <Layer x={-minX} y={-minY}>
+        {image && <KonvaImage 
+          image={image} 
+          listening={false} 
+          x={version?.imagePos?.x || 0}
+          y={version?.imagePos?.y || 0}
+          scaleX={version?.imageScale || 1}
+          scaleY={version?.imageScale || 1}
+        />}
+        {styledUnits.map((unit: any) => {
+            const { displayColor, displayOpacity } = unit;
+
+            const shapeProps = {
+                key: unit.id,
+                x: unit.x,
+                y: unit.y,
+                fill: displayColor,
+                opacity: displayOpacity,
+                rotation: unit.rotation || 0,
+                stroke: '#ffffff',
+                strokeWidth: 2,
+                shadowBlur: 4,
+                shadowColor: 'rgba(0,0,0,0.5)',
+                listening: false,
+            };
+
+            if (unit.type === 'rect') {
+                return (
+                    <React.Fragment key={unit.id}>
+                        <Rect {...shapeProps} width={unit.width} height={unit.height} cornerRadius={4} />
+                        {unit.name && (
+                            <Text x={unit.x} y={unit.y} text={unit.sizeLabel} fontSize={14} fill="white" fontStyle="bold" align="center" verticalAlign="middle" width={unit.width} height={unit.height} listening={false} shadowColor="black" shadowBlur={2} shadowOpacity={1} />
+                        )}
+                    </React.Fragment>
+                );
+            } else if (unit.type === 'circle') {
+                 return (
+                    <React.Fragment key={unit.id}>
+                        <Circle {...shapeProps} radius={unit.radius} />
+                        {unit.name && (
+                            <Text x={unit.x - (unit.radius||0)} y={unit.y - 14} text={unit.sizeLabel} fontSize={14} fill="white" fontStyle="bold" align="center" verticalAlign="middle" width={(unit.radius||0)*2} height={(unit.radius||0)*2} listening={false} shadowColor="black" shadowBlur={2} shadowOpacity={1} />
+                        )}
+                    </React.Fragment>
+                );
+            } else if (unit.type === 'polygon' && unit.points) {
+                return (
+                    <React.Fragment key={unit.id}>
+                        <Line {...shapeProps} points={unit.points} closed={true} />
+                        {unit.name && (
+                            <Text 
+                                x={unit.points ? Math.min(...unit.points.filter((_: any, i: number) => i % 2 === 0)) : unit.x} 
+                                y={unit.points ? Math.min(...unit.points.filter((_: any, i: number) => i % 2 === 1)) : unit.y} 
+                                width={unit.points ? Math.max(...unit.points.filter((_: any, i: number) => i % 2 === 0)) - Math.min(...unit.points.filter((_: any, i: number) => i % 2 === 0)) : 100}
+                                height={unit.points ? Math.max(...unit.points.filter((_: any, i: number) => i % 2 === 1)) - Math.min(...unit.points.filter((_: any, i: number) => i % 2 === 1)) : 30}
+                                align="center"
+                                verticalAlign="middle"
+                                text={unit.sizeLabel} 
+                                fontSize={14} 
+                                fill="white" 
+                                fontStyle="bold" 
+                                listening={false} 
+                                shadowColor="black"
+                                shadowBlur={2}
+                                shadowOpacity={1}
+                            />
+                        )}
+                    </React.Fragment>
+                );
+            }
+            return null;
+        })}
+      </Layer>
+    </Stage>
+  );
+};
+
+export const ExportAllManager = ({ versions, units, summaryData, format, paperSize, quality, selectedLabels, onComplete }: any) => {
+    const [stagesReady, setStagesReady] = useState<Record<number, any>>({});
+    
+    const handleStageReady = React.useCallback((index: number, stage: any) => {
+        setStagesReady(prev => ({ ...prev, [index]: stage }));
+    }, []);
+
+    useEffect(() => {
+        const readyCount = Object.keys(stagesReady).length;
+        if (readyCount === versions.length && readyCount > 0) {
+            // all stages loaded
+            const doExport = async () => {
+                
+                // Determine pixelRatio and jpeg quality based on selected quality
+                let pxRatio = 2;
+                let jpegQuality = 0.9;
+                if (quality === 'high') {
+                    pxRatio = 4;
+                    jpegQuality = 1.0;
+                } else if (quality === 'low') {
+                    pxRatio = 1;
+                    jpegQuality = 0.7;
+                }
+                
+                const maxSize = Math.max(stagesReady[0]?.width() || 2000, stagesReady[0]?.height() || 2000);
+                if (pxRatio * maxSize > 6000) {
+                    pxRatio = 6000 / maxSize;
+                }
+
+                if (format === 'pdf' || format === 'drive' || format === 'auto_drive') {
+                    // Combine into PDF
+                    let pdf: jsPDF | null = null;
+                    
+                    for (let i = 0; i < versions.length; i++) {
+                        const stage = stagesReady[i];
+                        if (!stage) continue;
+                        
+                        const width = stage.width();
+                        const height = stage.height();
+                        const dataURL = stage.toDataURL({ pixelRatio: pxRatio, mimeType: 'image/jpeg', quality: jpegQuality });
+                        
+                        const isLandscape = width > height;
+                        const orientationStr = isLandscape ? 'landscape' : 'portrait';
+
+                        if (!pdf) {
+                            if (paperSize === 'original') {
+                                pdf = new jsPDF({
+                                    orientation: orientationStr,
+                                    unit: 'px',
+                                    format: [width, height]
+                                });
+                            } else {
+                                pdf = new jsPDF({
+                                    orientation: orientationStr,
+                                    unit: 'mm',
+                                    format: paperSize
+                                });
+                            }
+                        } else {
+                            if (paperSize === 'original') {
+                                pdf.addPage([width, height], orientationStr);
+                            } else {
+                                pdf.addPage(paperSize, orientationStr);
+                            }
+                        }
+                        
+                        if (paperSize === 'original') {
+                             pdf.addImage(dataURL, 'JPEG', 0, 0, width, height);
+                        } else {
+                             const pageWidth = pdf.internal.pageSize.getWidth();
+                             const pageHeight = pdf.internal.pageSize.getHeight();
+
+                             // We want to fit the image horizontally while maintaining aspect ratio
+                             let imgWidth = pageWidth;
+                             let imgHeight = (height * pageWidth) / width;
+
+                             if (imgHeight > pageHeight) {
+                                 // Or if they wanted full fit without cutting
+                                 imgHeight = pageHeight;
+                                 imgWidth = (width * pageHeight) / height;
+                             }
+
+                             const x = (pageWidth - imgWidth) / 2;
+                             const y = (pageHeight - imgHeight) / 2;
+
+                             pdf.addImage(dataURL, 'JPEG', x, y, imgWidth, imgHeight);
+                        }
+                    }
+                    
+                    if (pdf) {
+                        if (format === 'drive' || format === 'auto_drive') {
+                            const pdfBlob = pdf.output('blob');
+                            const token = await getAccessToken();
+                            if (!token) {
+                                if (format !== 'auto_drive') alert("Vui lòng đăng nhập Google để upload file.");
+                                if (onComplete) onComplete(false);
+                            } else {
+                                const confirmSave = format === 'auto_drive' ? true : window.confirm("Đồng ý tạo (hoặc ghi đè) file Data_Mapping_Export.pdf trên Google Drive của bạn?");
+                                if (confirmSave) {
+                                    try {
+                                        await uploadFileToDrive({
+                                            accessToken: token,
+                                            fileBlob: pdfBlob,
+                                            fileName: 'Data_Mapping_Export.pdf',
+                                            mimeType: 'application/pdf',
+                                            fileId: '1hxzPKKhQWhQ-tAThmgan8eNqqy5GN-Ds'
+                                        });
+                                        if (format !== 'auto_drive') alert("Upload thành công!");
+                                        if (onComplete) onComplete(true);
+                                    } catch (e: any) {
+                                        console.error(e);
+                                        if (format !== 'auto_drive') alert("Lỗi upload: " + e.message);
+                                        if (onComplete) onComplete(false);
+                                    }
+                                } else {
+                                    if (onComplete) onComplete(false);
+                                }
+                            }
+                        } else {
+                            pdf.save(`all_versions.pdf`);
+                            if (onComplete) onComplete(true);
+                        }
+                    }
+                } else if (format === 'jpeg') {
+                    // For jpeg, downloading multiple files is usually easiest, or combining into a tall image
+                    // We'll download them sequentially
+                    for (let i = 0; i < versions.length; i++) {
+                        const stage = stagesReady[i];
+                        if (!stage) continue;
+                        const dataURL = stage.toDataURL({ pixelRatio: pxRatio, mimeType: 'image/jpeg', quality: jpegQuality });
+                        const link = document.createElement('a');
+                        link.download = `version_${versions[i].name || i}.jpeg`;
+                        link.href = dataURL;
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                        // Small pause to allow browser to handle multiple downloads
+                        await new Promise(r => setTimeout(r, 200));
+                    }
+                    if (onComplete) onComplete(true);
+                } else if (format === 'r2_jpeg') {
+                    try {
+                        const images: HTMLImageElement[] = [];
+                        for (let i = 0; i < versions.length; i++) {
+                            const stage = stagesReady[i];
+                            if (!stage) continue;
+                            const dataURL = stage.toDataURL({ pixelRatio: pxRatio, mimeType: 'image/jpeg', quality: jpegQuality });
+                            const img = new Image();
+                            await new Promise((resolve) => {
+                                img.onload = resolve;
+                                img.src = dataURL;
+                            });
+                            images.push(img);
+                        }
+                        
+                        if (images.length > 0) {
+                            const stage0 = stagesReady[0];
+                            const baseWidth = stage0?.width() || 2000;
+                            const baseHeight = stage0?.height() || 2000;
+                            const isLandscape = baseWidth > baseHeight;
+
+                            let targetWidth = baseWidth;
+                            let targetHeight = baseHeight;
+
+                            if (paperSize === 'a4') {
+                                targetWidth = isLandscape ? 2000 : 1414;
+                                targetHeight = isLandscape ? 1414 : 2000;
+                            } else if (paperSize === 'a3') {
+                                targetWidth = isLandscape ? 2828 : 2000;
+                                targetHeight = isLandscape ? 2000 : 2828;
+                            } else if (paperSize === 'a2') {
+                                targetWidth = isLandscape ? 4000 : 2828;
+                                targetHeight = isLandscape ? 2828 : 4000;
+                            }
+
+                            const blockPixelWidth = Math.round(targetWidth * pxRatio);
+                            const blockPixelHeight = Math.round(targetHeight * pxRatio);
+                            const totalHeight = images.length * blockPixelHeight;
+
+                            const canvas = document.createElement('canvas');
+                            canvas.width = blockPixelWidth;
+                            canvas.height = totalHeight;
+                            const ctx = canvas.getContext('2d');
+                            if (ctx) {
+                                ctx.fillStyle = '#1e293b'; // Slate background matching our aesthetic
+                                ctx.fillRect(0, 0, blockPixelWidth, totalHeight);
+                                
+                                let y = 0;
+                                images.forEach(img => {
+                                    const imgW = img.width;
+                                    const imgH = img.height;
+
+                                    let imgFitWidth = blockPixelWidth;
+                                    let imgFitHeight = (imgH * blockPixelWidth) / imgW;
+
+                                    if (imgFitHeight > blockPixelHeight) {
+                                        imgFitHeight = blockPixelHeight;
+                                        imgFitWidth = (imgW * blockPixelHeight) / imgH;
+                                    }
+
+                                    const offsetX = (blockPixelWidth - imgFitWidth) / 2;
+                                    const offsetY = (blockPixelHeight - imgFitHeight) / 2;
+
+                                    ctx.drawImage(img, offsetX, y + offsetY, imgFitWidth, imgFitHeight);
+                                    y += blockPixelHeight;
+                                });
+                                
+                                const blob = await new Promise<Blob | null>(res => canvas.toBlob(res, 'image/jpeg', jpegQuality));
+                                if (blob) {
+                                    if (onComplete) onComplete(true, blob);
+                                    return;
+                                }
+                            }
+                        }
+                        if (onComplete) onComplete(false);
+                    } catch (err) {
+                        console.error(err);
+                        if (onComplete) onComplete(false);
+                    }
+                }
+            };
+            
+            doExport();
+        }
+    }, [stagesReady, versions, format, onComplete]);
+
+    return (
+        <>
+            <div className="fixed inset-0 z-[9999] bg-black/80 flex flex-col items-center justify-center text-white backdrop-blur-sm">
+                <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-6"></div>
+                <h3 className="text-xl font-bold tracking-wider">Generating Export...</h3>
+                <p className="text-slate-400 mt-2">Loading maps and generating {format.toUpperCase()} ( {Object.keys(stagesReady).length} / {versions.length} )</p>
+            </div>
+            <div style={{ position: 'absolute', top: -10000, left: -10000, visibility: 'hidden' }}>
+                {versions.map((v: any, i: number) => (
+                    <HiddenExportStage 
+                        key={v.id} 
+                        index={i}
+                        version={v} 
+                        units={units} 
+                        summaryData={summaryData} 
+                        selectedLabels={selectedLabels}
+                        onReady={handleStageReady} 
+                    />
+                ))}
+            </div>
+        </>
+    );
+};
