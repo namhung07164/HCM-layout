@@ -112,26 +112,22 @@ export default function DriveAutoExporter() {
         for (const file of filesToUpload) {
             const safeName = (file.name || 'Export').replace(/[\/\\]/g, '_').replace(/\s+/g, '_') + '.jpeg';
             
-            const command = new PutObjectCommand({
-                Bucket: bucketName,
-                Key: safeName,
-                ContentType: 'image/jpeg',
-            });
-
-            const signedUrl = await getSignedUrl(s3, command, { expiresIn: 3600 });
-
-            // 2. Upload file directly to R2 using the presigned URL
-            const uploadRes = await fetch(signedUrl, {
-                method: 'PUT',
+            const response = await fetch('/api/r2-upload', {
+                method: 'POST',
                 headers: {
-                    'Content-Type': 'image/jpeg'
+                    'Content-Type': 'image/jpeg',
+                    'x-r2-account-id': accountId,
+                    'x-r2-access-key-id': accessKeyId,
+                    'x-r2-secret-access-key': secretAccessKey,
+                    'x-r2-bucket-name': bucketName,
+                    'x-r2-file-name': encodeURIComponent(safeName)
                 },
                 body: file.blob
             });
 
-            if (!uploadRes.ok) {
-                const textRes = await uploadRes.text().catch(() => '');
-                throw new Error(`Upload failed for ${safeName}: Status ${uploadRes.status} - ${textRes.substring(0, 50)}`);
+            if (!response.ok) {
+                const textRes = await response.text().catch(() => '');
+                throw new Error(`Upload failed for ${safeName}: Status ${response.status} - ${textRes.substring(0, 50)}`);
             }
         }
 
