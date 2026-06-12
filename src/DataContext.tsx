@@ -356,24 +356,28 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     setIsSaving(true);
     let errorToReport = null;
     try {
-      // 1. Server persistence (Backup)
-      const res = await savePersistentData({ 
-        classInfo: c, 
-        actualClassInfo: ac,
-        sales: s,
-        unitInfo: u,
-        profits: p,
-        mdStatus: md,
-        subFees: sf,
-        projectStatus: ps,
-        basePlan: bp,
-        units: un,
-        mapUnits: mu,
-        mapVersions: mv,
-        activeMapVersionId: amvId,
-        migrated_scaled_1000: true // Set flag to avoid re-migration
-      });
-      if (res.success && !lastBackup) setLastBackup(res.timestamp);
+      // 1. Server persistence (Backup) - Catch errors so we don't break local persistence
+      try {
+        const res = await savePersistentData({ 
+          classInfo: c, 
+          actualClassInfo: ac,
+          sales: s,
+          unitInfo: u,
+          profits: p,
+          mdStatus: md,
+          subFees: sf,
+          projectStatus: ps,
+          basePlan: bp,
+          units: un,
+          mapUnits: mu,
+          mapVersions: mv,
+          activeMapVersionId: amvId,
+          migrated_scaled_1000: true // Set flag to avoid re-migration
+        });
+        if (res.success && !lastBackup) setLastBackup(res.timestamp);
+      } catch (bkpErr) {
+        console.warn('Server backup failed, skipped:', bkpErr);
+      }
       
       // 2. Local persistence if a folder is selected
       const activeHandle = customHandle || dirHandleRef.current;
