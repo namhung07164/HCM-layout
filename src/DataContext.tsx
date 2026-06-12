@@ -350,9 +350,11 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     c: ClassInfo[], ac: ActualClassInfo[], s: SalesInfo[], u: UnitInfo[], p: ProfitInfo[], md: MDStatusInfo[], 
     sf: SubFeeInfo[], ps: ProjectStatusInfo[], bp: BasePlanInfo[], un: UnitDataInfo[],
     mu: UnitShape[], mv: MapVersion[], amvId: string | null,
-    customHandle?: any
+    customHandle?: any,
+    isManualClick: boolean = false
   ) => {
     setIsSaving(true);
+    let errorToReport = null;
     try {
       // 1. Server persistence (Backup)
       const res = await savePersistentData({ 
@@ -377,7 +379,19 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       const activeHandle = customHandle || dirHandleRef.current;
       if (activeHandle) {
         // Double check permission before saving
-        const hasPerm = await verifyPermission(activeHandle, true);
+        let hasPerm = await verifyPermission(activeHandle, true);
+        
+        // If manual click and no permission, try requesting it
+        if (!hasPerm && isManualClick) {
+            try {
+                if ((await activeHandle.requestPermission({ mode: 'readwrite' })) === 'granted') {
+                    hasPerm = true;
+                }
+            } catch (e: any) {
+                console.warn('Could not request permission:', e);
+            }
+        }
+
         if (hasPerm) {
           const fileHandle = await activeHandle.getFileHandle('SheetSyncData.json', { create: true });
           const writable = await fileHandle.createWritable();
@@ -402,12 +416,23 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
           }));
           await writable.close();
           setLastBackup(timestamp);
+          if (isManualClick) {
+              alert('Lưu thành công file SheetSyncData.json vào thư mục được chọn!');
+          }
+        } else if (isManualClick) {
+           errorToReport = 'Lưu thất bại: Không có quyền ghi vào thư mục được chọn. Hãy chọn lại thư mục.';
         }
+      } else if (isManualClick) {
+        alert('Đã lưu vào bộ nhớ tạm. Hãy chọn thư mục cục bộ (Sync to Local Folder) để lưu file vào máy.');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Auto-backup failed:', error);
+      errorToReport = `Lỗi khi lưu: ${error.message}`;
     } finally {
       setIsSaving(false);
+      if (errorToReport && isManualClick) {
+          alert(errorToReport);
+      }
     }
   };
 
@@ -605,7 +630,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   };
 
   const triggerManualBackup = async () => {
-    await saveToHandlers(classInfo, actualClassInfo, sales, unitInfo, profits, mdStatus, subFees, projectStatus, basePlan, units, mapUnits, mapVersions, activeMapVersionId);
+    await saveToHandlers(classInfo, actualClassInfo, sales, unitInfo, profits, mdStatus, subFees, projectStatus, basePlan, units, mapUnits, mapVersions, activeMapVersionId, undefined, true);
   };
 
   return (
