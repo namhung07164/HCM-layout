@@ -228,6 +228,13 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       setSalesState(salesData);
       setProfitsState(profitsData);
       
+      if (parsed.r2Config) {
+        if (parsed.r2Config.accountId) localStorage.setItem('r2_account_id', parsed.r2Config.accountId);
+        if (parsed.r2Config.accessKey) localStorage.setItem('r2_access_key', parsed.r2Config.accessKey);
+        if (parsed.r2Config.secretKey) localStorage.setItem('r2_secret_key', parsed.r2Config.secretKey);
+        if (parsed.r2Config.bucketName) localStorage.setItem('r2_bucket_name', parsed.r2Config.bucketName);
+      }
+
       if (parsed.lastUpdated) setLastBackup(parsed.lastUpdated);
       return true;
     } catch (e) {
@@ -290,6 +297,13 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         setSalesState(salesData);
         setProfitsState(profitsData);
         
+        if (data.r2Config) {
+          if (data.r2Config.accountId) localStorage.setItem('r2_account_id', data.r2Config.accountId);
+          if (data.r2Config.accessKey) localStorage.setItem('r2_access_key', data.r2Config.accessKey);
+          if (data.r2Config.secretKey) localStorage.setItem('r2_secret_key', data.r2Config.secretKey);
+          if (data.r2Config.bucketName) localStorage.setItem('r2_bucket_name', data.r2Config.bucketName);
+        }
+
         if (data.lastUpdated) setLastBackup(data.lastUpdated);
       } catch (error) {
         console.error('Initial load failed:', error);
@@ -372,7 +386,13 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
           mapUnits: mu,
           mapVersions: mv,
           activeMapVersionId: amvId,
-          migrated_scaled_1000: true // Set flag to avoid re-migration
+          migrated_scaled_1000: true, // Set flag to avoid re-migration
+          r2Config: {
+            accountId: localStorage.getItem('r2_account_id') || '',
+            accessKey: localStorage.getItem('r2_access_key') || '',
+            secretKey: localStorage.getItem('r2_secret_key') || '',
+            bucketName: localStorage.getItem('r2_bucket_name') || ''
+          }
         });
         if (res.success && !lastBackup) setLastBackup(res.timestamp);
       } catch (bkpErr) {
@@ -416,7 +436,13 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
             mapVersions: mv,
             activeMapVersionId: amvId,
             lastUpdated: timestamp,
-            migrated_scaled_1000: true // Set flag to avoid re-migration
+            migrated_scaled_1000: true, // Set flag to avoid re-migration
+            r2Config: {
+              accountId: localStorage.getItem('r2_account_id') || '',
+              accessKey: localStorage.getItem('r2_access_key') || '',
+              secretKey: localStorage.getItem('r2_secret_key') || '',
+              bucketName: localStorage.getItem('r2_bucket_name') || ''
+            }
           }));
           await writable.close();
           setLastBackup(timestamp);

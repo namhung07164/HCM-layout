@@ -52,7 +52,13 @@ export default function GoogleSyncWidget() {
             mapUnits: dataContext.mapUnits,
             mapVersions: dataContext.mapVersions,
             activeMapVersionId: dataContext.activeMapVersionId,
-            migrated_scaled_1000: true
+            migrated_scaled_1000: true,
+            r2Config: {
+                accountId: localStorage.getItem('r2_account_id') || '',
+                accessKey: localStorage.getItem('r2_access_key') || '',
+                secretKey: localStorage.getItem('r2_secret_key') || '',
+                bucketName: localStorage.getItem('r2_bucket_name') || ''
+            }
         };
 
         const jsonString = JSON.stringify(dataToSave);
@@ -117,6 +123,13 @@ export default function GoogleSyncWidget() {
         if (data.mapUnits) dataContext.setMapUnits(data.mapUnits);
         if (data.mapVersions) dataContext.setMapVersions(data.mapVersions);
         if (data.activeMapVersionId) dataContext.setActiveMapVersionId(data.activeMapVersionId);
+        
+        if (data.r2Config) {
+            if (data.r2Config.accountId) localStorage.setItem('r2_account_id', data.r2Config.accountId);
+            if (data.r2Config.accessKey) localStorage.setItem('r2_access_key', data.r2Config.accessKey);
+            if (data.r2Config.secretKey) localStorage.setItem('r2_secret_key', data.r2Config.secretKey);
+            if (data.r2Config.bucketName) localStorage.setItem('r2_bucket_name', data.r2Config.bucketName);
+        }
 
         alert("Tải dữ liệu từ Google Drive thành công!");
     } catch (err: any) {
