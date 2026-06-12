@@ -1,13 +1,23 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useData } from "../DataContext";
-import { Globe, Loader2, CloudUpload, CloudDownload } from "lucide-react";
+import { Globe, Loader2, CloudUpload, CloudDownload, LogOut } from "lucide-react";
 import { cn } from "../lib/utils";
-import { googleSignIn, getAccessToken } from "../lib/auth";
+import { googleSignIn, getAccessToken, logout } from "../lib/auth";
 import { uploadFileToDrive } from "../lib/drive";
+import { getAuth, onAuthStateChanged, User } from "firebase/auth";
 
 export default function GoogleSyncWidget() {
   const dataContext = useData();
   const [isDriveLoading, setIsDriveLoading] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
+
+  useEffect(() => {
+    const auth = getAuth();
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+        setUser(currentUser);
+    });
+    return () => unsubscribe();
+  }, []);
 
   // Auto-login handle
   const authenticateGoogle = async () => {
@@ -157,6 +167,28 @@ export default function GoogleSyncWidget() {
           <CloudDownload size={12} className={isDriveLoading ? "animate-pulse" : ""} />
           Tải Về Từ Google Drive
         </button>
+
+        {user && (
+            <button
+              onClick={async () => {
+                  try {
+                      await logout();
+                      alert("Đã đăng xuất tài khoản Google.");
+                  } catch (e: any) {
+                      console.error(e);
+                      alert("Lỗi khi đăng xuất: " + e.message);
+                  }
+              }}
+              disabled={isDriveLoading}
+              className={cn(
+                "w-full flex items-center justify-center gap-2 px-3 py-1.5 rounded border border-slate-500/30 text-[10px] font-medium transition-colors mt-2",
+                "bg-slate-600/20 text-slate-400 hover:bg-slate-600/30 hover:border-slate-500/50 hover:text-white"
+              )}
+            >
+              <LogOut size={12} />
+              Đổi Tài Khoản Google ({user.email})
+            </button>
+        )}
       </div>
     </div>
   );
