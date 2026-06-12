@@ -8,8 +8,6 @@ import { jsPDF } from 'jspdf';
 import { useSummaryData, generateSizeLabel } from '../../lib/summaryData';
 import { useData } from '../../DataContext';
 import { Calculator, CloudUpload } from 'lucide-react';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { uploadFileToDrive } from '../../lib/drive';
 import { initAuth, googleSignIn, getAccessToken } from '../../lib/auth';
 import R2UploadModal from '../R2UploadModal';
@@ -146,33 +144,21 @@ export default function ReviewTab({ units, setUnits, versions, setVersions, acti
                 throw new Error('Missing R2 credentials in settings.');
             }
 
-            const s3 = new S3Client({
-                region: 'auto',
-                endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
-                credentials: {
-                    accessKeyId,
-                    secretAccessKey,
-                },
-            });
-
             const filesToUpload = Array.isArray(data) ? data : [{blob: data as Blob, name: 'Data_Mapping_Export'}];
 
             try {
                 for (const file of filesToUpload) {
                     const safeName = (file.name || 'Export').replace(/[\/\\]/g, '_').replace(/\s+/g, '_') + '.jpeg';
                     
-                    const command = new PutObjectCommand({
-                        Bucket: bucketName,
-                        Key: safeName,
-                        ContentType: 'image/jpeg',
-                    });
-
-                    const signedUrl = await getSignedUrl(s3, command, { expiresIn: 3600 });
-
-                    const response = await fetch(signedUrl, {
-                        method: 'PUT',
+                    const response = await fetch('/api/r2-upload', {
+                        method: 'POST',
                         headers: {
-                            'Content-Type': 'image/jpeg'
+                            'Content-Type': 'image/jpeg',
+                            'x-r2-account-id': accountId,
+                            'x-r2-access-key-id': accessKeyId,
+                            'x-r2-secret-access-key': secretAccessKey,
+                            'x-r2-bucket-name': bucketName,
+                            'x-r2-file-name': encodeURIComponent(safeName)
                         },
                         body: file.blob
                     });

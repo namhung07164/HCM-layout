@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { X, CloudUpload, Settings, Key } from 'lucide-react';
 
 interface R2UploadModalProps {
