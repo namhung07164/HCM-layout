@@ -185,7 +185,7 @@ export function useSummaryData() {
         projectStatus:
           projectStatusMatch && projectStatusMatch.status
             ? projectStatusMatch.status
-            : "Upcoming",
+            : "N/A",
         salesByHcmcate,
         profitByHcmcate,
         hcmSalesEffi: finalSalesEffi,
