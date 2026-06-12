@@ -140,32 +140,35 @@ export default function ReviewTab({ units, setUnits, versions, setVersions, acti
             const secretAccessKey = localStorage.getItem('r2_secret_key') || '';
             const bucketName = localStorage.getItem('r2_bucket_name') || '';
 
+            if (!accountId || !accessKeyId || !secretAccessKey || !bucketName) {
+                throw new Error('Missing R2 credentials in settings.');
+            }
+
+            const { S3Client, PutObjectCommand } = await import('@aws-sdk/client-s3');
+            const { getSignedUrl } = await import('@aws-sdk/s3-request-presigner');
+
+            const s3 = new S3Client({
+                region: 'auto',
+                endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
+                credentials: {
+                    accessKeyId,
+                    secretAccessKey,
+                },
+            });
+
             const filesToUpload = Array.isArray(data) ? data : [{blob: data as Blob, name: 'Data_Mapping_Export'}];
 
             try {
                 for (const file of filesToUpload) {
                     const safeName = (file.name || 'Export').replace(/[\/\\]/g, '_').replace(/\s+/g, '_') + '.jpeg';
                     
-                    // 1. Get Presigned URL
-                    const presignRes = await fetch('/api/r2-presign', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            accountId,
-                            accessKeyId,
-                            secretAccessKey,
-                            bucketName,
-                            fileName: safeName,
-                            contentType: 'image/jpeg'
-                        })
+                    const command = new PutObjectCommand({
+                        Bucket: bucketName,
+                        Key: safeName,
+                        ContentType: 'image/jpeg',
                     });
 
-                    if (!presignRes.ok) {
-                        const errorData = await presignRes.json().catch(() => ({}));
-                        throw new Error(`Không thể tạo Presigned URL cho ${safeName}: ` + (errorData.error || presignRes.statusText));
-                    }
-                    
-                    const { signedUrl } = await presignRes.json();
+                    const signedUrl = await getSignedUrl(s3, command, { expiresIn: 3600 });
 
                     // 2. Upload file directly to R2 using the presigned URL
                     const uploadRes = await fetch(signedUrl, {
