@@ -478,6 +478,36 @@ export default function DynamicHierarchyTab({
     );
   };
 
+  const copyGroups = (sourceVersionId: string) => {
+    const sourceVersion = versions.find((v) => v.id === sourceVersionId);
+    if (!sourceVersion || !activeVersion) return;
+
+    if (!confirm(`Bạn có chắc muốn copy groups từ version "${sourceVersion.name}"?\n(Các group hiện tại trong version này sẽ bị thay thế)`)) {
+      return;
+    }
+
+    const newGroups = sourceVersion.groups.map(g => ({ ...g, id: uuidv4() }));
+    const newGroupMappings: Record<string, string[]> = {};
+    
+    sourceVersion.groups.forEach((g, idx) => {
+        const newId = newGroups[idx].id;
+        newGroupMappings[newId] = [...(sourceVersion.groupMappings[g.id] || [])];
+    });
+
+    setVersions(
+      versions.map((v) => {
+        if (v.id === activeVersion.id) {
+          return {
+            ...v,
+            groups: newGroups,
+            groupMappings: newGroupMappings,
+          };
+        }
+        return v;
+      }),
+    );
+  };
+
   const activeGroups = activeVersion?.groups || [];
 
   return (
@@ -564,6 +594,24 @@ export default function DynamicHierarchyTab({
                   >
                     <Plus size={12} /> Create Group
                   </button>
+
+                  {versions.length > 1 && (
+                    <select
+                      className="bg-slate-800 hover:bg-slate-700 text-emerald-400 text-xs font-bold uppercase px-3 py-1.5 rounded-lg border border-slate-700 outline-none transition-colors cursor-pointer"
+                      value=""
+                      onChange={(e) => {
+                        if (e.target.value) {
+                            copyGroups(e.target.value);
+                            e.target.value = "";
+                        }
+                      }}
+                    >
+                        <option value="">[ Copy Groups From ]</option>
+                        {versions.filter(v => v.id !== activeVersion.id).map(v => (
+                            <option key={v.id} value={v.id}>{v.name}</option>
+                        ))}
+                    </select>
+                  )}
                 </div>
               </div>
 
