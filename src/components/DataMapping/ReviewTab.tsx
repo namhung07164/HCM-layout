@@ -144,18 +144,6 @@ export default function ReviewTab({ units, setUnits, versions, setVersions, acti
                 throw new Error('Missing R2 credentials in settings.');
             }
 
-            const { S3Client, PutObjectCommand } = await import('@aws-sdk/client-s3');
-            const { getSignedUrl } = await import('@aws-sdk/s3-request-presigner');
-
-            const s3 = new S3Client({
-                region: 'auto',
-                endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
-                credentials: {
-                    accessKeyId,
-                    secretAccessKey,
-                },
-            });
-
             const filesToUpload = Array.isArray(data) ? data : [{blob: data as Blob, name: 'Data_Mapping_Export'}];
 
             try {

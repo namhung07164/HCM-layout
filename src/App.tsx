@@ -55,10 +55,10 @@ export default function App() {
   }, []);
 
   const navigation = [
-    { id: "input", label: "Library", icon: FileInput },
-    { id: "mapping", label: "Mapping", icon: Split },
-    { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-    { id: "picture", label: "Picture", icon: ImageIcon },
+    { id: "input", label: "Library", icon: FileInput, shortcut: "⌥+I" },
+    { id: "mapping", label: "Mapping", icon: Split, shortcut: "⌥+M" },
+    { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, shortcut: "⌥+D" },
+    { id: "picture", label: "Picture", icon: ImageIcon, shortcut: "⌥+P" },
   ];
 
   const {
@@ -73,6 +73,43 @@ export default function App() {
     markAllNotificationsRead,
     triggerManualBackup,
   } = useData();
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Save shortcut (Ctrl+S or Cmd+S)
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        triggerManualBackup();
+      }
+      
+      // Import/Library shortcut (Ctrl+Alt+I or Cmd+Opt+I)
+      if ((e.ctrlKey || e.metaKey) && e.altKey && e.key.toLowerCase() === 'i') {
+        e.preventDefault();
+        setActiveTab('input');
+      }
+
+      // Mapping shortcut (Ctrl+Alt+M)
+      if ((e.ctrlKey || e.metaKey) && e.altKey && e.key.toLowerCase() === 'm') {
+        e.preventDefault();
+        setActiveTab('mapping');
+      }
+
+      // Dashboard shortcut (Ctrl+Alt+D)
+      if ((e.ctrlKey || e.metaKey) && e.altKey && e.key.toLowerCase() === 'd') {
+        e.preventDefault();
+        setActiveTab('dashboard');
+      }
+
+      // Picture shortcut (Ctrl+Alt+P)
+      if ((e.ctrlKey || e.metaKey) && e.altKey && e.key.toLowerCase() === 'p') {
+        e.preventDefault();
+        setActiveTab('picture');
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [triggerManualBackup]);
 
   if (reviewOnlyMode) {
     return <ReviewOnlyView />;
@@ -194,22 +231,29 @@ export default function App() {
                         setIsMenuOpen(false);
                       }}
                       className={cn(
-                        "w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-300 group text-sm font-medium border border-transparent",
+                        "w-full flex items-center justify-between px-4 py-3 rounded-lg transition-all duration-300 group text-sm font-medium border border-transparent",
                         isActive
                           ? "bg-blue-600/10 text-blue-400 border-blue-500/20 shadow-[0_0_15px_rgba(59,130,246,0.1)]"
                           : "text-slate-400 hover:bg-slate-800/50 hover:text-slate-200",
                       )}
                     >
-                      <Icon
-                        size={18}
-                        className={cn(
-                          "transition-colors",
-                          isActive
-                            ? "text-blue-400"
-                            : "text-slate-500 group-hover:text-slate-400",
-                        )}
-                      />
-                      {item.label}
+                      <div className="flex items-center gap-3">
+                        <Icon
+                          size={18}
+                          className={cn(
+                            "transition-colors",
+                            isActive
+                              ? "text-blue-400"
+                              : "text-slate-500 group-hover:text-slate-400",
+                          )}
+                        />
+                        {item.label}
+                      </div>
+                      {item.shortcut && (
+                        <span className="text-[10px] tracking-wide text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity uppercase font-mono">
+                          {item.shortcut}
+                        </span>
+                      )}
                     </button>
                   );
                 })}
@@ -281,10 +325,15 @@ export default function App() {
                           <button
                             onClick={() => triggerManualBackup()}
                             disabled={isSaving}
-                            className="w-full flex items-center justify-center gap-2 py-2 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="w-full flex items-center justify-between px-3 py-2 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed group"
                           >
-                            {isSaving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
-                            <span className="text-[10px] uppercase tracking-widest font-bold">Lưu Dữ Liệu Ngay</span>
+                            <div className="flex items-center gap-2">
+                              {isSaving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+                              <span className="text-[10px] uppercase tracking-widest font-bold">Lưu Dữ Liệu Ngay</span>
+                            </div>
+                            <span className="text-[10px] uppercase font-mono text-blue-400/50 group-hover:text-blue-400/80 transition-colors">
+                              ⌘S
+                            </span>
                           </button>
                         </div>
                       )}
