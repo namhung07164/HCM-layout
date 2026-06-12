@@ -143,7 +143,8 @@ export default function R2UploadModal({ isOpen, onClose, onStartExport, uploadin
           )}
           
           <div className="pt-2 text-xs text-slate-400 bg-slate-800/40 p-3 rounded-lg border border-slate-800">
-            Các hình sẽ được tạo/ghi đè với tên tương ứng của từng phiên bản (VD: <strong className="text-white">Ten_Phien_Ban.jpeg</strong>). Sẽ không làm tốn dung lượng Firebase.
+            <p>Các hình sẽ được tạo/ghi đè với tên tương ứng của từng phiên bản (VD: <strong className="text-white">Ten_Phien_Ban.jpeg</strong>). Sẽ không làm tốn dung lượng Firebase.</p>
+            <p className="mt-2 text-amber-500/80"><strong className="text-amber-500">Lưu ý quan trọng:</strong> Vui lòng đảm bảo bạn đã cấu hình CORS trên Cloudflare R2 Bucket (Settings {'>'} CORS Rules) để cho phép <code className="text-slate-300 bg-slate-900 border border-slate-700 px-1 rounded">PUT</code> method từ domain này.</p>
           </div>
         </div>
 

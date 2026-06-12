@@ -6,6 +6,8 @@ import { useSummaryData } from '../lib/summaryData';
 import { ExportAllManager } from './DataMapping/ReviewTab';
 import { useDynamicRules } from '../hooks/useDynamicRules';
 import { MapVersion } from './DataMapping/types';
+import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 export default function DriveAutoExporter() {
   const { mapVersions, mapUnits, profits, subFees, mdStatus, projectStatus, setMapVersions, activeMapVersionId, setMapUnits } = useData();
@@ -95,23 +97,40 @@ export default function DriveAutoExporter() {
             throw new Error('Missing R2 credentials in settings.');
         }
 
+        const s3 = new S3Client({
+            region: 'auto',
+            endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
+            credentials: {
+                accessKeyId,
+                secretAccessKey,
+            },
+        });
+
         const filesToUpload = Array.isArray(data) ? data : [{blob: data as Blob, name: 'Data_Mapping_Export'}];
 
         for (const file of filesToUpload) {
             const safeName = (file.name || 'Export').replace(/[\/\\]/g, '_').replace(/\s+/g, '_') + '.jpeg';
             
-            const response = await fetch('/api/r2-upload', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'image/jpeg',
-                    'x-r2-account-id': accountId,
-                    'x-r2-access-key-id': accessKeyId,
-                    'x-r2-secret-access-key': secretAccessKey,
-                    'x-r2-bucket-name': bucketName,
-                    'x-r2-file-name': encodeURIComponent(safeName)
-                },
-                body: file.blob
+            const command = new PutObjectCommand({
+                Bucket: bucketName,
+                Key: safeName,
+                ContentType: 'image/jpeg',
             });
+
+            const signedUrl = await getSignedUrl(s3, command, { expiresIn: 3600 });
+
+            let response;
+            try {
+                response = await fetch(signedUrl, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'image/jpeg'
+                    },
+                    body: file.blob
+                });
+            } catch (netErr: any) {
+                throw new Error(`Network/CORS error for ${safeName}. Vui lòng kiểm tra cấu hình CORS trên bucket R2 của bạn. Chi tiết: ${netErr.message}`);
+            }
 
             if (!response.ok) {
                 const textRes = await response.text().catch(() => '');
