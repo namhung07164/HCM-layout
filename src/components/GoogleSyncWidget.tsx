@@ -47,18 +47,18 @@ export default function GoogleSyncWidget() {
       }
 
       if (Array.isArray(items)) {
-        // Lọc dữ liệu: Chỉ chọn dữ liệu HN
-        const hnData = items.filter(
+        // Lọc dữ liệu: Chỉ chọn dữ liệu HCM
+        const hcmData = items.filter(
           (row: any) =>
-            row["Store"] === "HN" ||
-            row["store"] === "HN" ||
-            row["store"] === "hanoi" ||
-            row["Store"] === "HANOI",
+            row["Store"] === "HCM" ||
+            row["store"] === "HCM" ||
+            row["store"] === "hcm" ||
+            row["Store"] === "hochiminh",
         );
 
         // Nhóm theo Project Code
         const groupedByUnit: { [key: string]: any[] } = {};
-        hnData.forEach((row: any) => {
+        hcmData.forEach((row: any) => {
           const unit =
             row["Code"] ||
             row["code"] ||

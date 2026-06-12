@@ -132,11 +132,11 @@ export function useProjectStatusSync(validUnits: string[]) {
 
   const projectStatus = useMemo(() => {
     // Only map projects that have a code matching units from the Summary tab
-    // Also restrict strictly to 'HN' store to avoid loading HCM or other irrelevant store data
+    // Also restrict strictly to 'HCM' store to avoid loading HN or other irrelevant store data
     const filteredProjects = rawProjects.filter(p => {
       const code = String(p.code || p.CODE || '').trim();
       const store = String(p.store || p.STORE || '').trim().toUpperCase();
-      return validUnits.includes(code) && store === 'HN';
+      return validUnits.includes(code) && store === 'HCM';
     });
 
     return filteredProjects.map(p => {
