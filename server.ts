@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import fs from 'fs';
 import dotenv from 'dotenv';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 dotenv.config();
 
@@ -27,25 +28,63 @@ async function startServer() {
   }
 
   // API Routes
+  app.post('/api/r2-presign', async (req, res) => {
+    try {
+      const { accountId, accessKeyId, secretAccessKey, bucketName, fileName, contentType } = req.body;
+      
+      if (!accountId || !accessKeyId || !secretAccessKey || !bucketName || !fileName) {
+        return res.status(400).json({ error: 'Missing required credentials or fileName' });
+      }
+
+      const s3 = new S3Client({
+        region: 'auto',
+        endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
+        credentials: {
+          accessKeyId,
+          secretAccessKey,
+        },
+      });
+
+      const command = new PutObjectCommand({
+        Bucket: bucketName,
+        Key: fileName,
+        ContentType: contentType || 'image/jpeg',
+      });
+
+      const signedUrl = await getSignedUrl(s3, command, { expiresIn: 3600 });
+      res.json({ signedUrl, fileName });
+    } catch (error: any) {
+      console.error('R2 presign error:', error);
+      res.status(500).json({ error: error.message || 'Presign failed' });
+    }
+  });
+
   app.post('/api/r2-upload', async (req, res) => {
     try {
       const accountId = req.headers['x-r2-account-id'] as string || req.body.accountId;
       const accessKeyId = req.headers['x-r2-access-key-id'] as string || req.body.accessKeyId;
       const secretAccessKey = req.headers['x-r2-secret-access-key'] as string || req.body.secretAccessKey;
       const bucketName = req.headers['x-r2-bucket-name'] as string || req.body.bucketName;
-      const fileName = req.headers['x-r2-file-name'] as string || req.body.fileName || 'Data_Mapping_Export.jpeg';
+      let fileName = req.headers['x-r2-file-name'] as string || req.body.fileName || 'Data_Mapping_Export.jpeg';
+      try {
+        fileName = decodeURIComponent(fileName);
+      } catch (e) {
+        // Ignore decode error
+      }
 
       if (!accountId || !accessKeyId || !secretAccessKey || !bucketName) {
+        console.error('Missing credentials');
         return res.status(400).json({ error: 'Missing required credentials' });
       }
 
       let buffer: Buffer;
       if (Buffer.isBuffer(req.body)) {
         buffer = req.body;
-      } else if (req.body.fileBase64) {
+      } else if (req.body && req.body.fileBase64) {
         const base64Data = req.body.fileBase64.replace(/^data:image\/\w+;base64,/, '');
         buffer = Buffer.from(base64Data, 'base64');
       } else {
+        console.error('No file data received. req.body is buffer:', Buffer.isBuffer(req.body), 'type:', typeof req.body, 'keys:', Object.keys(req.body || {}));
         return res.status(400).json({ error: 'No file data received' });
       }
 

@@ -77,38 +77,62 @@ export default function DriveAutoExporter() {
     }
   }, [triggerExport, exportingVersions, mapVersions, calculateNextVersions, setMapVersions, activeMapVersionId, mapUnits, setMapUnits]);
 
-  const handleExportComplete = async (success: boolean, blob?: Blob) => {
+  const handleExportComplete = async (success: boolean, data?: any) => {
     console.log("R2AutoExporter: ExportAllManager completed with status =", success);
     setTriggerExport(false);
     setExportingVersions(null);
 
-    // If it was successful and we have a blob for R2
-    if (success && blob) {
+    // If it was successful and we have data for R2
+    if (success && data) {
       try {
-        console.log("R2AutoExporter: Uploading blob to R2...");
+        console.log("R2AutoExporter: Uploading to R2...");
         const accountId = localStorage.getItem('r2_account_id') || '';
         const accessKeyId = localStorage.getItem('r2_access_key') || '';
         const secretAccessKey = localStorage.getItem('r2_secret_key') || '';
         const bucketName = localStorage.getItem('r2_bucket_name') || '';
 
-        const response = await fetch('/api/r2-upload', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'image/jpeg',
-                'x-r2-account-id': accountId,
-                'x-r2-access-key-id': accessKeyId,
-                'x-r2-secret-access-key': secretAccessKey,
-                'x-r2-bucket-name': bucketName,
-                'x-r2-file-name': 'Data_Mapping_Export.jpeg'
-            },
-            body: blob
-        });
+        const filesToUpload = Array.isArray(data) ? data : [{blob: data as Blob, name: 'Data_Mapping_Export'}];
 
-        if (!response.ok) {
-            const errorRes = await response.json().catch(() => ({ error: 'Unknown server error' }));
-            throw new Error(errorRes.error || `Server response: ${response.status}`);
+        for (const file of filesToUpload) {
+            const safeName = (file.name || 'Export').replace(/[\/\\]/g, '_').replace(/\s+/g, '_') + '.jpeg';
+            
+            // 1. Get Presigned URL
+            const presignRes = await fetch('/api/r2-presign', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    accountId,
+                    accessKeyId,
+                    secretAccessKey,
+                    bucketName,
+                    fileName: safeName,
+                    contentType: 'image/jpeg'
+                })
+            });
+
+            if (!presignRes.ok) {
+                const errorData = await presignRes.json().catch(() => ({}));
+                throw new Error(`Presign failed for ${safeName}: ` + (errorData.error || presignRes.statusText));
+            }
+            
+            const { signedUrl } = await presignRes.json();
+
+            // 2. Upload file directly to R2 using the presigned URL
+            const uploadRes = await fetch(signedUrl, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'image/jpeg'
+                },
+                body: file.blob
+            });
+
+            if (!uploadRes.ok) {
+                const textRes = await uploadRes.text().catch(() => '');
+                throw new Error(`Upload failed for ${safeName}: Status ${uploadRes.status} - ${textRes.substring(0, 50)}`);
+            }
         }
-        console.log('R2AutoExporter: Successfully uploaded to Cloudflare R2!');
+
+        console.log('R2AutoExporter: Successfully uploaded all files to Cloudflare R2!');
       } catch (err: any) {
         console.error('R2AutoExporter: Upload failed', err);
         success = false; // Mark as failed to handle error clearing

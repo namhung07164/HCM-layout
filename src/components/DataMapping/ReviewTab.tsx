@@ -123,9 +123,9 @@ export default function ReviewTab({ units, setUnits, versions, setVersions, acti
   });
   const [selectedVersionsToExport, setSelectedVersionsToExport] = useState<Record<string, boolean>>({});
 
-  const handleExportAllManagerComplete = async (success: boolean, blob?: Blob) => {
+  const handleExportAllManagerComplete = async (success: boolean, data?: any) => {
     if (exportAllFormat === 'r2_jpeg') {
-        if (!success || !blob) {
+        if (!success || !data) {
             alert('Lỗi tạo ảnh JPEG.');
             setExportAllFormat(null);
             setIsUploadingToR2(false);
@@ -140,26 +140,49 @@ export default function ReviewTab({ units, setUnits, versions, setVersions, acti
             const secretAccessKey = localStorage.getItem('r2_secret_key') || '';
             const bucketName = localStorage.getItem('r2_bucket_name') || '';
 
-            try {
-                const response = await fetch('/api/r2-upload', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'image/jpeg',
-                        'x-r2-account-id': accountId,
-                        'x-r2-access-key-id': accessKeyId,
-                        'x-r2-secret-access-key': secretAccessKey,
-                        'x-r2-bucket-name': bucketName,
-                        'x-r2-file-name': 'Data_Mapping_Export.jpeg'
-                    },
-                    body: blob
-                });
+            const filesToUpload = Array.isArray(data) ? data : [{blob: data as Blob, name: 'Data_Mapping_Export'}];
 
-                if (!response.ok) {
-                    const errorRes = await response.json().catch(() => ({ error: 'Unknown server error' }));
-                    throw new Error(errorRes.error || `Server response: ${response.status}`);
+            try {
+                for (const file of filesToUpload) {
+                    const safeName = (file.name || 'Export').replace(/[\/\\]/g, '_').replace(/\s+/g, '_') + '.jpeg';
+                    
+                    // 1. Get Presigned URL
+                    const presignRes = await fetch('/api/r2-presign', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            accountId,
+                            accessKeyId,
+                            secretAccessKey,
+                            bucketName,
+                            fileName: safeName,
+                            contentType: 'image/jpeg'
+                        })
+                    });
+
+                    if (!presignRes.ok) {
+                        const errorData = await presignRes.json().catch(() => ({}));
+                        throw new Error(`Không thể tạo Presigned URL cho ${safeName}: ` + (errorData.error || presignRes.statusText));
+                    }
+                    
+                    const { signedUrl } = await presignRes.json();
+
+                    // 2. Upload file directly to R2 using the presigned URL
+                    const uploadRes = await fetch(signedUrl, {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'image/jpeg'
+                        },
+                        body: file.blob
+                    });
+
+                    if (!uploadRes.ok) {
+                        const textRes = await uploadRes.text().catch(() => '');
+                        throw new Error(`Lỗi khi upload ${safeName} lên R2: Trạng thái ${uploadRes.status} - ${textRes.substring(0, 50)}`);
+                    }
                 }
 
-                alert('Upload thành công/ghi đè lên Cloudflare R2!');
+                alert(`Upload thành công ${filesToUpload.length} file lên Cloudflare R2!`);
             } catch (err: any) {
                 console.error(err);
                 alert('Lỗi upload R2: ' + err.message);
@@ -1192,77 +1215,19 @@ export const ExportAllManager = ({ versions, units, summaryData, format, paperSi
                     if (onComplete) onComplete(true);
                 } else if (format === 'r2_jpeg') {
                     try {
-                        const images: HTMLImageElement[] = [];
+                        const imagesData: {blob: Blob, name: string}[] = [];
                         for (let i = 0; i < versions.length; i++) {
                             const stage = stagesReady[i];
                             if (!stage) continue;
                             const dataURL = stage.toDataURL({ pixelRatio: pxRatio, mimeType: 'image/jpeg', quality: jpegQuality });
-                            const img = new Image();
-                            await new Promise((resolve) => {
-                                img.onload = resolve;
-                                img.src = dataURL;
-                            });
-                            images.push(img);
+                            const res = await fetch(dataURL);
+                            const blob = await res.blob();
+                            imagesData.push({ blob, name: versions[i].name || `version_${i}` });
                         }
                         
-                        if (images.length > 0) {
-                            const stage0 = stagesReady[0];
-                            const baseWidth = stage0?.width() || 2000;
-                            const baseHeight = stage0?.height() || 2000;
-                            const isLandscape = baseWidth > baseHeight;
-
-                            let targetWidth = baseWidth;
-                            let targetHeight = baseHeight;
-
-                            if (paperSize === 'a4') {
-                                targetWidth = isLandscape ? 2000 : 1414;
-                                targetHeight = isLandscape ? 1414 : 2000;
-                            } else if (paperSize === 'a3') {
-                                targetWidth = isLandscape ? 2828 : 2000;
-                                targetHeight = isLandscape ? 2000 : 2828;
-                            } else if (paperSize === 'a2') {
-                                targetWidth = isLandscape ? 4000 : 2828;
-                                targetHeight = isLandscape ? 2828 : 4000;
-                            }
-
-                            const blockPixelWidth = Math.round(targetWidth * pxRatio);
-                            const blockPixelHeight = Math.round(targetHeight * pxRatio);
-                            const totalHeight = images.length * blockPixelHeight;
-
-                            const canvas = document.createElement('canvas');
-                            canvas.width = blockPixelWidth;
-                            canvas.height = totalHeight;
-                            const ctx = canvas.getContext('2d');
-                            if (ctx) {
-                                ctx.fillStyle = '#1e293b'; // Slate background matching our aesthetic
-                                ctx.fillRect(0, 0, blockPixelWidth, totalHeight);
-                                
-                                let y = 0;
-                                images.forEach(img => {
-                                    const imgW = img.width;
-                                    const imgH = img.height;
-
-                                    let imgFitWidth = blockPixelWidth;
-                                    let imgFitHeight = (imgH * blockPixelWidth) / imgW;
-
-                                    if (imgFitHeight > blockPixelHeight) {
-                                        imgFitHeight = blockPixelHeight;
-                                        imgFitWidth = (imgW * blockPixelHeight) / imgH;
-                                    }
-
-                                    const offsetX = (blockPixelWidth - imgFitWidth) / 2;
-                                    const offsetY = (blockPixelHeight - imgFitHeight) / 2;
-
-                                    ctx.drawImage(img, offsetX, y + offsetY, imgFitWidth, imgFitHeight);
-                                    y += blockPixelHeight;
-                                });
-                                
-                                const blob = await new Promise<Blob | null>(res => canvas.toBlob(res, 'image/jpeg', jpegQuality));
-                                if (blob) {
-                                    if (onComplete) onComplete(true, blob);
-                                    return;
-                                }
-                            }
+                        if (imagesData.length > 0) {
+                            if (onComplete) onComplete(true, imagesData);
+                            return;
                         }
                         if (onComplete) onComplete(false);
                     } catch (err) {

@@ -144,7 +144,7 @@ export default function R2UploadModal({ isOpen, onClose, onStartExport, uploadin
           )}
           
           <div className="pt-2 text-xs text-slate-400 bg-slate-800/40 p-3 rounded-lg border border-slate-800">
-            File sẽ được tạo/ghi đè với tên <strong className="text-white">Data_Mapping_Export.jpeg</strong>. Sẽ không làm tốn dung lượng Firebase.
+            Các hình sẽ được tạo/ghi đè với tên tương ứng của từng phiên bản (VD: <strong className="text-white">Ten_Phien_Ban.jpeg</strong>). Sẽ không làm tốn dung lượng Firebase.
           </div>
         </div>
 
