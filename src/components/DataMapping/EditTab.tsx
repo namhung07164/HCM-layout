@@ -893,15 +893,49 @@ export default function EditTab({ units, setUnits, versions, setVersions, active
                 )}
             </div>
             
-            {localImageUrl && (
-                <button 
-                    onClick={toggleFullscreen}
-                    className="p-2 bg-slate-900/80 hover:bg-slate-800 text-white rounded-lg border border-slate-700 backdrop-blur-sm transition-all pointer-events-auto"
-                    title="Toggle Fullscreen"
-                >
-                    {isFullscreen ? <Minimize size={20} /> : <Maximize size={20} />}
-                </button>
-            )}
+            <div className="flex gap-2 items-center pointer-events-auto">
+                {localImageUrl && (
+                    <>
+                        <div className="relative">
+                            <button
+                                onClick={() => document.getElementById('replace-bg-input2')?.click()}
+                                className="p-2 bg-slate-900/80 hover:bg-slate-800 text-white rounded-lg border border-slate-700 backdrop-blur-sm transition-all flex items-center gap-2"
+                                title="Thay đổi Background Image/PDF"
+                            >
+                                <FileImage size={18} />
+                                <span className="text-[10px] uppercase font-bold tracking-wider hidden sm:inline">Thay BG</span>
+                            </button>
+                            <input 
+                                id="replace-bg-input2"
+                                type="file"
+                                accept=".pdf,image/*"
+                                className="hidden"
+                                onChange={handleReplaceBackground}
+                            />
+                        </div>
+                        
+                        <button
+                            onClick={handleRotateBackground}
+                            className="p-2 bg-slate-900/80 hover:bg-slate-800 text-white rounded-lg border border-slate-700 backdrop-blur-sm transition-all flex items-center gap-2"
+                            title="Xoay Background Image/PDF (90 độ)"
+                        >
+                            <RotateCw size={18} />
+                            <span className="text-[10px] uppercase font-bold tracking-wider hidden sm:inline">Xoay BG</span>
+                        </button>
+                    </>
+                )}
+
+                {localImageUrl && (
+                    <button 
+                        onClick={toggleFullscreen}
+                        className="p-2 bg-slate-900/80 hover:bg-slate-800 text-white rounded-lg border border-slate-700 backdrop-blur-sm transition-all pointer-events-auto flex items-center gap-2"
+                        title="Toggle Fullscreen"
+                    >
+                        {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
+                        <span className="text-[10px] uppercase font-bold tracking-wider hidden sm:inline">Toàn Màn Hình</span>
+                    </button>
+                )}
+            </div>
         </div>
 
         {isLoading && (
