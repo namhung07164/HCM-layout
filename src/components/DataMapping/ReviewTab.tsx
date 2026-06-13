@@ -622,6 +622,7 @@ export default function ReviewTab({ units, setUnits, versions, setVersions, acti
                 y={activeVersion?.imagePos?.y || 0}
                 scaleX={activeVersion?.imageScale || 1}
                 scaleY={activeVersion?.imageScale || 1}
+                rotation={activeVersion?.backgroundRotation || 0}
               />}
               {styledUnits.map((unit) => {
                 const { displayColor, displayOpacity } = unit as any;
@@ -1011,6 +1012,7 @@ const HiddenExportStage = ({ version, units, summaryData, selectedLabels, onRead
           y={version?.imagePos?.y || 0}
           scaleX={version?.imageScale || 1}
           scaleY={version?.imageScale || 1}
+          rotation={version?.backgroundRotation || 0}
         />}
         {styledUnits.map((unit: any) => {
             const { displayColor, displayOpacity } = unit;

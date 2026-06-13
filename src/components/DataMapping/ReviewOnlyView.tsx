@@ -83,6 +83,7 @@ const VersionStage = ({ version, mapUnits, summaryData, selectedLabels, windowSi
             y={version?.imagePos?.y || 0}
             scaleX={version?.imageScale || 1}
             scaleY={version?.imageScale || 1}
+            rotation={version?.backgroundRotation || 0}
           />}
           {styledUnits.map((unit: any) => {
             const { displayColor, displayOpacity } = unit;

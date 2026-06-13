@@ -549,6 +549,11 @@ export default function EditTab({ units, setUnits, versions, setVersions, active
     }
   };
 
+  const handleRotateBackground = () => {
+    setBgRotation((prev) => (prev + 90) % 360);
+  };
+
+
   const handleExportUnits = () => {
     if (units.length === 0) {
       alert('No units to save.');
@@ -739,16 +744,19 @@ export default function EditTab({ units, setUnits, versions, setVersions, active
               />
             </div>
             {activeVersionId && (
-              <div className="relative">
-                <ToolButton icon={FileImage} active={false} onClick={() => document.getElementById('replace-bg-input')?.click()} title="Replace Background Image/PDF" />
-                <input 
-                  id="replace-bg-input"
-                  type="file"
-                  accept=".pdf,image/*"
-                  className="hidden"
-                  onChange={handleReplaceBackground}
-                />
-              </div>
+              <>
+                <div className="relative">
+                  <ToolButton icon={FileImage} active={false} onClick={() => document.getElementById('replace-bg-input')?.click()} title="Replace Background Image/PDF" />
+                  <input 
+                    id="replace-bg-input"
+                    type="file"
+                    accept=".pdf,image/*"
+                    className="hidden"
+                    onChange={handleReplaceBackground}
+                  />
+                </div>
+                <ToolButton icon={RotateCw} active={false} onClick={handleRotateBackground} title="Rotate Background Image/PDF 90°" />
+              </>
             )}
         </div>,
         portalNode
@@ -947,6 +955,7 @@ export default function EditTab({ units, setUnits, versions, setVersions, active
                           y={imagePos.y}
                           scaleX={imageScale}
                           scaleY={imageScale}
+                          rotation={bgRotation}
                           draggable={activeTool === 'edit-bg' && alignStep === 'none'}
                           listening={isLocked || activeTool === 'edit-bg'} 
                           onDragEnd={(e) => {
