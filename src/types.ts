@@ -138,3 +138,5 @@ export type MappingSubTabType =
   | "unit-info"
   | "md-status"
   | "project-status";
+
+export type StoreRegion = 'HCM' | 'HN';

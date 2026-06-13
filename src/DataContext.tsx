@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
-import { ClassInfo, ActualClassInfo, SalesInfo, ProfitInfo, UnitInfo, MDStatusInfo, SubFeeInfo, ProjectStatusInfo, BasePlanInfo, UnitDataInfo } from './types';
+import { ClassInfo, ActualClassInfo, SalesInfo, ProfitInfo, UnitInfo, MDStatusInfo, SubFeeInfo, ProjectStatusInfo, BasePlanInfo, UnitDataInfo, StoreRegion } from './types';
 import { UnitShape, MapVersion } from './components/DataMapping/types';
 import { loadPersistentData, savePersistentData } from './lib/sheets';
 import { get, set } from 'idb-keyval';
@@ -58,6 +58,7 @@ interface DataContextType {
   syncWithGoogleSheets: (spreadsheetId: string) => Promise<void>;
   spreadsheetId: string | null;
   setSpreadsheetId: (id: string | null) => void;
+  store: StoreRegion;
 }
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
@@ -65,7 +66,7 @@ const DataContext = createContext<DataContextType | undefined>(undefined);
 import { syncFromGoogleSheets } from './services/googleSheets';
 import { useProjectStatusSync } from './hooks/useProjectStatusSync';
 
-export function DataProvider({ children }: { children: React.ReactNode }) {
+export function DataProvider({ children, store }: { children: React.ReactNode, store: StoreRegion }) {
   const [classInfo, setClassInfoState] = useState<ClassInfo[]>([]);
   const [actualClassInfo, setActualClassInfoState] = useState<ActualClassInfo[]>([]);
   const [sales, setSalesState] = useState<SalesInfo[]>([]);
@@ -197,7 +198,22 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   // Load data from a given handle
   async function loadFromHandle(handle: any) {
     try {
-      const fileHandle = await handle.getFileHandle('SheetSyncData.json');
+      let fileHandle;
+      try {
+        fileHandle = await handle.getFileHandle(`SheetSyncData_${store}.json`);
+      } catch (err) {
+        if (store === 'HCM') {
+            try {
+                fileHandle = await handle.getFileHandle('SheetSyncData.json');
+                console.log("Found legacy SheetSyncData.json for HCM, will use it.");
+            } catch (fallbackErr) {
+                throw err;
+            }
+        } else {
+            throw err;
+        }
+      }
+      
       const file = await fileHandle.getFile();
       const text = await file.text();
       const parsed = JSON.parse(text);
@@ -270,7 +286,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         }
 
         // 2. Fallback: Load from Server
-        const data = await loadPersistentData();
+        const data = await loadPersistentData(store);
         setClassInfoState(data.classInfo || []);
         setActualClassInfoState(data.actualClassInfo || []);
         setUnitInfoState(data.unitInfo || []);
@@ -393,7 +409,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
             secretKey: localStorage.getItem('r2_secret_key') || '',
             bucketName: localStorage.getItem('r2_bucket_name') || ''
           }
-        });
+        }, store);
         if (res.success && !lastBackup) setLastBackup(res.timestamp);
       } catch (bkpErr) {
         console.warn('Server backup failed, skipped:', bkpErr);
@@ -417,7 +433,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         }
 
         if (hasPerm) {
-          const fileHandle = await activeHandle.getFileHandle('SheetSyncData.json', { create: true });
+          const fileHandle = await activeHandle.getFileHandle(`SheetSyncData_${store}.json`, { create: true });
           const writable = await fileHandle.createWritable();
           const timestamp = new Date().toISOString();
           // Use 0 indentation for performance and smaller file size
@@ -447,7 +463,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
           await writable.close();
           setLastBackup(timestamp);
           if (isManualClick) {
-              alert('Lưu thành công file SheetSyncData.json vào thư mục được chọn!');
+              alert(`Lưu thành công file SheetSyncData_${store}.json vào thư mục được chọn!`);
           }
         } else if (isManualClick) {
            errorToReport = 'Lưu thất bại: Không có quyền ghi vào thư mục được chọn. Hãy chọn lại thư mục.';
@@ -706,7 +722,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       hasLocalFolder,
       needsPermission,
       setNeedsPermission,
-      requestFolderPermission
+      requestFolderPermission,
+      store
     }}>
       {children}
     </DataContext.Provider>

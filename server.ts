@@ -113,8 +113,15 @@ async function startServer() {
   });
   app.get('/api/data/load', (req, res) => {
     try {
-      if (fs.existsSync(PERSIST_FILE)) {
-        const raw = fs.readFileSync(PERSIST_FILE, 'utf-8');
+      const store = req.query.store || 'HCM';
+      const persistFile = path.join(DATA_DIR, `persist_${store}.json`);
+      const legacyFile = path.join(DATA_DIR, 'persist.json');
+
+      if (fs.existsSync(persistFile)) {
+        const raw = fs.readFileSync(persistFile, 'utf-8');
+        res.json(JSON.parse(raw));
+      } else if (store === 'HCM' && fs.existsSync(legacyFile)) {
+        const raw = fs.readFileSync(legacyFile, 'utf-8');
         res.json(JSON.parse(raw));
       } else {
         res.json({ classInfo: [], sales: [] });
@@ -126,13 +133,14 @@ async function startServer() {
 
   app.post('/api/data/save', (req, res) => {
     try {
-      const { classInfo, sales } = req.body;
+      const store = req.query.store || 'HCM';
+      const persistFile = path.join(DATA_DIR, `persist_${store}.json`);
+      const bodyData = req.body;
       const data = { 
-        classInfo: classInfo || [], 
-        sales: sales || [],
+        ...bodyData,
         lastUpdated: new Date().toISOString()
       };
-      fs.writeFileSync(PERSIST_FILE, JSON.stringify(data, null, 2));
+      fs.writeFileSync(persistFile, JSON.stringify(data, null, 2));
       res.json({ success: true, timestamp: data.lastUpdated });
     } catch (error: any) {
       res.status(500).json({ error: 'Failed to save backup' });

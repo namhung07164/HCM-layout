@@ -18,12 +18,12 @@ export async function getSheetConfig() {
   return response.data;
 }
 
-export async function loadPersistentData() {
-  const response = await axios.get('/api/data/load');
+export async function loadPersistentData(store: string) {
+  const response = await axios.get('/api/data/load', { params: { store } });
   return response.data;
 }
 
-export async function savePersistentData(data: { classInfo: any[]; sales: any[]; [key: string]: any }) {
-  const response = await axios.post('/api/data/save', data);
+export async function savePersistentData(data: { classInfo: any[]; sales: any[]; [key: string]: any }, store: string) {
+  const response = await axios.post('/api/data/save', data, { params: { store } });
   return response.data;
 }

@@ -67,7 +67,7 @@ export default function GoogleSyncWidget() {
         await uploadFileToDrive({
             accessToken: token,
             fileBlob: blob,
-            fileName: "SheetSyncData.json",
+            fileName: `SheetSyncData_${dataContext.store}.json`,
             mimeType: "application/json"
         });
 
@@ -89,17 +89,31 @@ export default function GoogleSyncWidget() {
     try {
         const token = await authenticateGoogle();
 
-        const query = encodeURIComponent(`name='SheetSyncData.json' and trashed=false`);
+        const query = encodeURIComponent(`name='SheetSyncData_${dataContext.store}.json' and trashed=false`);
         const listRes = await fetch(`https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name)`, {
             headers: { Authorization: `Bearer ${token}` }
         });
 
         if (!listRes.ok) throw new Error('Failed to list files from Google Drive');
         const listData = await listRes.json();
-        const existingFile = listData.files && listData.files.length > 0 ? listData.files[0] : null;
+        let existingFile = listData.files && listData.files.length > 0 ? listData.files[0] : null;
+
+        if (!existingFile && dataContext.store === 'HCM') {
+            const legacyQuery = encodeURIComponent(`name='SheetSyncData.json' and trashed=false`);
+            const legacyListRes = await fetch(`https://www.googleapis.com/drive/v3/files?q=${legacyQuery}&fields=files(id,name)`, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            if (legacyListRes.ok) {
+                const legacyListData = await legacyListRes.json();
+                if (legacyListData.files && legacyListData.files.length > 0) {
+                    existingFile = legacyListData.files[0];
+                    console.log("Found legacy SheetSyncData.json on Drive");
+                }
+            }
+        }
 
         if (!existingFile) {
-            throw new Error("Không tìm thấy file SheetSyncData.json trên Google Drive.");
+            throw new Error(`Không tìm thấy file SheetSyncData_${dataContext.store}.json trên Google Drive.`);
         }
 
         const fetchRes = await fetch(`https://www.googleapis.com/drive/v3/files/${existingFile.id}?alt=media`, {

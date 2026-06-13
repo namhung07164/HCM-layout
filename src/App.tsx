@@ -40,8 +40,10 @@ import DriveAutoExporter from "./components/DriveAutoExporter";
 type TabId = "input" | "dashboard" | "dataMapping" | "mapping" | "picture";
 
 import GoogleSyncWidget from "./components/GoogleSyncWidget";
+import {DataProvider} from "./DataContext";
+import type { StoreRegion } from "./types";
 
-export default function App() {
+function MainApp({ store, onSwitchStore }: { store: StoreRegion, onSwitchStore: () => void }) {
   const [activeTab, setActiveTab] = useState<TabId>("input");
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isNotifOpen, setIsNotifOpen] = useState(false);
@@ -258,7 +260,31 @@ export default function App() {
                   );
                 })}
 
-                <div className="pt-8 space-y-4">
+                <div className="px-4 mt-6">
+                  <button
+                    onClick={() => {
+                        setIsMenuOpen(false);
+                        onSwitchStore();
+                    }}
+                    className={cn(
+                        "w-full flex items-center justify-between p-3 rounded-xl border transition-all text-left group",
+                        store === 'HCM' ? "border-blue-500/30 bg-blue-900/10 hover:bg-blue-900/20" : "border-emerald-500/30 bg-emerald-900/10 hover:bg-emerald-900/20"
+                    )}
+                  >
+                        <div className="flex flex-col">
+                            <span className="text-[9px] uppercase tracking-widest text-slate-500 font-bold">Cơ Sở Hoạt Động</span>
+                            <span className={cn(
+                                "text-sm font-bold leading-tight mt-0.5",
+                                store === 'HCM' ? "text-blue-400" : "text-emerald-400"
+                            )}>
+                                {store === 'HCM' ? 'Hồ Chí Minh' : 'Hà Nội'}
+                            </span>
+                        </div>
+                        <Split size={14} className="text-slate-500 group-hover:text-slate-300 transition-colors" />
+                  </button>
+                </div>
+
+                <div className="pt-6 space-y-4">
                   <p className="text-[10px] text-slate-500 uppercase tracking-[0.2em] font-bold px-4 mb-2">
                     Systems
                   </p>
@@ -393,6 +419,22 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-4">
+            <button
+              onClick={onSwitchStore}
+              className={cn(
+                "hidden sm:flex flex-col items-start px-3 py-1 bg-slate-900 border rounded-lg transition-colors group",
+                store === 'HCM' ? "border-blue-500/30 hover:bg-blue-900/20" : "border-emerald-500/30 hover:bg-emerald-900/20"
+              )}
+            >
+              <span className="text-[8px] uppercase tracking-widest text-slate-500 font-bold">Cơ Sở Hoạt Động</span>
+              <span className={cn(
+                "text-xs font-bold leading-tight transition-colors",
+                store === 'HCM' ? "text-blue-400 group-hover:text-blue-300" : "text-emerald-400 group-hover:text-emerald-300"
+              )}>
+                {store === 'HCM' ? 'Hồ Chí Minh' : 'Hà Nội'}
+              </span>
+            </button>
+
             <div className="hidden lg:flex items-center gap-2 px-3 py-1 bg-slate-900 border border-slate-800 rounded-full">
               <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
               <span className="text-[8px] font-bold uppercase tracking-widest text-slate-500">
@@ -512,5 +554,62 @@ export default function App() {
       </main>
       <DriveAutoExporter />
     </div>
+  );
+}
+
+export default function App() {
+  const [store, setStore] = useState<StoreRegion | null>(() => {
+    const saved = localStorage.getItem('active_store');
+    return (saved === 'HCM' || saved === 'HN') ? saved : null;
+  });
+
+  const handleSelectStore = (s: StoreRegion) => {
+    localStorage.setItem('active_store', s);
+    setStore(s);
+  };
+
+  if (!store) {
+    return (
+      <div className="flex h-screen bg-[#0F1115] text-[#E2E8F0] font-sans items-center justify-center p-6">
+        <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-2xl glass">
+          <div className="text-center mb-8">
+            <h1 className="text-3xl font-light serif italic tracking-wide text-white mb-3">
+              Data Manager
+            </h1>
+            <p className="text-slate-400 text-sm">
+              Vui lòng chọn cơ sở mà bạn muốn làm việc. Dữ liệu của 2 cơ sở sẽ được phân tách hoàn toàn riêng biệt.
+            </p>
+          </div>
+          <div className="space-y-4">
+            <button
+              onClick={() => handleSelectStore('HCM')}
+              className="w-full flex items-center justify-between p-4 rounded-xl border border-blue-500/30 bg-blue-900/20 hover:bg-blue-600/20 transition-all group"
+            >
+              <div className="flex flex-col text-left">
+                <span className="text-lg font-bold text-white group-hover:text-blue-400 transition-colors">Hồ Chí Minh</span>
+                <span className="text-xs text-slate-500">Giữ nguyên dữ liệu hiện tại</span>
+              </div>
+              <ChevronRight className="text-blue-500 group-hover:translate-x-1 transition-transform" />
+            </button>
+            <button
+              onClick={() => handleSelectStore('HN')}
+              className="w-full flex items-center justify-between p-4 rounded-xl border border-emerald-500/30 bg-emerald-900/20 hover:bg-emerald-600/20 transition-all group"
+            >
+              <div className="flex flex-col text-left">
+                <span className="text-lg font-bold text-white group-hover:text-emerald-400 transition-colors">Hà Nội</span>
+                <span className="text-xs text-slate-500">Khởi tạo dữ liệu mới hoàn toàn</span>
+              </div>
+              <ChevronRight className="text-emerald-500 group-hover:translate-x-1 transition-transform" />
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <DataProvider store={store} key={store}>
+      <MainApp store={store} onSwitchStore={() => setStore(null)} />
+    </DataProvider>
   );
 }
