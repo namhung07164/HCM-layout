@@ -924,7 +924,7 @@ export default function ReviewTab({ units, setUnits, versions, setVersions, acti
   );
 }
 
-const HiddenExportStage = ({ version, units, summaryData, selectedLabels, onReady, index }: any) => {
+const HiddenExportStage = ({ version, units, summaryData, selectedLabels, paperSize, onReady, index }: any) => {
   const styledUnits = React.useMemo(() => {
     const unitToGroupStyle = new Map<string, { color: string; opacity: number }>();
     version.groups.forEach((group: any) => {
@@ -971,10 +971,27 @@ const HiddenExportStage = ({ version, units, summaryData, selectedLabels, onRead
     return null; // Wait for image
   }
 
-  let minX = image ? (version?.imagePos?.x || 0) : 0;
-  let minY = image ? (version?.imagePos?.y || 0) : 0;
-  let maxX = image ? minX + (image.naturalWidth || image.width) * (version?.imageScale || 1) : 800;
-  let maxY = image ? minY + (image.naturalHeight || image.height) * (version?.imageScale || 1) : 600;
+  let minX = 0, minY = 0, maxX = 800, maxY = 600;
+  
+  if (image) {
+    const angle = (version?.backgroundRotation || 0) * Math.PI / 180;
+    const s = Math.sin(angle);
+    const c = Math.cos(angle);
+    const w = (image.naturalWidth || image.width) * (version?.imageScale || 1);
+    const h = (image.naturalHeight || image.height) * (version?.imageScale || 1);
+    const px = version?.imagePos?.x || 0;
+    const py = version?.imagePos?.y || 0;
+    
+    const p1 = { x: px, y: py };
+    const p2 = { x: px + w * c, y: py + w * s };
+    const p3 = { x: px + w * c - h * s, y: py + w * s + h * c };
+    const p4 = { x: px - h * s, y: py + h * c };
+    
+    minX = Math.min(p1.x, p2.x, p3.x, p4.x);
+    minY = Math.min(p1.y, p2.y, p3.y, p4.y);
+    maxX = Math.max(p1.x, p2.x, p3.x, p4.x);
+    maxY = Math.max(p1.y, p2.y, p3.y, p4.y);
+  }
 
   styledUnits.forEach((unit: any) => {
     if (unit.type === 'rect') {
@@ -997,13 +1014,43 @@ const HiddenExportStage = ({ version, units, summaryData, selectedLabels, onRead
     }
   });
 
-  minX -= 20;
-  minY -= 20;
-  maxX += 20;
-  maxY += 20;
+  minX -= 40; // Add 40px padding instead of 20px
+  minY -= 40;
+  maxX += 40;
+  maxY += 40;
 
-  const logicalWidth = maxX - minX;
-  const logicalHeight = maxY - minY;
+  let logicalWidth = maxX - minX;
+  let logicalHeight = maxY - minY;
+
+  // Căn chỉnh khung bản vẽ cho đẹp theo form giấy
+  if (paperSize && paperSize !== 'original') {
+      let paperRatio = 1.4142; // Mặc định A-series ratio ~ 297/210
+      if (paperSize === 'a4' || paperSize === 'a3' || paperSize === 'a2') {
+          paperRatio = 297 / 210;
+      } else if (Array.isArray(paperSize) && paperSize.length === 2) {
+          paperRatio = Math.max(paperSize[0], paperSize[1]) / Math.min(paperSize[0], paperSize[1]);
+      }
+
+      const isLandscape = logicalWidth > logicalHeight;
+      const targetRatio = isLandscape ? paperRatio : 1 / paperRatio;
+      const currentRatio = logicalWidth / logicalHeight;
+
+      if (currentRatio > targetRatio) {
+          // Logical Width lớn hơn tỷ lệ => Tăng Height
+          const newHeight = logicalWidth / targetRatio;
+          const diff = newHeight - logicalHeight;
+          minY -= diff / 2;
+          maxY += diff / 2;
+          logicalHeight = newHeight;
+      } else {
+          // Logical Height lớn hơn tỷ lệ => Tăng Width
+          const newWidth = logicalHeight * targetRatio;
+          const diff = newWidth - logicalWidth;
+          minX -= diff / 2;
+          maxX += diff / 2;
+          logicalWidth = newWidth;
+      }
+  }
 
   const MAX_DIM = 3000;
   let stageScale = 1;
@@ -1027,6 +1074,7 @@ const HiddenExportStage = ({ version, units, summaryData, selectedLabels, onRead
       scaleY={stageScale}
     >
       <Layer x={-minX} y={-minY}>
+        <Rect x={minX} y={minY} width={logicalWidth} height={logicalHeight} fill="white" listening={false} />
         {image && <KonvaImage 
           image={image} 
           listening={false} 
@@ -1287,6 +1335,7 @@ export const ExportAllManager = ({ versions, units, summaryData, format, paperSi
                         units={units} 
                         summaryData={summaryData} 
                         selectedLabels={selectedLabels}
+                        paperSize={paperSize}
                         onReady={handleStageReady} 
                     />
                 ))}
