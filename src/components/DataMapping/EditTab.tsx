@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Stage, Layer, Rect, Circle, Line, Image as KonvaImage, Transformer, Text, Group } from 'react-konva';
 import useImage from 'use-image';
 import { v4 as uuidv4 } from 'uuid';
-import { MousePointer2, Square, Circle as CircleIcon, Hexagon, Upload, Trash2, Maximize, Minimize, Lock, Unlock, Save, Magnet, Search, X as CloseIcon, Undo2, RotateCw, Eye, EyeOff, Download, FolderOpen, Pencil, FileImage, Move } from 'lucide-react';
+import { MousePointer2, Square, Circle as CircleIcon, Hexagon, Upload, Trash2, Maximize, Minimize, Lock, Unlock, Save, Magnet, Search, X as CloseIcon, Undo2, RotateCw, RefreshCw, Eye, EyeOff, Download, FolderOpen, Pencil, FileImage, Move } from 'lucide-react';
 import { UnitShape, ShapeType, MapVersion } from './types';
 import { cn } from '../../lib/utils';
 import { useDropzone } from 'react-dropzone';
@@ -199,7 +199,7 @@ export default function EditTab({ units, setUnits, versions, setVersions, active
     }
   }, [activeVersionId, activeVersion]);
 
-  const [image] = useImage(localImageUrl || '');
+  const [image] = useImage(localImageUrl || '', 'anonymous');
   const [activeTool, setActiveTool] = useState<ShapeType | 'select' | 'edit-bg'>('select');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -697,6 +697,14 @@ export default function EditTab({ units, setUnits, versions, setVersions, active
     }
   };
 
+  const handleReloadExternalBackground = () => {
+    if (!localImageUrl || localImageUrl.startsWith('data:') || localImageUrl.startsWith('blob:')) return;
+    const baseUrl = localImageUrl.split('?')[0];
+    const updatedUrl = `${baseUrl}?v=${Date.now()}`;
+    setLocalImageUrl(updatedUrl);
+    setVersions(versions.map(v => v.id === activeVersionId ? { ...v, backgroundUrl: updatedUrl } : v));
+  };
+
   const handleImportUnits = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -1012,6 +1020,17 @@ export default function EditTab({ units, setUnits, versions, setVersions, active
                                 onChange={handleReplaceBackground}
                             />
                         </div>
+
+                        {(!localImageUrl.startsWith('data:') && !localImageUrl.startsWith('blob:')) && (
+                            <button
+                                onClick={handleReloadExternalBackground}
+                                className="p-2 bg-slate-900/80 hover:bg-slate-800 text-white rounded-lg border border-slate-700 backdrop-blur-sm transition-all flex items-center gap-2"
+                                title="Tải lại ảnh nền từ máy chủ (Tránh bị lưu bộ nhớ đệm)"
+                            >
+                                <RefreshCw size={18} />
+                                <span className="text-[10px] uppercase font-bold tracking-wider hidden sm:inline">Làm Mới</span>
+                            </button>
+                        )}
                         
                         <button
                             onClick={handleRotateBackground}

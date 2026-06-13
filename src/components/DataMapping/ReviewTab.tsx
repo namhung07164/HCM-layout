@@ -81,7 +81,7 @@ export default function ReviewTab({ units, setUnits, versions, setVersions, acti
       });
   }, [units, activeVersion, summaryData, selectedLabels]);
 
-  const [image] = useImage(activeVersion?.backgroundUrl || '');
+  const [image] = useImage(activeVersion?.backgroundUrl || '', 'anonymous');
   const [scale, setScale] = useState(activeVersion?.backgroundScale || 1);
   const [position, setPosition] = useState(activeVersion?.backgroundPos || { x: 0, y: 0 });
   const [copiedLink, setCopiedLink] = useState(false);
@@ -930,7 +930,7 @@ const HiddenExportStage = ({ version, units, summaryData, selectedLabels, onRead
       });
   }, [units, version, summaryData, selectedLabels]);
 
-  const [image, status] = useImage(version.backgroundUrl || '');
+  const [image, status] = useImage(version.backgroundUrl || '', 'anonymous');
   const stageRef = useRef<any>(null);
 
   useEffect(() => {

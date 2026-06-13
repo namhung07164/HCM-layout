@@ -35,7 +35,7 @@ const VersionStage = ({ version, mapUnits, summaryData, selectedLabels, windowSi
       });
   }, [mapUnits, version, summaryData, selectedLabels]);
 
-  const [image] = useImage(version?.backgroundUrl || '');
+  const [image] = useImage(version?.backgroundUrl || '', 'anonymous');
   
   const [scale, setScale] = useState(version?.backgroundScale || 1);
   const [position, setPosition] = useState(version?.backgroundPos || { x: 0, y: 0 });
