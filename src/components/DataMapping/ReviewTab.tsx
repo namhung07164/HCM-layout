@@ -188,6 +188,28 @@ export default function ReviewTab({ units, setUnits, versions, setVersions, acti
                     }
                 }
 
+                // Attempt to purge cache if credentials exist
+                const cfZoneId = localStorage.getItem('cf_zone_id');
+                const cfApiToken = localStorage.getItem('cf_api_token');
+                if (cfZoneId && cfApiToken) {
+                   console.log('ReviewTab: Triggering Cloudflare Cache Purge...');
+                   try {
+                     const purgeRes = await fetch('/api/purge-cache', {
+                         method: 'POST',
+                         headers: { 'Content-Type': 'application/json' },
+                         body: JSON.stringify({ zoneId: cfZoneId, apiToken: cfApiToken })
+                     });
+                     const purgeData = await purgeRes.json();
+                     if (purgeData.success) {
+                         console.log('ReviewTab: Cloudflare Cache successfully purged!');
+                     } else {
+                         console.warn('ReviewTab: Cloudflare Cache purge returned error:', purgeData.error);
+                     }
+                   } catch (purgeErr) {
+                       console.error('ReviewTab: Failed to call purge cache API', purgeErr);
+                   }
+                }
+
                 alert(`Upload thành công ${filesToUpload.length} file lên Cloudflare R2!`);
             } catch (err: any) {
                 console.error(err);

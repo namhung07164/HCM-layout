@@ -147,6 +147,37 @@ async function startServer() {
     }
   });
 
+  app.post('/api/purge-cache', async (req, res) => {
+    try {
+      const { zoneId, apiToken, files } = req.body;
+      if (!zoneId || !apiToken) {
+        return res.status(400).json({ error: 'Missing Cloudflare Zone ID or API Token' });
+      }
+
+      // if files are explicitly provided, use them; otherwise purge everything on the zone
+      const requestBody = files && files.length > 0 ? { files } : { purge_everything: true };
+
+      const response = await fetch(`https://api.cloudflare.com/client/v4/zones/${zoneId}/purge_cache`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody)
+      });
+
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.errors?.[0]?.message || 'Cloudflare API Error');
+      }
+
+      res.json({ success: true, message: 'Cache purged successfully' });
+    } catch (error: any) {
+      console.error('Purge cache error:', error);
+      res.status(500).json({ error: error.message || 'Failed to purge cache' });
+    }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({

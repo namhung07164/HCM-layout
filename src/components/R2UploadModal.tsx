@@ -14,6 +14,8 @@ export default function R2UploadModal({ isOpen, onClose, onStartExport, uploadin
   const [accessKey, setAccessKey] = useState('');
   const [secretKey, setSecretKey] = useState('');
   const [bucketName, setBucketName] = useState('');
+  const [cfZoneId, setCfZoneId] = useState('');
+  const [cfApiToken, setCfApiToken] = useState('');
   const [showConfig, setShowConfig] = useState(true);
 
   useEffect(() => {
@@ -21,11 +23,15 @@ export default function R2UploadModal({ isOpen, onClose, onStartExport, uploadin
     const storedAccessKey = localStorage.getItem('r2_access_key') || '';
     const storedSecretKey = localStorage.getItem('r2_secret_key') || '';
     const storedBucketName = localStorage.getItem('r2_bucket_name') || '';
+    const storedCfZoneId = localStorage.getItem('cf_zone_id') || '';
+    const storedCfApiToken = localStorage.getItem('cf_api_token') || '';
 
     setAccountId(storedAccountId);
     setAccessKey(storedAccessKey);
     setSecretKey(storedSecretKey);
     setBucketName(storedBucketName);
+    setCfZoneId(storedCfZoneId);
+    setCfApiToken(storedCfApiToken);
 
     if (storedAccountId && storedAccessKey && storedSecretKey && storedBucketName) {
       setShowConfig(false);
@@ -39,6 +45,8 @@ export default function R2UploadModal({ isOpen, onClose, onStartExport, uploadin
     localStorage.setItem('r2_access_key', accessKey);
     localStorage.setItem('r2_secret_key', secretKey);
     localStorage.setItem('r2_bucket_name', bucketName);
+    localStorage.setItem('cf_zone_id', cfZoneId);
+    localStorage.setItem('cf_api_token', cfApiToken);
 
     if (window.confirm("Đồng ý tạo (hoặc ghi đè) file Data_Mapping_Export.jpeg trên Cloudflare R2 của bạn?")) {
       onStartExport();
@@ -138,6 +146,34 @@ export default function R2UploadModal({ isOpen, onClose, onStartExport, uploadin
                   placeholder="e.g. YOUR_SECRET_ACCESS_KEY"
                   disabled={uploading}
                 />
+              </div>
+              
+              <div className="pt-2 mt-4 border-t border-slate-800">
+                <h3 className="text-xs font-semibold text-slate-300 uppercase mb-3 flex items-center gap-1.5"><Settings size={14} className="text-blue-400"/> Tùy chọn xóa Cache</h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Cloudflare Zone ID (Tùy chọn)</label>
+                    <input
+                      type="text"
+                      value={cfZoneId}
+                      onChange={(e) => setCfZoneId(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500 text-sm font-mono transition-colors"
+                      placeholder="e.g. 023e105f4ecef8ad9ca31a8372d0c353"
+                      disabled={uploading}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">CF API Token (Quyền Purge Cache, Tùy chọn)</label>
+                    <input
+                      type="password"
+                      value={cfApiToken}
+                      onChange={(e) => setCfApiToken(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500 text-sm font-mono transition-colors"
+                      placeholder="e.g. xyZabc123"
+                      disabled={uploading}
+                    />
+                  </div>
+                </div>
               </div>
             </div>
           )}

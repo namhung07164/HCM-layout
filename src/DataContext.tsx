@@ -249,6 +249,8 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
         if (parsed.r2Config.accessKey) localStorage.setItem('r2_access_key', parsed.r2Config.accessKey);
         if (parsed.r2Config.secretKey) localStorage.setItem('r2_secret_key', parsed.r2Config.secretKey);
         if (parsed.r2Config.bucketName) localStorage.setItem('r2_bucket_name', parsed.r2Config.bucketName);
+        if (parsed.r2Config.cfZoneId) localStorage.setItem('cf_zone_id', parsed.r2Config.cfZoneId);
+        if (parsed.r2Config.cfApiToken) localStorage.setItem('cf_api_token', parsed.r2Config.cfApiToken);
       }
 
       if (parsed.lastUpdated) setLastBackup(parsed.lastUpdated);
@@ -318,6 +320,8 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
           if (data.r2Config.accessKey) localStorage.setItem('r2_access_key', data.r2Config.accessKey);
           if (data.r2Config.secretKey) localStorage.setItem('r2_secret_key', data.r2Config.secretKey);
           if (data.r2Config.bucketName) localStorage.setItem('r2_bucket_name', data.r2Config.bucketName);
+          if (data.r2Config.cfZoneId) localStorage.setItem('cf_zone_id', data.r2Config.cfZoneId);
+          if (data.r2Config.cfApiToken) localStorage.setItem('cf_api_token', data.r2Config.cfApiToken);
         }
 
         if (data.lastUpdated) setLastBackup(data.lastUpdated);
@@ -407,7 +411,9 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
             accountId: localStorage.getItem('r2_account_id') || '',
             accessKey: localStorage.getItem('r2_access_key') || '',
             secretKey: localStorage.getItem('r2_secret_key') || '',
-            bucketName: localStorage.getItem('r2_bucket_name') || ''
+            bucketName: localStorage.getItem('r2_bucket_name') || '',
+            cfZoneId: localStorage.getItem('cf_zone_id') || '',
+            cfApiToken: localStorage.getItem('cf_api_token') || ''
           }
         }, store);
         if (res.success && !lastBackup) setLastBackup(res.timestamp);
@@ -457,7 +463,9 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
               accountId: localStorage.getItem('r2_account_id') || '',
               accessKey: localStorage.getItem('r2_access_key') || '',
               secretKey: localStorage.getItem('r2_secret_key') || '',
-              bucketName: localStorage.getItem('r2_bucket_name') || ''
+              bucketName: localStorage.getItem('r2_bucket_name') || '',
+              cfZoneId: localStorage.getItem('cf_zone_id') || '',
+              cfApiToken: localStorage.getItem('cf_api_token') || ''
             }
           }));
           await writable.close();

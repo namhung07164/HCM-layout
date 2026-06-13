@@ -57,7 +57,9 @@ export default function GoogleSyncWidget() {
                 accountId: localStorage.getItem('r2_account_id') || '',
                 accessKey: localStorage.getItem('r2_access_key') || '',
                 secretKey: localStorage.getItem('r2_secret_key') || '',
-                bucketName: localStorage.getItem('r2_bucket_name') || ''
+                bucketName: localStorage.getItem('r2_bucket_name') || '',
+                cfZoneId: localStorage.getItem('cf_zone_id') || '',
+                cfApiToken: localStorage.getItem('cf_api_token') || ''
             }
         };
 
@@ -143,6 +145,8 @@ export default function GoogleSyncWidget() {
             if (data.r2Config.accessKey) localStorage.setItem('r2_access_key', data.r2Config.accessKey);
             if (data.r2Config.secretKey) localStorage.setItem('r2_secret_key', data.r2Config.secretKey);
             if (data.r2Config.bucketName) localStorage.setItem('r2_bucket_name', data.r2Config.bucketName);
+            if (data.r2Config.cfZoneId) localStorage.setItem('cf_zone_id', data.r2Config.cfZoneId);
+            if (data.r2Config.cfApiToken) localStorage.setItem('cf_api_token', data.r2Config.cfApiToken);
         }
 
         alert("Tải dữ liệu từ Google Drive thành công!");
