@@ -81,7 +81,7 @@ const getStatus = (start: any, handover: any, opening: any, code: any) => {
   return 'On process';
 };
 
-export function useProjectStatusSync(validUnits: string[]) {
+export function useProjectStatusSync(validUnits: string[], activeStore: string) {
   const [rawProjects, setRawProjects] = useState<any[]>([]);
   const [rawTasks, setRawTasks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -132,11 +132,11 @@ export function useProjectStatusSync(validUnits: string[]) {
 
   const projectStatus = useMemo(() => {
     // Only map projects that have a code matching units from the Summary tab
-    // Also restrict strictly to 'HCM' store to avoid loading HN or other irrelevant store data
+    // Also restrict strictly to activeStore
     const filteredProjects = rawProjects.filter(p => {
       const code = String(p.code || p.CODE || '').trim();
       const store = String(p.store || p.STORE || '').trim().toUpperCase();
-      return validUnits.includes(code) && store === 'HCM';
+      return validUnits.includes(code) && store === activeStore;
     });
 
     return filteredProjects.map(p => {

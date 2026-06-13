@@ -78,7 +78,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
   const [basePlan, setBasePlanState] = useState<BasePlanInfo[]>([]);
   const [units, setUnitsState] = useState<UnitDataInfo[]>([]);
   const validUnits = React.useMemo(() => units.map(u => u.unit), [units]);
-  const { projectStatus: fsProjectStatus, error: fsError } = useProjectStatusSync(validUnits);
+  const { projectStatus: fsProjectStatus, error: fsError } = useProjectStatusSync(validUnits, store);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
 
   const addNotification = (message: string) => {
