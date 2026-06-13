@@ -23,6 +23,105 @@ interface EditTabProps {
   setActiveVersionId: (id: string | null) => void;
 }
 
+function SearchableSelect({ 
+    options, 
+    value, 
+    onChange 
+}: { 
+    options: { value: string, label: string }[], 
+    value: string, 
+    onChange: (val: string) => void 
+}) {
+    const [searchTerm, setSearchTerm] = React.useState('');
+    const [isOpen, setIsOpen] = React.useState(false);
+    const wrapperRef = React.useRef<HTMLDivElement>(null);
+
+    React.useEffect(() => {
+        const found = options.find(o => o.value === value);
+        if (found) {
+            setSearchTerm(found.label);
+        } else {
+            setSearchTerm(value || '');
+        }
+    }, [value, options]);
+
+    React.useEffect(() => {
+        function handleClickOutside(event: MouseEvent) {
+            if (wrapperRef.current && !wrapperRef.current.contains(event.target as Node)) {
+                setIsOpen(false);
+                // Reset search term to the actual selected value's label if clicked outside
+                const found = options.find(o => o.value === value);
+                if (found) {
+                    setSearchTerm(found.label);
+                } else if (value) {
+                    setSearchTerm(value);
+                } else {
+                    setSearchTerm('');
+                }
+            }
+        }
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, [value, options]);
+
+    const filteredOptions = options.filter(opt => 
+        opt.label.toLowerCase().includes(searchTerm.toLowerCase()) || opt.value.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+
+    return (
+        <div ref={wrapperRef} className="relative w-full">
+            <div className="relative">
+                <input 
+                    type="text"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-3 pr-8 py-2 text-sm text-slate-200 outline-none focus:border-blue-500 transition-colors"
+                    value={searchTerm}
+                    onChange={(e) => {
+                        setSearchTerm(e.target.value);
+                        setIsOpen(true);
+                    }}
+                    onFocus={(e) => {
+                        setIsOpen(true);
+                    }}
+                    placeholder="Search unit..."
+                />
+                <button
+                    type="button"
+                    onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (isOpen) setIsOpen(false);
+                        else setIsOpen(true);
+                    }}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200"
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                </button>
+            </div>
+            {isOpen && (
+                <div className="absolute z-50 w-full mt-1 bg-slate-900 border border-slate-700 rounded-lg shadow-xl max-h-60 overflow-y-auto">
+                    {filteredOptions.length === 0 ? (
+                        <div className="px-3 py-2 text-sm text-slate-500 text-center italic">No results found</div>
+                    ) : (
+                        filteredOptions.map(opt => (
+                            <div 
+                                key={opt.value}
+                                className={`px-3 py-2 text-sm cursor-pointer transition-colors ${value === opt.value ? 'bg-blue-600/30 text-blue-300 font-medium' : 'text-slate-300 hover:bg-slate-800'}`}
+                                onClick={() => {
+                                    onChange(opt.value);
+                                    setSearchTerm(opt.label);
+                                    setIsOpen(false);
+                                }}
+                            >
+                                {opt.label}
+                            </div>
+                        ))
+                    )}
+                </div>
+            )}
+        </div>
+    );
+}
+
 export default function EditTab({ units, setUnits, versions, setVersions, activeVersionId, setActiveVersionId }: EditTabProps) {
   const summaryData = useSummaryData();
   const masterUnits = React.useMemo(() => {
@@ -1275,18 +1374,13 @@ export default function EditTab({ units, setUnits, versions, setVersions, active
             <div className="space-y-4">
                 <div className="space-y-1">
                     <label className="text-[10px] uppercase text-slate-500 font-bold">Unit Name</label>
-                    <select 
-                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none focus:border-blue-500"
+                    <SearchableSelect 
                         value={units.find(u => u.id === selectedId)?.name || ''}
-                        onChange={(e) => {
-                            handleSetUnitsWithHistory(units.map(u => u.id === selectedId ? { ...u, name: e.target.value } : u));
+                        onChange={(val) => {
+                            handleSetUnitsWithHistory(units.map(u => u.id === selectedId ? { ...u, name: val } : u));
                         }}
-                    >
-                        <option value="">-- Select Unit --</option>
-                        {masterUnits.map(u => (
-                            <option key={u.unit} value={u.unit}>{u.unit} (F{u.floor})</option>
-                        ))}
-                    </select>
+                        options={masterUnits.map(u => ({ value: u.unit, label: `${u.unit} (F${u.floor})` }))}
+                    />
                 </div>
 
                 <div className="flex items-center justify-between bg-slate-950 p-3 rounded-xl border border-slate-800">
