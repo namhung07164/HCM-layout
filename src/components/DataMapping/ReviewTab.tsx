@@ -35,7 +35,7 @@ export default function ReviewTab({ units, setUnits, versions, setVersions, acti
   const [activeVersionId, setActiveVersionId] = useState<string | null>(initialActiveVersionId || versions[0]?.id || null);
   const activeVersion = versions.find(v => v.id === activeVersionId);
   const summaryData = useSummaryData();
-  const { profits, subFees, mdStatus, projectStatus } = useData();
+  const { profits, subFees, mdStatus, projectStatus, projectLink } = useData();
 
   const [selectedLabels, setSelectedLabels] = useState<string[]>(() => {
     try {
@@ -327,6 +327,8 @@ export default function ReviewTab({ units, setUnits, versions, setVersions, acti
         mgmtFee: 0,
         mdStatus: "",
         projectStatus: "",
+        projectLink: "",
+        actStatus: "",
         vendorCode: "",
         brandCode: "",
         brandName: "",
@@ -352,6 +354,7 @@ export default function ReviewTab({ units, setUnits, versions, setVersions, acti
         dataMap[key].floor = (sumData as any).floor || dataMap[key].floor;
         if (!dataMap[key].mdStatus) dataMap[key].mdStatus = sumData.mdStatus;
         if (!dataMap[key].projectStatus) dataMap[key].projectStatus = sumData.projectStatus;
+        if (!dataMap[key].actStatus) dataMap[key].actStatus = sumData.actStatus;
       }
     });
 
@@ -408,8 +411,17 @@ export default function ReviewTab({ units, setUnits, versions, setVersions, acti
       }
     });
 
+    projectLink.forEach((pl) => {
+      if (pl.unit) {
+        const key = pl.unit.toLowerCase();
+        if (dataMap[key]) {
+          dataMap[key].projectLink = pl.status;
+        }
+      }
+    });
+
     return dataMap;
-  }, [unitNamesStr, summaryData, profits, subFees, mdStatus, projectStatus]);
+  }, [unitNamesStr, summaryData, profits, subFees, mdStatus, projectStatus, projectLink]);
 
   const applyAllDynamicRules = () => {
     let hasChanges = false;

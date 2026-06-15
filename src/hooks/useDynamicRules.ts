@@ -8,7 +8,8 @@ export function useDynamicRules(
   profits: any[],
   subFees: any[],
   mdStatus: any[],
-  projectStatus: any[]
+  projectStatus: any[],
+  projectLink: any[]
 ) {
   const unitNamesStr = useMemo(() => JSON.stringify(units.map(u => ({ id: u.id, name: u.name }))), [units]);
 
@@ -31,6 +32,8 @@ export function useDynamicRules(
         mgmtFee: 0,
         mdStatus: "",
         projectStatus: "",
+        projectLink: "",
+        actStatus: "",
         vendorCode: "",
         brandCode: "",
         brandName: "",
@@ -56,6 +59,7 @@ export function useDynamicRules(
         dataMap[key].floor = (sumData as any).floor || dataMap[key].floor;
         if (!dataMap[key].mdStatus) dataMap[key].mdStatus = sumData.mdStatus;
         if (!dataMap[key].projectStatus) dataMap[key].projectStatus = sumData.projectStatus;
+        if (!dataMap[key].actStatus) dataMap[key].actStatus = sumData.actStatus;
       }
     });
 
@@ -112,8 +116,17 @@ export function useDynamicRules(
       }
     });
 
+    projectLink.forEach((pl) => {
+      if (pl.unit) {
+        const key = pl.unit.toLowerCase();
+        if (dataMap[key]) {
+          dataMap[key].projectLink = pl.status;
+        }
+      }
+    });
+
     return dataMap;
-  }, [unitNamesStr, summaryData, profits, subFees, mdStatus, projectStatus]);
+  }, [unitNamesStr, summaryData, profits, subFees, mdStatus, projectStatus, projectLink]);
 
   const calculateNextVersions = (versions: MapVersion[]): { nextVersions: MapVersion[], hasChanges: boolean } => {
     let hasChanges = false;

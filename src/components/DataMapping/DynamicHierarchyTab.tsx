@@ -34,7 +34,7 @@ export default function DynamicHierarchyTab({
   activeVersionId,
   setActiveVersionId,
 }: DynamicHierarchyTabProps) {
-  const { profits, subFees, mdStatus, projectStatus } = useData();
+  const { profits, subFees, mdStatus, projectStatus, projectLink } = useData();
   const summaryData = useSummaryData();
 
   const viewVersionId = activeVersionId || versions[0]?.id || null;
@@ -69,6 +69,8 @@ export default function DynamicHierarchyTab({
         mgmtFee: 0,
         mdStatus: "",
         projectStatus: "",
+        projectLink: "",
+        actStatus: "",
         vendorCode: "",
         brandCode: "",
         brandName: "",
@@ -95,6 +97,8 @@ export default function DynamicHierarchyTab({
         if (!dataMap[key].mdStatus) dataMap[key].mdStatus = sumData.mdStatus;
         if (!dataMap[key].projectStatus)
           dataMap[key].projectStatus = sumData.projectStatus;
+        if (!dataMap[key].actStatus)
+          dataMap[key].actStatus = sumData.actStatus;
       }
     });
 
@@ -151,8 +155,17 @@ export default function DynamicHierarchyTab({
       }
     });
 
+    projectLink.forEach((pl) => {
+      if (pl.unit) {
+        const key = pl.unit.toLowerCase();
+        if (dataMap[key]) {
+          dataMap[key].projectLink = pl.status;
+        }
+      }
+    });
+
     return dataMap;
-  }, [unitNamesStr, summaryData, profits, subFees, mdStatus, projectStatus]);
+  }, [unitNamesStr, summaryData, profits, subFees, mdStatus, projectStatus, projectLink]);
 
   // Evaluates rules for a given group against a unit shape
   const matchRules = (unit: UnitShape, rules: GroupRule[] | undefined) => {
@@ -746,6 +759,8 @@ export default function DynamicHierarchyTab({
                                   <option value="projectStatus">
                                     Project Status
                                   </option>
+                                  <option value="projectLink">Project Link</option>
+                                  <option value="actStatus">Act. Status</option>
                                   <option value="taskDelegation">Task Delegation</option>
                                   <option value="flowStatus">Flow: Status</option>
                                   <option value="party">Party</option>
