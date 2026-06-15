@@ -220,7 +220,7 @@ export const generateSizeLabel = (unit: Record<string, any>, uInfo: any, selecte
     if (selectedLabels.includes('MD Status') && uInfo?.mdStatus) parts.push(`MD Status: ${uInfo.mdStatus}`);
     if (selectedLabels.includes('Task') && uInfo?.task) parts.push(`Task: ${uInfo.task}`);
     if (selectedLabels.includes('Project Status') && uInfo?.projectStatus) parts.push(`Project Status: ${uInfo.projectStatus}`);
-    if (selectedLabels.includes('Act. Status') && uInfo?.actStatus) parts.push(`Act. Status: ${uInfo.actStatus}`);
+    if (selectedLabels.includes('Act: Status') && uInfo?.actStatus) parts.push(`Act: Status: ${uInfo.actStatus}`);
     
     if (selectedLabels.includes('Sales') && uInfo?.salesAmount !== undefined) parts.push(`Sales: ${formatMoney(uInfo.salesAmount)}`);
     if (selectedLabels.includes('Sales By CP') && uInfo?.salesByCp !== undefined) parts.push(`Sales (CP): ${formatMoney(uInfo.salesByCp)}`);

@@ -221,7 +221,7 @@ export default function SummaryTab() {
     },
     {
       key: "actStatus",
-      label: "Act. Status",
+      label: "Act: Status",
       renderCell: (val: any) => val,
       filterType: "select",
       filterOptions: getUniqueOptions("actStatus"),

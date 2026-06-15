@@ -130,7 +130,7 @@ export default function ProjectStatusTab() {
     },
     { 
       key: 'actStatus', 
-      label: 'Act. Status', 
+      label: 'Act: Status', 
       summary: getUniqueCount('actStatus'),
       renderCell: renderTextCell('actStatus')
     },
@@ -151,7 +151,7 @@ export default function ProjectStatusTab() {
       unit: row['unit'] || row['Unit'] || '',
       unitLink: row['unit link'] || row['unitLink'] || row['Unit Link'] || row['Unit link'] || '',
       status: row['status'] || row['Status'] || '',
-      actStatus: row['act status'] || row['actStatus'] || row['Act Status'] || row['Act. Status'] || '',
+      actStatus: row['act status'] || row['actStatus'] || row['Act Status'] || row['Act: Status'] || row['Act. Status'] || '',
       startDate: standardizeDateToMMDDYYYY(row['start date'] || row['startDate'] || row['Start Date'] || ''),
       endDate: standardizeDateToMMDDYYYY(row['end date'] || row['endDate'] || row['End Date'] || ''),
       task: row['task'] || row['Task'] || '',
