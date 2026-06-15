@@ -205,7 +205,12 @@ export function useSummaryData() {
         marginByCp,
         mgmtFee: mgmtFeeAmount,
         mdStatus: mdStatusMatch ? mdStatusMatch.status : "-",
-        task: projectLinkMatch ? projectLinkMatch.task : (projectStatusMatch ? projectStatusMatch.task : "-"),
+        task: (() => {
+          const psTask = projectStatusMatch?.task;
+          const plTask = projectLinkMatch?.task;
+          if (psTask && plTask && psTask !== plTask) return `${psTask} + ${plTask}`;
+          return psTask || plTask || "-";
+        })(),
         projectStatus: (() => {
           const ps = projectStatusMatch?.status;
           const pl = projectLinkMatch?.status;

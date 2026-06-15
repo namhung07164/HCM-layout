@@ -24,7 +24,7 @@ interface ReviewTabProps {
 
 const AVAILABLE_LABELS = [
     'Unit ID', 'Size SQM', 'Floor', 'Brand Code', 'Brand Name', 'Vendor Code',
-    'Name', 'Class Code', 'Update', 'Status', 'MD Status', 'Task', 'Project Status',
+    'Name', 'Class Code', 'Update', 'Status', 'MD Status', 'Task', 'Project Status', 'Act: Status',
     'Sales', 'Sales By CP', 'Sales By HCM Categ',
     'Profit', 'Profit By CP', 'Profit By HCM Categ',
     'Margin', 'Margin By CP', 'HCM Margin',
