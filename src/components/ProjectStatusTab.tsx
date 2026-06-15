@@ -72,7 +72,7 @@ export default function ProjectStatusTab() {
       updateRow({
         ...row,
         unitLink: unitLinkValue,
-        projectName: parentUnitRow.projectName || '',
+        projectName: row.unit || '',
         status: parentUnitRow.status || '',
         task: parentUnitRow.task || '',
         startDate: parentUnitRow.startDate || '',
@@ -88,30 +88,21 @@ export default function ProjectStatusTab() {
   }, [projectStatus]);
 
   const renderUnitLinkCell = React.useCallback(() => (val: any, row: ProjectStatusInfo, updateRow: (newRow: ProjectStatusInfo) => void, isLocked: boolean) => {
-    // Generate a unique ID for the datalist based on the row's id or index to avoid conflicts,
-    // but a global one works fine since the options are the same.
     return (
-      <>
-        <input 
-          type="text"
-          list="unitLinkOptions"
-          value={val || ''}
-          onChange={(e) => handleUnitLinkChange(row, updateRow, e.target.value)}
-          disabled={isLocked}
-          className={cn(
-            "bg-transparent border-0 text-slate-300 w-full outline-none",
-            isLocked ? "bg-transparent opacity-50 cursor-not-allowed" : "cursor-text bg-slate-900/80 hover:bg-slate-800 transition-colors focus:bg-blue-600/20 focus:text-white rounded px-3 py-1.5 shadow-inner shadow-black/40 border border-slate-700/50 hover:border-slate-500 focus:border-blue-500/50 text-xs"
-          )}
-          placeholder="Select Unit..."
-        />
-        <datalist id="unitLinkOptions">
-          {uniqueUnits.map(unit => (
-            <option key={unit} value={unit} />
-          ))}
-        </datalist>
-      </>
+      <input 
+        type="text"
+        list="unitLinkOptions"
+        value={val || ''}
+        onChange={(e) => handleUnitLinkChange(row, updateRow, e.target.value)}
+        disabled={isLocked}
+        className={cn(
+          "bg-transparent border-0 text-slate-300 w-full outline-none",
+          isLocked ? "bg-transparent opacity-50 cursor-not-allowed" : "cursor-text bg-slate-900/80 hover:bg-slate-800 transition-colors focus:bg-blue-600/20 focus:text-white rounded px-3 py-1.5 shadow-inner shadow-black/40 border border-slate-700/50 hover:border-slate-500 focus:border-blue-500/50 text-xs"
+        )}
+        placeholder="Select Unit..."
+      />
     );
-  }, [uniqueUnits, handleUnitLinkChange]);
+  }, [handleUnitLinkChange]);
 
   const columns: { key: keyof ProjectStatusInfo; label: string; summary?: React.ReactNode; renderCell?: any }[] = React.useMemo(() => [
     { key: 'update', label: 'Year', summary: getUniqueCount('update'), renderCell: renderTextCell('update') },
@@ -161,13 +152,20 @@ export default function ProjectStatusTab() {
   }), []);
 
   return (
-    <DataTable
-      title="Dữ Liệu Project Status"
-      description="Quản lý thông tin và tiến độ của các Project"
-      columns={columns}
-      data={projectStatus}
-      onDataChange={handleDataChange}
-      importConfig={importConfig}
-    />
+    <>
+      <datalist id="unitLinkOptions">
+        {uniqueUnits.map(unit => (
+          <option key={unit} value={unit} />
+        ))}
+      </datalist>
+      <DataTable
+        title="Dữ Liệu Project Status"
+        description="Quản lý thông tin và tiến độ của các Project"
+        columns={columns}
+        data={projectStatus}
+        onDataChange={handleDataChange}
+        importConfig={importConfig}
+      />
+    </>
   );
 }
