@@ -122,6 +122,22 @@ export interface UnitDataInfo {
   [key: string]: any;
 }
 
+export interface ProjectLinkInfo {
+  update: string;
+  projectName: string;
+  unit: string;
+  unitLink?: string;
+  status: string;
+  actStatus?: string;
+  startDate: string;
+  endDate: string;
+  task: string;
+  delegationStatus?: string;
+  party?: string;
+  flowStatus?: string;
+  [key: string]: any;
+}
+
 export type TabType =
   | "input"
   | "dashboard"
@@ -140,6 +156,7 @@ export type MappingSubTabType =
   | "summary"
   | "unit-info"
   | "md-status"
-  | "project-status";
+  | "project-status"
+  | "project-link";
 
 export type StoreRegion = 'HCM' | 'HN';

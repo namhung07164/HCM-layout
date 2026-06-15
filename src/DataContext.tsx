@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
-import { ClassInfo, ActualClassInfo, SalesInfo, ProfitInfo, UnitInfo, MDStatusInfo, SubFeeInfo, ProjectStatusInfo, BasePlanInfo, UnitDataInfo, StoreRegion } from './types';
+import { ClassInfo, ActualClassInfo, SalesInfo, ProfitInfo, UnitInfo, MDStatusInfo, SubFeeInfo, ProjectStatusInfo, ProjectLinkInfo, BasePlanInfo, UnitDataInfo, StoreRegion } from './types';
 import { UnitShape, MapVersion } from './components/DataMapping/types';
 import { loadPersistentData, savePersistentData } from './lib/sheets';
 import { get, set } from 'idb-keyval';
@@ -20,6 +20,7 @@ interface DataContextType {
   mdStatus: MDStatusInfo[];
   subFees: SubFeeInfo[];
   projectStatus: ProjectStatusInfo[];
+  projectLink: ProjectLinkInfo[];
   basePlan: BasePlanInfo[];
   units: UnitDataInfo[];
   notifications: AppNotification[];
@@ -36,6 +37,7 @@ interface DataContextType {
   setMdStatus: (data: MDStatusInfo[]) => void;
   setSubFees: (data: SubFeeInfo[]) => void;
   setProjectStatus: (data: ProjectStatusInfo[]) => void;
+  setProjectLink: (data: ProjectLinkInfo[]) => void;
   setBasePlan: (data: BasePlanInfo[]) => void;
   setUnits: (data: UnitDataInfo[]) => void;
   setNotifications: (data: AppNotification[]) => void;
@@ -76,6 +78,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
   const [mdStatus, setMdStatusState] = useState<MDStatusInfo[]>([]);
   const [subFees, setSubFeesState] = useState<SubFeeInfo[]>([]);
   const [projectStatus, setProjectStatusState] = useState<ProjectStatusInfo[]>([]);
+  const [projectLink, setProjectLinkState] = useState<ProjectLinkInfo[]>([]);
   const [basePlan, setBasePlanState] = useState<BasePlanInfo[]>([]);
   const [units, setUnitsState] = useState<UnitDataInfo[]>([]);
   const validUnits = React.useMemo(() => units.map(u => u.unit), [units]);
@@ -224,6 +227,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
       if (parsed.mdStatus) setMdStatusState(parsed.mdStatus);
       if (parsed.subFees) setSubFeesState(parsed.subFees);
       if (parsed.projectStatus) setProjectStatusState(parsed.projectStatus);
+      if (parsed.projectLink) setProjectLinkState(parsed.projectLink);
       if (parsed.basePlan) setBasePlanState(parsed.basePlan);
       if (parsed.units) setUnitsState(parsed.units);
       if (parsed.mapUnits) setMapUnitsState(parsed.mapUnits);
@@ -296,6 +300,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
         setMdStatusState(data.mdStatus || []);
         setSubFeesState(data.subFees || []);
         setProjectStatusState(data.projectStatus || []);
+        setProjectLinkState(data.projectLink || []);
         setBasePlanState(data.basePlan || []);
         setUnitsState(data.units || []);
         setMapUnitsState(data.mapUnits || []);
@@ -374,7 +379,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
 
   const saveToHandlers = async (
     c: ClassInfo[], ac: ActualClassInfo[], s: SalesInfo[], u: UnitInfo[], p: ProfitInfo[], md: MDStatusInfo[], 
-    sf: SubFeeInfo[], ps: ProjectStatusInfo[], bp: BasePlanInfo[], un: UnitDataInfo[],
+    sf: SubFeeInfo[], ps: ProjectStatusInfo[], pl: ProjectLinkInfo[], bp: BasePlanInfo[], un: UnitDataInfo[],
     mu: UnitShape[], mv: MapVersion[], amvId: string | null,
     customHandle?: any,
     isManualClick: boolean = false
@@ -393,6 +398,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
           mdStatus: md,
           subFees: sf,
           projectStatus: ps,
+          projectLink: pl,
           basePlan: bp,
           units: un,
           mapUnits: mu,
@@ -444,6 +450,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
             mdStatus: md,
             subFees: sf,
             projectStatus: ps,
+            projectLink: pl,
             basePlan: bp,
             units: un,
             mapUnits: mu,
@@ -492,13 +499,13 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
     }
 
     saveTimeoutRef.current = setTimeout(() => {
-      saveToHandlers(classInfo, actualClassInfo, sales, unitInfo, profits, mdStatus, subFees, projectStatus, basePlan, units, mapUnits, mapVersions, activeMapVersionId);
+      saveToHandlers(classInfo, actualClassInfo, sales, unitInfo, profits, mdStatus, subFees, projectStatus, projectLink, basePlan, units, mapUnits, mapVersions, activeMapVersionId);
     }, 2000); // Wait 2 seconds of silence before saving
 
     return () => {
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
     };
-  }, [classInfo, actualClassInfo, sales, unitInfo, profits, mdStatus, subFees, projectStatus, basePlan, units, mapUnits, mapVersions, activeMapVersionId]);
+  }, [classInfo, actualClassInfo, sales, unitInfo, profits, mdStatus, subFees, projectStatus, projectLink, basePlan, units, mapUnits, mapVersions, activeMapVersionId]);
 
   const setActualClassInfo = (data: ActualClassInfo[]) => {
     setActualClassInfoState(data);
@@ -530,6 +537,9 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
 
   const setProjectStatus = (data: ProjectStatusInfo[]) => {
     setProjectStatusState(data);
+  };
+  const setProjectLink = (data: ProjectLinkInfo[]) => {
+    setProjectLinkState(data);
   };
 
   const setBasePlan = (data: BasePlanInfo[]) => {
@@ -648,6 +658,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
       if (results['MD Status']) setMdStatusState(parseSheetData(results['MD Status']));
       if (results['Sub Fees']) setSubFeesState(parseSheetData(results['Sub Fees']));
       if (results['Project Status']) setProjectStatusState(parseSheetData(results['Project Status']));
+      if (results['Project Link']) setProjectLinkState(parseSheetData(results['Project Link']));
       if (results['Base Plan']) {
         const basePlanData = parseSheetData(results['Base Plan']);
         setBasePlanState(basePlanData.map((b: any) => ({
@@ -676,7 +687,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
   };
 
   const triggerManualBackup = async () => {
-    await saveToHandlers(classInfo, actualClassInfo, sales, unitInfo, profits, mdStatus, subFees, projectStatus, basePlan, units, mapUnits, mapVersions, activeMapVersionId, undefined, true);
+    await saveToHandlers(classInfo, actualClassInfo, sales, unitInfo, profits, mdStatus, subFees, projectStatus, projectLink, basePlan, units, mapUnits, mapVersions, activeMapVersionId, undefined, true);
   };
 
   const triggerManualLoad = async () => {
@@ -717,6 +728,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
       mdStatus,
       subFees,
       projectStatus,
+      projectLink,
       basePlan,
       units,
       notifications,
@@ -730,6 +742,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
       setMdStatus,
       setSubFees,
       setProjectStatus,
+      setProjectLink,
       setBasePlan,
       setUnits,
       setNotifications,

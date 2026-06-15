@@ -72,6 +72,7 @@ export async function syncFromGoogleSheets(spreadsheetId: string) {
     'MD Status!A1:Z1000',
     'Sub Fees!A1:Z1000',
     'Project Status!A1:Z1000',
+    'Project Link!A1:Z1000',
     'Base Plan!A1:Z1000',
     'Units!A1:Z1000'
   ];

@@ -12,7 +12,7 @@ export interface SummaryDataItem extends UnitInfo {
   marginByCp: number;
   mdStatus: string;
   task: string;
-  projectStatus: string;
+  projectLink: string;
   actStatus: string;
   salesByHcmcate: number;
   profitByHcmcate: number;
@@ -28,7 +28,7 @@ export function useSummaryData() {
     sales: salesData,
     profits: profitData,
     mdStatus: mdStatusData,
-    projectStatus: projectStatusData,
+    projectLink: projectLinkData,
     basePlan,
     units: unitsData,
   } = useData();
@@ -101,7 +101,7 @@ export function useSummaryData() {
         return md.unit === unit.unit;
       });
 
-      const projectStatusMatch = (projectStatusData || []).find((ps) => {
+      const projectLinkMatch = (projectLinkData || []).find((ps) => {
         return ps.unit === unit.unit;
       });
 
@@ -182,14 +182,14 @@ export function useSummaryData() {
         margin,
         marginByCp,
         mdStatus: mdStatusMatch ? mdStatusMatch.status : "-",
-        task: projectStatusMatch ? projectStatusMatch.task : "-",
-        projectStatus:
-          projectStatusMatch && projectStatusMatch.status
-            ? projectStatusMatch.status
+        task: projectLinkMatch ? projectLinkMatch.task : "-",
+        projectLink:
+          projectLinkMatch && projectLinkMatch.status
+            ? projectLinkMatch.status
             : "N/A",
         actStatus: 
-          projectStatusMatch && projectStatusMatch.actStatus
-            ? projectStatusMatch.actStatus
+          projectLinkMatch && projectLinkMatch.actStatus
+            ? projectLinkMatch.actStatus
             : "-",
         salesByHcmcate,
         profitByHcmcate,
@@ -197,7 +197,7 @@ export function useSummaryData() {
         hcmMargin,
       };
     });
-  }, [unitInfo, classInfo, salesData, profitData, mdStatusData, projectStatusData, basePlan, unitsData]);
+  }, [unitInfo, classInfo, salesData, profitData, mdStatusData, projectLinkData, basePlan, unitsData]);
 
   return summaryData;
 }
@@ -219,7 +219,7 @@ export const generateSizeLabel = (unit: Record<string, any>, uInfo: any, selecte
     if (selectedLabels.includes('Status') && uInfo?.status) parts.push(`Status: ${uInfo.status}`);
     if (selectedLabels.includes('MD Status') && uInfo?.mdStatus) parts.push(`MD Status: ${uInfo.mdStatus}`);
     if (selectedLabels.includes('Task') && uInfo?.task) parts.push(`Task: ${uInfo.task}`);
-    if (selectedLabels.includes('Project Status') && uInfo?.projectStatus) parts.push(`Project Status: ${uInfo.projectStatus}`);
+    if (selectedLabels.includes('Project Link') && uInfo?.projectLink) parts.push(`Project Link: ${uInfo.projectLink}`);
     if (selectedLabels.includes('Act: Status') && uInfo?.actStatus) parts.push(`Act: Status: ${uInfo.actStatus}`);
     
     if (selectedLabels.includes('Sales') && uInfo?.salesAmount !== undefined) parts.push(`Sales: ${formatMoney(uInfo.salesAmount)}`);

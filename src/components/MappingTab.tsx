@@ -5,7 +5,8 @@ import SummaryTab from "./SummaryTab";
 import UnitInfoTab from "./UnitInfoTab";
 import MDStatusTab from "./MDStatusTab";
 import ProjectStatusTab from "./ProjectStatusTab";
-import { Table2, Activity, Briefcase, FileSpreadsheet } from "lucide-react";
+import ProjectLinkTab from "./ProjectLinkTab";
+import { Table2, Activity, Briefcase, FileSpreadsheet, Link } from "lucide-react";
 import { MappingSubTabType } from "../types";
 
 export default React.memo(function MappingTab() {
@@ -17,6 +18,7 @@ export default React.memo(function MappingTab() {
     { id: "unit-info", label: "Unit Info", icon: Table2 },
     { id: "md-status", label: "MD Status", icon: Activity },
     { id: "project-status", label: "Project Status", icon: Briefcase },
+    { id: "project-link", label: "Project Link", icon: Link },
   ];
 
   return (
@@ -62,6 +64,7 @@ export default React.memo(function MappingTab() {
         {activeSubTab === "unit-info" && <UnitInfoTab />}
         {activeSubTab === "md-status" && <MDStatusTab />}
         {activeSubTab === "project-status" && <ProjectStatusTab />}
+        {activeSubTab === "project-link" && <ProjectLinkTab />}
       </div>
     </div>
   );

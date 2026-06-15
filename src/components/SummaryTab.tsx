@@ -212,12 +212,12 @@ export default function SummaryTab() {
       summary: getUniqueCount("task"),
     },
     {
-      key: "projectStatus",
-      label: "Project Status",
+      key: "projectLink",
+      label: "Project Link",
       renderCell: (val: any) => val,
       filterType: "select",
-      filterOptions: getUniqueOptions("projectStatus"),
-      summary: getUniqueCount("projectStatus"),
+      filterOptions: getUniqueOptions("projectLink"),
+      summary: getUniqueCount("projectLink"),
     },
     {
       key: "actStatus",
