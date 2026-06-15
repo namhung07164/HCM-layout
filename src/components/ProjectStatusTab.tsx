@@ -74,6 +74,7 @@ export default function ProjectStatusTab() {
         unitLink: unitLinkValue,
         projectName: row.unit || '',
         status: parentUnitRow.status || '',
+        actStatus: parentUnitRow.actStatus || '',
         task: parentUnitRow.task || '',
         startDate: parentUnitRow.startDate || '',
         endDate: parentUnitRow.endDate || '',
@@ -128,6 +129,12 @@ export default function ProjectStatusTab() {
       renderCell: renderTextCell('status')
     },
     { 
+      key: 'actStatus', 
+      label: 'Act. Status', 
+      summary: getUniqueCount('actStatus'),
+      renderCell: renderTextCell('actStatus')
+    },
+    { 
       key: 'task', 
       label: 'Task',
       summary: getUniqueCount('task'),
@@ -138,12 +145,13 @@ export default function ProjectStatusTab() {
   ], [projectStatus, renderTextCell, renderUnitCell, renderUnitLinkCell]);
 
   const importConfig = React.useMemo(() => ({
-    expectedHeaders: ['project name', 'unit', 'unit link', 'status', 'start date', 'end date', 'task', 'update'],
+    expectedHeaders: ['project name', 'unit', 'unit link', 'status', 'act status', 'start date', 'end date', 'task', 'update'],
     mapping: (row: any) => ({
       projectName: row['project name'] || row['projectName'] || row['Project Name'] || '',
       unit: row['unit'] || row['Unit'] || '',
       unitLink: row['unit link'] || row['unitLink'] || row['Unit Link'] || row['Unit link'] || '',
       status: row['status'] || row['Status'] || '',
+      actStatus: row['act status'] || row['actStatus'] || row['Act Status'] || row['Act. Status'] || '',
       startDate: standardizeDateToMMDDYYYY(row['start date'] || row['startDate'] || row['Start Date'] || ''),
       endDate: standardizeDateToMMDDYYYY(row['end date'] || row['endDate'] || row['End Date'] || ''),
       task: row['task'] || row['Task'] || '',

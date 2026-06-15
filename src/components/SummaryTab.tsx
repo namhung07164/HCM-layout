@@ -220,6 +220,14 @@ export default function SummaryTab() {
       summary: getUniqueCount("projectStatus"),
     },
     {
+      key: "actStatus",
+      label: "Act. Status",
+      renderCell: (val: any) => val,
+      filterType: "select",
+      filterOptions: getUniqueOptions("actStatus"),
+      summary: getUniqueCount("actStatus"),
+    },
+    {
       key: "status",
       label: "Status",
       filterType: "select",

@@ -27,6 +27,26 @@ export default function MDStatusTab() {
     'Rejected'
   ];
 
+  const uniqueUnits = React.useMemo(() => {
+    return Array.from(new Set(mdStatus.map(p => p.unit).filter(Boolean))).sort();
+  }, [mdStatus]);
+
+  const handleUnitLinkChange = React.useCallback((row: MDStatusInfo, updateRow: (newRow: MDStatusInfo) => void, unitLinkValue: string) => {
+    const parentUnitRow = mdStatus.find(p => p.unit === unitLinkValue);
+    
+    if (parentUnitRow) {
+      updateRow({
+        ...row,
+        unitLink: unitLinkValue,
+        brandCode: parentUnitRow.brandCode || '',
+        brandName: parentUnitRow.brandName || '',
+        status: parentUnitRow.status || '',
+      });
+    } else {
+      updateRow({ ...row, unitLink: unitLinkValue });
+    }
+  }, [mdStatus]);
+
   const renderUnitCell = React.useCallback(() => (val: any, row: MDStatusInfo, updateRow: (newRow: MDStatusInfo) => void, isLocked: boolean) => {
     const activeUnits = summaryData.filter(u => u.status !== 'Unactive' && u.status !== 'unact' && u.status !== 'Inactive');
     const options = activeUnits.map(u => ({
@@ -50,6 +70,23 @@ export default function MDStatusTab() {
       </div>
     );
   }, [summaryData]);
+
+  const renderUnitLinkCell = React.useCallback(() => (val: any, row: MDStatusInfo, updateRow: (newRow: MDStatusInfo) => void, isLocked: boolean) => {
+    return (
+      <input 
+        type="text"
+        list="unitLinkOptions"
+        value={val || ''}
+        onChange={(e) => handleUnitLinkChange(row, updateRow, e.target.value)}
+        disabled={isLocked}
+        className={cn(
+          "bg-transparent border-0 text-slate-300 w-full outline-none",
+          isLocked ? "bg-transparent opacity-50 cursor-not-allowed" : "cursor-text bg-slate-900/80 hover:bg-slate-800 transition-colors focus:bg-blue-600/20 focus:text-white rounded px-3 py-1.5 shadow-inner shadow-black/40 border border-slate-700/50 hover:border-slate-500 focus:border-blue-500/50 text-xs"
+        )}
+        placeholder="Select Unit..."
+      />
+    );
+  }, [handleUnitLinkChange]);
 
   const renderBrandCodeCell = React.useCallback(() => (val: any, row: MDStatusInfo, updateRow: (newRow: MDStatusInfo) => void, isLocked: boolean) => {
     const options = classInfo.map(c => ({
@@ -118,6 +155,7 @@ export default function MDStatusTab() {
 
   const columns: { key: keyof MDStatusInfo; label: string; summary?: React.ReactNode; renderCell?: any }[] = React.useMemo(() => [
     { key: 'unit', label: 'Unit', summary: getUniqueCount('unit'), renderCell: renderUnitCell() },
+    { key: 'unitLink', label: 'Unit Link', summary: getUniqueCount('unitLink'), renderCell: renderUnitLinkCell() },
     { key: 'brandCode', label: 'Brand Code', summary: getUniqueCount('brandCode'), renderCell: renderBrandCodeCell() },
     { key: 'brandName', label: 'Brand Name', summary: getUniqueCount('brandName'), renderCell: renderBrandNameCell() },
     { 
@@ -125,14 +163,15 @@ export default function MDStatusTab() {
       label: 'Status', 
       renderCell: renderStatusCell()
     },
-  ], [mdStatus, renderUnitCell, renderBrandCodeCell, renderBrandNameCell, renderStatusCell]);
+  ], [mdStatus, renderUnitCell, renderUnitLinkCell, renderBrandCodeCell, renderBrandNameCell, renderStatusCell]);
 
   const importConfig = React.useMemo(() => ({
-    expectedHeaders: ['update', 'brand code', 'brand name', 'status'],
+    expectedHeaders: ['update', 'unit', 'unit link', 'brand code', 'brand name', 'status'],
     mapping: (row: any) => {
       return {
         update: standardizeDateToMMDDYYYY(row['update'] || row['Update'] || row['date'] || row['Date'] || ''),
         unit: row['unit'] || row['Unit'] || '',
+        unitLink: row['unit link'] || row['unitLink'] || row['Unit Link'] || row['Unit link'] || '',
         brandCode: row['brand code'] || row['brandCode'] || row['Brand Code'] || '',
         brandName: row['brand name'] || row['brandName'] || row['Brand Name'] || '',
         status: row['status'] || row['Status'] || ''
@@ -141,13 +180,20 @@ export default function MDStatusTab() {
   }), []);
 
   return (
-    <DataTable
-      title="Dữ Liệu MD Status"
-      description="Quản lý và cập nhật MD Status"
-      columns={columns}
-      data={mdStatus}
-      onDataChange={handleDataChange}
-      importConfig={importConfig}
-    />
+    <>
+      <datalist id="unitLinkOptions">
+        {uniqueUnits.map(unit => (
+          <option key={unit} value={unit} />
+        ))}
+      </datalist>
+      <DataTable
+        title="Dữ Liệu MD Status"
+        description="Quản lý và cập nhật MD Status"
+        columns={columns}
+        data={mdStatus}
+        onDataChange={handleDataChange}
+        importConfig={importConfig}
+      />
+    </>
   );
 }

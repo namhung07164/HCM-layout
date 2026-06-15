@@ -60,6 +60,7 @@ export interface UnitInfo {
 export interface MDStatusInfo {
   update: string;
   unit: string;
+  unitLink?: string;
   brandCode: string;
   brandName: string;
   status: string;
@@ -102,6 +103,7 @@ export interface ProjectStatusInfo {
   unit: string;
   unitLink?: string;
   status: string;
+  actStatus?: string;
   startDate: string;
   endDate: string;
   task: string;
