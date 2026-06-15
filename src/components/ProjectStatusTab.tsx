@@ -62,44 +62,56 @@ export default function ProjectStatusTab() {
     );
   }, [uniqueUnits]);
 
+  const handleUnitLinkChange = React.useCallback((row: ProjectStatusInfo, updateRow: (newRow: ProjectStatusInfo) => void, unitLinkValue: string) => {
+    const parentUnitRow = projectStatus.find(p => p.unit === unitLinkValue);
+    
+    const today = new Date();
+    const formattedDate = `${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}/${today.getFullYear()}`;
+
+    if (parentUnitRow) {
+      updateRow({
+        ...row,
+        unitLink: unitLinkValue,
+        projectName: parentUnitRow.projectName || '',
+        status: parentUnitRow.status || '',
+        task: parentUnitRow.task || '',
+        startDate: parentUnitRow.startDate || '',
+        endDate: parentUnitRow.endDate || '',
+        party: parentUnitRow.party || '',
+        flowStatus: parentUnitRow.flowStatus || '',
+        delegationStatus: parentUnitRow.delegationStatus || '',
+        update: formattedDate
+      });
+    } else {
+      updateRow({ ...row, unitLink: unitLinkValue, update: formattedDate });
+    }
+  }, [projectStatus]);
+
   const renderUnitLinkCell = React.useCallback(() => (val: any, row: ProjectStatusInfo, updateRow: (newRow: ProjectStatusInfo) => void, isLocked: boolean) => {
+    // Generate a unique ID for the datalist based on the row's id or index to avoid conflicts,
+    // but a global one works fine since the options are the same.
     return (
-      <select 
-        value={val || ''} 
-        onChange={(e) => {
-          const selected = e.target.value;
-          const motherUnitData = projectStatus.find(p => p.unit === selected);
-          if (motherUnitData) {
-            updateRow({
-              ...row,
-              unitLink: selected,
-              update: motherUnitData.update || '',
-              party: motherUnitData.party || '',
-              flowStatus: motherUnitData.flowStatus || '',
-              projectName: motherUnitData.projectName || '',
-              status: motherUnitData.status || '',
-              task: motherUnitData.task || '',
-              startDate: motherUnitData.startDate || '',
-              endDate: motherUnitData.endDate || '',
-              delegationStatus: motherUnitData.delegationStatus || '',
-            });
-          } else {
-            updateRow({ ...row, unitLink: selected });
-          }
-        }}
-        disabled={isLocked}
-        className={cn(
-          "w-full bg-slate-900 border border-slate-700 text-slate-300 rounded px-3 py-1.5 text-xs outline-none focus:border-blue-500 transition-all focus:bg-blue-600/20 focus:text-white",
-          isLocked ? "opacity-50 cursor-not-allowed" : "cursor-pointer hover:border-blue-500/50"
-        )}
-      >
-        <option value="">--</option>
-        {uniqueUnits.map(u => (
-          <option key={u} value={u}>{u}</option>
-        ))}
-      </select>
+      <>
+        <input 
+          type="text"
+          list="unitLinkOptions"
+          value={val || ''}
+          onChange={(e) => handleUnitLinkChange(row, updateRow, e.target.value)}
+          disabled={isLocked}
+          className={cn(
+            "bg-transparent border-0 text-slate-300 w-full outline-none",
+            isLocked ? "bg-transparent opacity-50 cursor-not-allowed" : "cursor-text bg-slate-900/80 hover:bg-slate-800 transition-colors focus:bg-blue-600/20 focus:text-white rounded px-3 py-1.5 shadow-inner shadow-black/40 border border-slate-700/50 hover:border-slate-500 focus:border-blue-500/50 text-xs"
+          )}
+          placeholder="Select Unit..."
+        />
+        <datalist id="unitLinkOptions">
+          {uniqueUnits.map(unit => (
+            <option key={unit} value={unit} />
+          ))}
+        </datalist>
+      </>
     );
-  }, [uniqueUnits, projectStatus]);
+  }, [uniqueUnits, handleUnitLinkChange]);
 
   const columns: { key: keyof ProjectStatusInfo; label: string; summary?: React.ReactNode; renderCell?: any }[] = React.useMemo(() => [
     { key: 'update', label: 'Year', summary: getUniqueCount('update'), renderCell: renderTextCell('update') },
@@ -111,9 +123,9 @@ export default function ProjectStatusTab() {
       summary: getUniqueCount('unit'),
       renderCell: renderTextCell('unit')
     },
-    { 
-      key: 'unitLink', 
-      label: 'Unit Link', 
+    {
+      key: 'unitLink',
+      label: 'Unit Link',
       summary: getUniqueCount('unitLink'),
       renderCell: renderUnitLinkCell()
     },
@@ -135,10 +147,11 @@ export default function ProjectStatusTab() {
   ], [projectStatus, renderTextCell, renderUnitCell, renderUnitLinkCell]);
 
   const importConfig = React.useMemo(() => ({
-    expectedHeaders: ['project name', 'unit', 'status', 'start date', 'end date', 'task', 'update'],
+    expectedHeaders: ['project name', 'unit', 'unit link', 'status', 'start date', 'end date', 'task', 'update'],
     mapping: (row: any) => ({
       projectName: row['project name'] || row['projectName'] || row['Project Name'] || '',
       unit: row['unit'] || row['Unit'] || '',
+      unitLink: row['unit link'] || row['unitLink'] || row['Unit Link'] || row['Unit link'] || '',
       status: row['status'] || row['Status'] || '',
       startDate: standardizeDateToMMDDYYYY(row['start date'] || row['startDate'] || row['Start Date'] || ''),
       endDate: standardizeDateToMMDDYYYY(row['end date'] || row['endDate'] || row['End Date'] || ''),
