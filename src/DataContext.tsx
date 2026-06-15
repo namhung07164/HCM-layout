@@ -50,6 +50,7 @@ interface DataContextType {
   isSaving: boolean;
   lastBackup: string | null;
   triggerManualBackup: () => Promise<void>;
+  triggerManualLoad: () => Promise<void>;
   selectLocalFolder: () => Promise<void>;
   hasLocalFolder: boolean;
   needsPermission: boolean;
@@ -360,16 +361,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
       await set('dirHandle', handle); // Save handle to IndexedDB
       setHasLocalFolder(true);
       
-      const loaded = await loadFromHandle(handle);
-      
-      // trigger a backup immediately to create/update the file in the new folder
-      await saveToHandlers(classInfo, actualClassInfo, sales, unitInfo, profits, mdStatus, subFees, projectStatus, basePlan, units, mapUnits, mapVersions, activeMapVersionId, handle);
-      
-      if (loaded) {
-        alert('Đã kết nối và tải dữ liệu từ thư mục cục bộ thành công!');
-      } else {
-        alert('Đã kết nối thư mục mới. Dữ liệu hiện tại sẽ được lưu vào đây.');
-      }
+      alert('Đã kết nối thư mục thành công!');
     } catch(err: any) {
       console.error(err);
       if (err.name !== 'AbortError') {
@@ -687,6 +679,33 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
     await saveToHandlers(classInfo, actualClassInfo, sales, unitInfo, profits, mdStatus, subFees, projectStatus, basePlan, units, mapUnits, mapVersions, activeMapVersionId, undefined, true);
   };
 
+  const triggerManualLoad = async () => {
+    if (!dirHandleRef.current) {
+        alert("Chưa chọn thư mục nào!");
+        return;
+    }
+    const isPermitted = await verifyPermission(dirHandleRef.current, true);
+    if (!isPermitted) {
+         alert("Bạn cần cấp quyền truy cập lại cho thư mục này.");
+         return;
+    }
+    
+    setIsLoading(true);
+    try {
+      const loaded = await loadFromHandle(dirHandleRef.current);
+      if (loaded) {
+          alert('Đọc dữ liệu từ thư mục cục bộ thành công!');
+      } else {
+          alert('Không tìm thấy dữ liệu SheetSyncData.json trong thư mục đã chọn.');
+      }
+    } catch(err: any) {
+        console.error(err);
+        alert('Lỗi khi đọc dữ liệu: ' + err.message);
+    } finally {
+        setIsLoading(false);
+    }
+  };
+
   return (
     <DataContext.Provider value={{
       actualClassInfo,
@@ -726,6 +745,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
       isSaving,
       lastBackup,
       triggerManualBackup,
+      triggerManualLoad,
       selectLocalFolder,
       hasLocalFolder,
       needsPermission,

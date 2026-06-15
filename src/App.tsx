@@ -26,6 +26,7 @@ import {
   Image as ImageIcon,
   Bell,
   Save,
+  Download,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "./lib/utils";
@@ -74,6 +75,7 @@ function MainApp({ store, onSwitchStore }: { store: StoreRegion, onSwitchStore: 
     notifications,
     markAllNotificationsRead,
     triggerManualBackup,
+    triggerManualLoad,
   } = useData();
 
   useEffect(() => {
@@ -341,12 +343,16 @@ function MainApp({ store, onSwitchStore }: { store: StoreRegion, onSwitchStore: 
                       </button>
 
                       {hasLocalFolder && (
-                        <div className="flex flex-col gap-1 w-full">
+                        <div className="flex flex-col gap-1 w-full mt-2">
                           <button
-                            onClick={selectLocalFolder}
-                            className="w-full text-center py-1.5 text-[8px] uppercase tracking-widest text-slate-600 hover:text-slate-400 transition-colors"
+                            onClick={() => triggerManualLoad()}
+                            disabled={isLoading}
+                            className="w-full flex items-center justify-between px-3 py-2 bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-400 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed group"
                           >
-                            Thay đổi thư mục
+                            <div className="flex items-center gap-2">
+                              {isLoading ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+                              <span className="text-[10px] uppercase tracking-widest font-bold">Đọc dữ liệu từ ổ D</span>
+                            </div>
                           </button>
                           <button
                             onClick={() => triggerManualBackup()}
@@ -360,6 +366,12 @@ function MainApp({ store, onSwitchStore }: { store: StoreRegion, onSwitchStore: 
                             <span className="text-[10px] uppercase font-mono text-blue-400/50 group-hover:text-blue-400/80 transition-colors">
                               ⌘S
                             </span>
+                          </button>
+                          <button
+                            onClick={selectLocalFolder}
+                            className="w-full text-center py-1.5 text-[8px] uppercase tracking-widest text-slate-600 hover:text-slate-400 transition-colors"
+                          >
+                            Thay đổi thư mục
                           </button>
                         </div>
                       )}
