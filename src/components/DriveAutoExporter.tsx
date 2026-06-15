@@ -10,14 +10,14 @@ import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 export default function DriveAutoExporter() {
-  const { mapVersions, mapUnits, profits, subFees, mdStatus, projectStatus, projectLink, setMapVersions, activeMapVersionId, setMapUnits } = useData();
+  const { mapVersions, mapUnits, setMapVersions, activeMapVersionId, setMapUnits } = useData();
   const summaryData = useSummaryData();
   const [triggerExport, setTriggerExport] = useState(false);
   const [exportingVersions, setExportingVersions] = useState<MapVersion[] | null>(null);
   const [triggerStatus, setTriggerStatus] = useState<boolean>(false);
   const [lastCheck, setLastCheck] = useState<string>('');
   
-  const { calculateNextVersions } = useDynamicRules(mapUnits, summaryData, profits, subFees, mdStatus, projectStatus, projectLink);
+  const { calculateNextVersions } = useDynamicRules(mapUnits, summaryData);
 
   useEffect(() => {
     console.log("DriveAutoExporter: Setting up layout_trigger snapshot listener");

@@ -10,10 +10,14 @@ export interface SummaryDataItem extends UnitInfo {
   profitByCp: number;
   margin: number;
   marginByCp: number;
+  mgmtFee: number;
   mdStatus: string;
   task: string;
   projectStatus: string;
   actStatus: string;
+  taskDelegation: string;
+  flowStatus: string;
+  party: string;
   salesByHcmcate: number;
   profitByHcmcate: number;
   hcmSalesEffi: number;
@@ -27,6 +31,7 @@ export function useSummaryData() {
     actualClassInfo,
     sales: salesData,
     profits: profitData,
+    subFees: subFeesData,
     mdStatus: mdStatusData,
     projectStatus: projectStatusData,
     projectLink: projectLinkData,
@@ -97,6 +102,18 @@ export function useSummaryData() {
       const margin = salesAmount > 0 ? profitAmount / salesAmount : 0;
       const marginByCp =
         salesByCpAmount > 0 ? profitByCpAmount / salesByCpAmount : 0;
+
+      const subFeesMatches = (subFeesData || []).filter((sf) => {
+        return sf.brandCode && unit.brandCode && sf.brandCode === unit.brandCode;
+      });
+
+      let mgmtFeeAmount = 0;
+      if (subFeesMatches.length > 0) {
+        mgmtFeeAmount = subFeesMatches.reduce(
+          (sum, sf) => sum + (Number(sf?.managementFee) || 0),
+          0,
+        );
+      }
 
       const mdStatusMatch = (mdStatusData || []).find((md) => {
         return md.unit === unit.unit;
@@ -186,6 +203,7 @@ export function useSummaryData() {
         profitByCp: profitByCpAmount,
         margin,
         marginByCp,
+        mgmtFee: mgmtFeeAmount,
         mdStatus: mdStatusMatch ? mdStatusMatch.status : "-",
         task: projectLinkMatch ? projectLinkMatch.task : (projectStatusMatch ? projectStatusMatch.task : "-"),
         projectStatus: (() => {
@@ -198,13 +216,16 @@ export function useSummaryData() {
           projectLinkMatch && projectLinkMatch.actStatus
             ? projectLinkMatch.actStatus
             : (projectStatusMatch && projectStatusMatch.actStatus ? projectStatusMatch.actStatus : "-"),
+        taskDelegation: projectStatusMatch ? projectStatusMatch.delegationStatus || "-" : "-",
+        flowStatus: projectStatusMatch ? projectStatusMatch.flowStatus || "-" : "-",
+        party: projectStatusMatch ? projectStatusMatch.party || "-" : "-",
         salesByHcmcate,
         profitByHcmcate,
         hcmSalesEffi: finalSalesEffi,
         hcmMargin,
       };
     });
-  }, [unitInfo, classInfo, salesData, profitData, mdStatusData, projectStatusData, projectLinkData, basePlan, unitsData]);
+  }, [unitInfo, classInfo, actualClassInfo, salesData, profitData, subFeesData, mdStatusData, projectStatusData, projectLinkData, basePlan, unitsData]);
 
   return summaryData;
 }

@@ -4,12 +4,7 @@ import { SummaryDataItem } from '../lib/summaryData';
 
 export function useDynamicRules(
   units: UnitShape[],
-  summaryData: SummaryDataItem[],
-  profits: any[],
-  subFees: any[],
-  mdStatus: any[],
-  projectStatus: any[],
-  projectLink: any[]
+  summaryData: SummaryDataItem[]
 ) {
   const unitNamesStr = useMemo(() => JSON.stringify(units.map(u => ({ id: u.id, name: u.name }))), [units]);
 
@@ -48,85 +43,32 @@ export function useDynamicRules(
     summaryData.forEach((sumData) => {
       const key = sumData.unit?.toLowerCase();
       if (key && dataMap[key]) {
-        dataMap[key].sales += sumData.salesAmount || 0;
-        dataMap[key].salesByCp += sumData.salesByCp || 0;
-        dataMap[key].salesByHcmcate += sumData.salesByHcmcate || 0;
-        dataMap[key].profitByHcmcate += sumData.profitByHcmcate || 0;
-        dataMap[key].vendorCode = sumData.vendorCode || dataMap[key].vendorCode;
-        dataMap[key].brandCode = sumData.brandCode || dataMap[key].brandCode;
-        dataMap[key].brandName = sumData.brandName || dataMap[key].brandName;
-        dataMap[key].classCode = sumData.classCode || dataMap[key].classCode;
-        dataMap[key].floor = (sumData as any).floor || dataMap[key].floor;
-        if (!dataMap[key].mdStatus) dataMap[key].mdStatus = sumData.mdStatus;
-        if (!dataMap[key].projectStatus) dataMap[key].projectStatus = sumData.projectStatus;
-        if (!dataMap[key].actStatus) dataMap[key].actStatus = sumData.actStatus;
-      }
-    });
-
-    projectStatus.forEach((ps) => {
-      const key = ps.unit?.toLowerCase();
-      if (key && dataMap[key]) {
-        if (!dataMap[key].taskDelegation) dataMap[key].taskDelegation = ps.delegationStatus;
-        if (!dataMap[key].flowStatus) dataMap[key].flowStatus = ps.flowStatus;
-        if (!dataMap[key].party) dataMap[key].party = ps.party;
-      }
-    });
-
-    profits.forEach((p) => {
-      const uInfo = summaryData.find((u) => u.brandCode === p.brandCode);
-      if (uInfo && uInfo.unit) {
-        const key = uInfo.unit.toLowerCase();
-        if (dataMap[key]) {
-          dataMap[key].profit += Number(p.profit) || 0;
-          dataMap[key].profitByCp += Number(p.profitByCp) || 0;
-        }
-      }
-    });
-
-    Object.values(dataMap).forEach((d) => {
-      d.margin = d.sales ? d.profit / d.sales : 0;
-      d.marginByCp = d.salesByCp ? d.profitByCp / d.salesByCp : 0;
-    });
-
-    subFees.forEach((sf) => {
-      const uInfo = summaryData.find((u) => u.brandCode === sf.brandCode);
-      if (uInfo && uInfo.unit) {
-        const key = uInfo.unit.toLowerCase();
-        if (dataMap[key]) {
-          dataMap[key].mgmtFee += Number(sf.managementFee) || 0;
-        }
-      }
-    });
-
-    mdStatus.forEach((m) => {
-      if (m.unit) {
-        const key = m.unit.toLowerCase();
-        if (dataMap[key]) {
-          dataMap[key].mdStatus = m.status;
-        }
-      }
-    });
-
-    projectStatus.forEach((ps) => {
-      if (ps.unit) {
-        const key = ps.unit.toLowerCase();
-        if (dataMap[key]) {
-          dataMap[key].projectStatus = ps.status;
-        }
-      }
-    });
-
-    projectLink.forEach((pl) => {
-      if (pl.unit) {
-        const key = pl.unit.toLowerCase();
-        if (dataMap[key]) {
-          dataMap[key].projectLink = pl.status;
-        }
+        dataMap[key].sales = sumData.salesAmount || 0;
+        dataMap[key].salesByCp = sumData.salesByCp || 0;
+        dataMap[key].salesByHcmcate = sumData.salesByHcmcate || 0;
+        dataMap[key].profit = sumData.profitAmount || 0;
+        dataMap[key].profitByCp = sumData.profitByCp || 0;
+        dataMap[key].profitByHcmcate = sumData.profitByHcmcate || 0;
+        dataMap[key].margin = sumData.margin || 0;
+        dataMap[key].marginByCp = sumData.marginByCp || 0;
+        dataMap[key].mgmtFee = sumData.mgmtFee || 0;
+        dataMap[key].mdStatus = sumData.mdStatus || "";
+        dataMap[key].projectStatus = sumData.projectStatus || "";
+        dataMap[key].projectLink = sumData.projectLink || ""; // Will be overridden or already exists in projectStatus
+        dataMap[key].actStatus = sumData.actStatus || "";
+        dataMap[key].taskDelegation = sumData.taskDelegation || "";
+        dataMap[key].flowStatus = sumData.flowStatus || "";
+        dataMap[key].party = sumData.party || "";
+        dataMap[key].vendorCode = sumData.vendorCode || "";
+        dataMap[key].brandCode = sumData.brandCode || "";
+        dataMap[key].brandName = sumData.brandName || "";
+        dataMap[key].classCode = sumData.classCode || "";
+        dataMap[key].floor = (sumData as any).floor || "";
       }
     });
 
     return dataMap;
-  }, [unitNamesStr, summaryData, profits, subFees, mdStatus, projectStatus, projectLink]);
+  }, [unitNamesStr, summaryData]);
 
   const calculateNextVersions = (versions: MapVersion[]): { nextVersions: MapVersion[], hasChanges: boolean } => {
     let hasChanges = false;
