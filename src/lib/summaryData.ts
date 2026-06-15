@@ -12,7 +12,7 @@ export interface SummaryDataItem extends UnitInfo {
   marginByCp: number;
   mdStatus: string;
   task: string;
-  projectLink: string;
+  projectStatus: string;
   actStatus: string;
   salesByHcmcate: number;
   profitByHcmcate: number;
@@ -28,6 +28,7 @@ export function useSummaryData() {
     sales: salesData,
     profits: profitData,
     mdStatus: mdStatusData,
+    projectStatus: projectStatusData,
     projectLink: projectLinkData,
     basePlan,
     units: unitsData,
@@ -99,6 +100,10 @@ export function useSummaryData() {
 
       const mdStatusMatch = (mdStatusData || []).find((md) => {
         return md.unit === unit.unit;
+      });
+
+      const projectStatusMatch = (projectStatusData || []).find((ps) => {
+        return ps.unit === unit.unit;
       });
 
       const projectLinkMatch = (projectLinkData || []).find((ps) => {
@@ -182,22 +187,24 @@ export function useSummaryData() {
         margin,
         marginByCp,
         mdStatus: mdStatusMatch ? mdStatusMatch.status : "-",
-        task: projectLinkMatch ? projectLinkMatch.task : "-",
-        projectLink:
-          projectLinkMatch && projectLinkMatch.status
-            ? projectLinkMatch.status
-            : "N/A",
+        task: projectLinkMatch ? projectLinkMatch.task : (projectStatusMatch ? projectStatusMatch.task : "-"),
+        projectStatus: (() => {
+          const ps = projectStatusMatch?.status;
+          const pl = projectLinkMatch?.status;
+          if (ps && pl) return `${ps} + ${pl}`;
+          return ps || pl || "N/A";
+        })(),
         actStatus: 
           projectLinkMatch && projectLinkMatch.actStatus
             ? projectLinkMatch.actStatus
-            : "-",
+            : (projectStatusMatch && projectStatusMatch.actStatus ? projectStatusMatch.actStatus : "-"),
         salesByHcmcate,
         profitByHcmcate,
         hcmSalesEffi: finalSalesEffi,
         hcmMargin,
       };
     });
-  }, [unitInfo, classInfo, salesData, profitData, mdStatusData, projectLinkData, basePlan, unitsData]);
+  }, [unitInfo, classInfo, salesData, profitData, mdStatusData, projectStatusData, projectLinkData, basePlan, unitsData]);
 
   return summaryData;
 }
@@ -219,7 +226,7 @@ export const generateSizeLabel = (unit: Record<string, any>, uInfo: any, selecte
     if (selectedLabels.includes('Status') && uInfo?.status) parts.push(`Status: ${uInfo.status}`);
     if (selectedLabels.includes('MD Status') && uInfo?.mdStatus) parts.push(`MD Status: ${uInfo.mdStatus}`);
     if (selectedLabels.includes('Task') && uInfo?.task) parts.push(`Task: ${uInfo.task}`);
-    if (selectedLabels.includes('Project Link') && uInfo?.projectLink) parts.push(`Project Link: ${uInfo.projectLink}`);
+    if (selectedLabels.includes('Project Status') && uInfo?.projectStatus) parts.push(`Project Status: ${uInfo.projectStatus}`);
     if (selectedLabels.includes('Act: Status') && uInfo?.actStatus) parts.push(`Act: Status: ${uInfo.actStatus}`);
     
     if (selectedLabels.includes('Sales') && uInfo?.salesAmount !== undefined) parts.push(`Sales: ${formatMoney(uInfo.salesAmount)}`);
