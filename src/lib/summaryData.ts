@@ -13,6 +13,9 @@ export interface SummaryDataItem extends UnitInfo {
   mdStatus: string;
   task: string;
   projectStatus: string;
+  startDate?: string;
+  endDate?: string;
+  unitLink?: string;
   salesByHcmcate: number;
   profitByHcmcate: number;
   hcmSalesEffi: number;
@@ -171,6 +174,8 @@ export function useSummaryData() {
 
       return {
         ...unit,
+        unit: unit.unit,
+        unitLink: projectStatusMatch?.unitLink || "",
         className: matchedClass?.name || matchedActualClass?.name || "",
         status: statusVal,
         update: unit?.update || "-",
@@ -181,11 +186,10 @@ export function useSummaryData() {
         margin,
         marginByCp,
         mdStatus: mdStatusMatch ? mdStatusMatch.status : "-",
-        task: projectStatusMatch ? projectStatusMatch.task : "-",
-        projectStatus:
-          projectStatusMatch && projectStatusMatch.status
-            ? projectStatusMatch.status
-            : "N/A",
+        task: projectStatusMatch && projectStatusMatch.task ? projectStatusMatch.task : "-",
+        projectStatus: projectStatusMatch && projectStatusMatch.status ? projectStatusMatch.status : "N/A",
+        startDate: projectStatusMatch?.startDate || "-",
+        endDate: projectStatusMatch?.endDate || "-",
         salesByHcmcate,
         profitByHcmcate,
         hcmSalesEffi: finalSalesEffi,

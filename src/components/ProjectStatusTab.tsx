@@ -62,6 +62,45 @@ export default function ProjectStatusTab() {
     );
   }, [uniqueUnits]);
 
+  const renderUnitLinkCell = React.useCallback(() => (val: any, row: ProjectStatusInfo, updateRow: (newRow: ProjectStatusInfo) => void, isLocked: boolean) => {
+    return (
+      <select 
+        value={val || ''} 
+        onChange={(e) => {
+          const selected = e.target.value;
+          const motherUnitData = projectStatus.find(p => p.unit === selected);
+          if (motherUnitData) {
+            updateRow({
+              ...row,
+              unitLink: selected,
+              update: motherUnitData.update || '',
+              party: motherUnitData.party || '',
+              flowStatus: motherUnitData.flowStatus || '',
+              projectName: motherUnitData.projectName || '',
+              status: motherUnitData.status || '',
+              task: motherUnitData.task || '',
+              startDate: motherUnitData.startDate || '',
+              endDate: motherUnitData.endDate || '',
+              delegationStatus: motherUnitData.delegationStatus || '',
+            });
+          } else {
+            updateRow({ ...row, unitLink: selected });
+          }
+        }}
+        disabled={isLocked}
+        className={cn(
+          "w-full bg-slate-900 border border-slate-700 text-slate-300 rounded px-3 py-1.5 text-xs outline-none focus:border-blue-500 transition-all focus:bg-blue-600/20 focus:text-white",
+          isLocked ? "opacity-50 cursor-not-allowed" : "cursor-pointer hover:border-blue-500/50"
+        )}
+      >
+        <option value="">--</option>
+        {uniqueUnits.map(u => (
+          <option key={u} value={u}>{u}</option>
+        ))}
+      </select>
+    );
+  }, [uniqueUnits, projectStatus]);
+
   const columns: { key: keyof ProjectStatusInfo; label: string; summary?: React.ReactNode; renderCell?: any }[] = React.useMemo(() => [
     { key: 'update', label: 'Year', summary: getUniqueCount('update'), renderCell: renderTextCell('update') },
     { key: 'party', label: 'Store', summary: getUniqueCount('party'), renderCell: renderTextCell('party') },
@@ -71,6 +110,12 @@ export default function ProjectStatusTab() {
       label: 'Unit', 
       summary: getUniqueCount('unit'),
       renderCell: renderTextCell('unit')
+    },
+    { 
+      key: 'unitLink', 
+      label: 'Unit Link', 
+      summary: getUniqueCount('unitLink'),
+      renderCell: renderUnitLinkCell()
     },
     { key: 'projectName', label: 'Project Name', summary: getUniqueCount('projectName'), renderCell: renderTextCell('projectName') },
     { 
@@ -87,7 +132,7 @@ export default function ProjectStatusTab() {
     },
     { key: 'startDate', label: 'Start Date', renderCell: renderTextCell('startDate') },
     { key: 'endDate', label: 'End Date', renderCell: renderTextCell('endDate') },
-  ], [projectStatus, renderTextCell, renderUnitCell]);
+  ], [projectStatus, renderTextCell, renderUnitCell, renderUnitLinkCell]);
 
   const importConfig = React.useMemo(() => ({
     expectedHeaders: ['project name', 'unit', 'status', 'start date', 'end date', 'task', 'update'],

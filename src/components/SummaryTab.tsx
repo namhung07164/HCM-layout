@@ -124,7 +124,12 @@ export default function SummaryTab() {
       filterOptions: getUniqueOptions("classCode"),
       summary: getUniqueCount("classCode"),
     },
-    { key: "unit", label: "Unit", renderCell: (val: any) => val, summary: getUniqueCount("unit") },
+    { 
+      key: "unit", 
+      label: "Unit", 
+      renderCell: (val: any, row: any) => row.unitLink || val, 
+      summary: getUniqueCount("unit") 
+    },
     { key: "size", label: "Size", renderCell: (val: any) => val, summary: getSum("size") },
     {
       key: "vendorCode",
@@ -218,6 +223,20 @@ export default function SummaryTab() {
       filterType: "select",
       filterOptions: getUniqueOptions("projectStatus"),
       summary: getUniqueCount("projectStatus"),
+    },
+    {
+      key: "startDate",
+      label: "Start Date",
+      renderCell: (val: any) => val,
+      filterType: "select",
+      filterOptions: getUniqueOptions("startDate"),
+    },
+    {
+      key: "endDate",
+      label: "End Date",
+      renderCell: (val: any) => val,
+      filterType: "select",
+      filterOptions: getUniqueOptions("endDate"),
     },
     {
       key: "status",

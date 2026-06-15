@@ -100,6 +100,7 @@ export interface ProjectStatusInfo {
   update: string;
   projectName: string;
   unit: string;
+  unitLink?: string;
   status: string;
   startDate: string;
   endDate: string;
