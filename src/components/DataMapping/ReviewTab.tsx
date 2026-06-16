@@ -37,18 +37,9 @@ export default function ReviewTab({ units, setUnits, versions, setVersions, acti
   const activeVersion = versions.find(v => v.id === activeVersionId);
   const summaryData = useSummaryData();
 
-  const [selectedLabels, setSelectedLabels] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem('review_selected_labels');
-      if (saved) return JSON.parse(saved);
-    } catch(e) {}
-    return ['Unit ID', 'Size SQM'];
-  });
-  const [showLabelSettings, setShowLabelSettings] = useState(false);
+  const { store, reviewSelectedLabels: selectedLabels, setReviewSelectedLabels: setSelectedLabels } = useData();
 
-  useEffect(() => {
-    localStorage.setItem('review_selected_labels', JSON.stringify(selectedLabels));
-  }, [selectedLabels]);
+  const [showLabelSettings, setShowLabelSettings] = useState(false);
 
   // Optimize units rendering by pre-calculating styles and filtering
   const styledUnits = React.useMemo(() => {

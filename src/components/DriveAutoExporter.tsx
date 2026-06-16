@@ -10,7 +10,7 @@ import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 export default function DriveAutoExporter() {
-  const { mapVersions, mapUnits, setMapVersions, activeMapVersionId, setMapUnits } = useData();
+  const { mapVersions, mapUnits, setMapVersions, activeMapVersionId, setMapUnits, store, reviewSelectedLabels } = useData();
   const summaryData = useSummaryData();
   const [triggerExport, setTriggerExport] = useState(false);
   const [exportingVersions, setExportingVersions] = useState<MapVersion[] | null>(null);
@@ -236,13 +236,7 @@ export default function DriveAutoExporter() {
           format="r2_jpeg"
           paperSize={(localStorage.getItem('export_paper_size') as any) || 'a4'}
           quality={(localStorage.getItem('export_quality') as any) || 'medium'}
-          selectedLabels={(() => {
-            try {
-              const saved = localStorage.getItem('review_selected_labels');
-              if (saved) return JSON.parse(saved);
-            } catch(e) {}
-            return ['Unit ID', 'Size SQM'];
-          })()}
+          selectedLabels={reviewSelectedLabels}
           onComplete={handleExportComplete}
         />
       )}

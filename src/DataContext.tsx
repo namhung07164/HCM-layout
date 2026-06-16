@@ -28,6 +28,7 @@ interface DataContextType {
   mapUnits: UnitShape[];
   mapVersions: MapVersion[];
   activeMapVersionId: string | null;
+  reviewSelectedLabels: string[];
 
   setActualClassInfo: (data: ActualClassInfo[]) => void;
   setClassInfo: (data: ClassInfo[]) => void;
@@ -64,6 +65,7 @@ interface DataContextType {
   store: StoreRegion;
   isAppLocked: boolean;
   setIsAppLocked: (v: boolean) => void;
+  setReviewSelectedLabels: (labels: string[]) => void;
 }
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
@@ -115,6 +117,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
   const [mapUnits, setMapUnitsState] = useState<UnitShape[]>([]);
   const [mapVersions, setMapVersionsState] = useState<MapVersion[]>([]);
   const [activeMapVersionId, setActiveMapVersionIdState] = useState<string | null>(null);
+  const [reviewSelectedLabels, setReviewSelectedLabelsState] = useState<string[]>(['Unit ID', 'Size SQM']);
   const [spreadsheetId, setSpreadsheetIdState] = useState<string | null>(null);
 
   const [isLoading, setIsLoading] = useState(true);
@@ -237,6 +240,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
       if (parsed.mapUnits) setMapUnitsState(parsed.mapUnits);
       if (parsed.mapVersions) setMapVersionsState(parsed.mapVersions);
       if (parsed.activeMapVersionId) setActiveMapVersionIdState(parsed.activeMapVersionId);
+      if (parsed.reviewSelectedLabels) setReviewSelectedLabelsState(parsed.reviewSelectedLabels);
       
       let salesData = parsed.sales || [];
       let profitsData = parsed.profits || [];
@@ -310,6 +314,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
         setMapUnitsState(data.mapUnits || []);
         setMapVersionsState(data.mapVersions || []);
         setActiveMapVersionIdState(data.activeMapVersionId || null);
+        if (data.reviewSelectedLabels) setReviewSelectedLabelsState(data.reviewSelectedLabels);
         
         let salesData = data.sales || [];
         let profitsData = data.profits || [];
@@ -384,7 +389,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
   const saveToHandlers = async (
     c: ClassInfo[], ac: ActualClassInfo[], s: SalesInfo[], u: UnitInfo[], p: ProfitInfo[], md: MDStatusInfo[], 
     sf: SubFeeInfo[], ps: ProjectStatusInfo[], pl: ProjectLinkInfo[], bp: BasePlanInfo[], un: UnitDataInfo[],
-    mu: UnitShape[], mv: MapVersion[], amvId: string | null,
+    mu: UnitShape[], mv: MapVersion[], amvId: string | null, rsl: string[],
     customHandle?: any,
     isManualClick: boolean = false
   ) => {
@@ -408,6 +413,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
           mapUnits: mu,
           mapVersions: mv,
           activeMapVersionId: amvId,
+          reviewSelectedLabels: rsl,
           migrated_scaled_1000: true, // Set flag to avoid re-migration
           r2Config: {
             accountId: localStorage.getItem('r2_account_id') || '',
@@ -460,6 +466,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
             mapUnits: mu,
             mapVersions: mv,
             activeMapVersionId: amvId,
+            reviewSelectedLabels: rsl,
             lastUpdated: timestamp,
             migrated_scaled_1000: true, // Set flag to avoid re-migration
             r2Config: {
@@ -503,13 +510,13 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
     }
 
     saveTimeoutRef.current = setTimeout(() => {
-      saveToHandlers(classInfo, actualClassInfo, sales, unitInfo, profits, mdStatus, subFees, projectStatus, projectLink, basePlan, units, mapUnits, mapVersions, activeMapVersionId);
+      saveToHandlers(classInfo, actualClassInfo, sales, unitInfo, profits, mdStatus, subFees, projectStatus, projectLink, basePlan, units, mapUnits, mapVersions, activeMapVersionId, reviewSelectedLabels);
     }, 2000); // Wait 2 seconds of silence before saving
-
+  
     return () => {
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
     };
-  }, [classInfo, actualClassInfo, sales, unitInfo, profits, mdStatus, subFees, projectStatus, projectLink, basePlan, units, mapUnits, mapVersions, activeMapVersionId]);
+  }, [classInfo, actualClassInfo, sales, unitInfo, profits, mdStatus, subFees, projectStatus, projectLink, basePlan, units, mapUnits, mapVersions, activeMapVersionId, reviewSelectedLabels]);
 
   const setActualClassInfo = (data: ActualClassInfo[]) => {
     setActualClassInfoState(data);
@@ -691,7 +698,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
   };
 
   const triggerManualBackup = async () => {
-    await saveToHandlers(classInfo, actualClassInfo, sales, unitInfo, profits, mdStatus, subFees, projectStatus, projectLink, basePlan, units, mapUnits, mapVersions, activeMapVersionId, undefined, true);
+    await saveToHandlers(classInfo, actualClassInfo, sales, unitInfo, profits, mdStatus, subFees, projectStatus, projectLink, basePlan, units, mapUnits, mapVersions, activeMapVersionId, reviewSelectedLabels, undefined, true);
   };
 
   const triggerManualLoad = async () => {
@@ -739,6 +746,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
       mapUnits,
       mapVersions,
       activeMapVersionId,
+      reviewSelectedLabels,
       setClassInfo, 
       setSales, 
       setUnitInfo,
@@ -755,6 +763,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
       setMapUnits: setMapUnitsState,
       setMapVersions: setMapVersionsState,
       setActiveMapVersionId: setActiveMapVersionIdState,
+      setReviewSelectedLabels: setReviewSelectedLabelsState,
       syncWithGoogleSheets,
       spreadsheetId,
       setSpreadsheetId,

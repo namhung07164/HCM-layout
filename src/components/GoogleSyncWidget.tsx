@@ -53,6 +53,7 @@ export default function GoogleSyncWidget() {
             mapUnits: dataContext.mapUnits,
             mapVersions: dataContext.mapVersions,
             activeMapVersionId: dataContext.activeMapVersionId,
+            reviewSelectedLabels: dataContext.reviewSelectedLabels,
             migrated_scaled_1000: true,
             r2Config: {
                 accountId: localStorage.getItem('r2_account_id') || '',
@@ -141,6 +142,7 @@ export default function GoogleSyncWidget() {
         if (data.mapUnits) dataContext.setMapUnits(data.mapUnits);
         if (data.mapVersions) dataContext.setMapVersions(data.mapVersions);
         if (data.activeMapVersionId) dataContext.setActiveMapVersionId(data.activeMapVersionId);
+        if (data.reviewSelectedLabels) dataContext.setReviewSelectedLabels(data.reviewSelectedLabels);
         
         if (data.r2Config) {
             if (data.r2Config.accountId) localStorage.setItem('r2_account_id', data.r2Config.accountId);
