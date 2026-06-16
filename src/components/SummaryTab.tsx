@@ -228,6 +228,22 @@ export default function SummaryTab() {
       summary: getUniqueCount("actStatus"),
     },
     {
+      key: "startDate",
+      label: "Start Date",
+      renderCell: (val: any) => val,
+      filterType: "select",
+      filterOptions: getUniqueOptions("startDate").filter((opt) => opt.value !== "-"),
+      summary: getUniqueCount("startDate"),
+    },
+    {
+      key: "endDate",
+      label: "End Date",
+      renderCell: (val: any) => val,
+      filterType: "select",
+      filterOptions: getUniqueOptions("endDate").filter((opt) => opt.value !== "-"),
+      summary: getUniqueCount("endDate"),
+    },
+    {
       key: "status",
       label: "Status",
       filterType: "select",

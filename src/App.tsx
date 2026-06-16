@@ -345,27 +345,27 @@ function MainApp({ store, onSwitchStore }: { store: StoreRegion, onSwitchStore: 
                       {hasLocalFolder && (
                         <div className="flex flex-col gap-1 w-full mt-2">
                           <button
-                            onClick={() => triggerManualLoad()}
-                            disabled={isLoading}
-                            className="w-full flex items-center justify-between px-3 py-2 bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-400 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed group"
-                          >
-                            <div className="flex items-center gap-2">
-                              {isLoading ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
-                              <span className="text-[10px] uppercase tracking-widest font-bold">Đọc dữ liệu từ ổ D</span>
-                            </div>
-                          </button>
-                          <button
                             onClick={() => triggerManualBackup()}
                             disabled={isSaving}
                             className="w-full flex items-center justify-between px-3 py-2 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed group"
                           >
                             <div className="flex items-center gap-2">
                               {isSaving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
-                              <span className="text-[10px] uppercase tracking-widest font-bold">Lưu Dữ Liệu Ngay</span>
+                              <span className="text-[10px] uppercase tracking-widest font-bold">Lưu Dữ Liệu Cục Bộ (Ổ D)</span>
                             </div>
                             <span className="text-[10px] uppercase font-mono text-blue-400/50 group-hover:text-blue-400/80 transition-colors">
                               ⌘S
                             </span>
+                          </button>
+                          <button
+                            onClick={() => triggerManualLoad()}
+                            disabled={isLoading}
+                            className="w-full flex items-center justify-between px-3 py-2 bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-400 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed group"
+                          >
+                            <div className="flex items-center gap-2">
+                              {isLoading ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+                              <span className="text-[10px] uppercase tracking-widest font-bold">Đọc Dữ Liệu (Từ Ổ D)</span>
+                            </div>
                           </button>
                           <button
                             onClick={selectLocalFolder}

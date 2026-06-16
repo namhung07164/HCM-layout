@@ -18,6 +18,8 @@ export interface SummaryDataItem extends UnitInfo {
   taskDelegation: string;
   flowStatus: string;
   party: string;
+  startDate: string;
+  endDate: string;
   salesByHcmcate: number;
   profitByHcmcate: number;
   hcmSalesEffi: number;
@@ -224,6 +226,18 @@ export function useSummaryData() {
         taskDelegation: projectStatusMatch ? projectStatusMatch.delegationStatus || "-" : "-",
         flowStatus: projectStatusMatch ? projectStatusMatch.flowStatus || "-" : "-",
         party: projectStatusMatch ? projectStatusMatch.party || "-" : "-",
+        startDate: (() => {
+          const psDate = projectStatusMatch?.startDate;
+          const plDate = projectLinkMatch?.startDate;
+          if (psDate && plDate && psDate !== plDate) return `${psDate} / ${plDate}`;
+          return psDate || plDate || "-";
+        })(),
+        endDate: (() => {
+          const psDate = projectStatusMatch?.endDate;
+          const plDate = projectLinkMatch?.endDate;
+          if (psDate && plDate && psDate !== plDate) return `${psDate} / ${plDate}`;
+          return psDate || plDate || "-";
+        })(),
         salesByHcmcate,
         profitByHcmcate,
         hcmSalesEffi: finalSalesEffi,

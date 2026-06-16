@@ -47,6 +47,7 @@ export default function GoogleSyncWidget() {
             mdStatus: dataContext.mdStatus,
             subFees: dataContext.subFees,
             projectStatus: dataContext.projectStatus,
+            projectLink: dataContext.projectLink,
             basePlan: dataContext.basePlan,
             units: dataContext.units,
             mapUnits: dataContext.mapUnits,
@@ -134,6 +135,7 @@ export default function GoogleSyncWidget() {
         if (data.mdStatus) dataContext.setMdStatus(data.mdStatus);
         if (data.subFees) dataContext.setSubFees(data.subFees);
         if (data.projectStatus) dataContext.setProjectStatus(data.projectStatus);
+        if (data.projectLink) dataContext.setProjectLink(data.projectLink);
         if (data.basePlan) dataContext.setBasePlan(data.basePlan);
         if (data.units) dataContext.setUnits(data.units);
         if (data.mapUnits) dataContext.setMapUnits(data.mapUnits);
