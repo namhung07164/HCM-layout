@@ -45,22 +45,20 @@ export default function ProjectLinkTab() {
 
   const renderUnitCell = React.useCallback(() => (val: any, row: ProjectLinkInfo, updateRow: (newRow: ProjectLinkInfo) => void, isLocked: boolean) => {
     return (
-      <select 
-        value={val || ''} 
+      <input 
+        type="text"
+        list="projectLinkUnitOptions"
+        value={val || ''}
         onChange={(e) => updateRow({ ...row, unit: e.target.value })}
         disabled={isLocked}
         className={cn(
-          "w-full bg-slate-900 border border-slate-700 text-slate-300 rounded px-3 py-1.5 text-xs outline-none focus:border-blue-500 transition-all focus:bg-blue-600/20 focus:text-white",
-          isLocked ? "opacity-50 cursor-not-allowed" : "cursor-pointer hover:border-blue-500/50"
+          "bg-transparent border-0 text-slate-300 w-full outline-none",
+          isLocked ? "bg-transparent opacity-50 cursor-not-allowed" : "cursor-text bg-slate-900/80 hover:bg-slate-800 transition-colors focus:bg-blue-600/20 focus:text-white rounded px-3 py-1.5 shadow-inner shadow-black/40 border border-slate-700/50 hover:border-slate-500 focus:border-blue-500/50 text-xs"
         )}
-      >
-        <option value="">--Select Unit--</option>
-        {uniqueUnits.map(unit => (
-          <option key={unit} value={unit}>{unit}</option>
-        ))}
-      </select>
+        placeholder="..."
+      />
     );
-  }, [uniqueUnits]);
+  }, []);
 
   const handleUnitLinkChange = React.useCallback((row: ProjectLinkInfo, updateRow: (newRow: ProjectLinkInfo) => void, unitLinkValue: string) => {
     const parentUnitRow = projectStatus.find(p => p.unit === unitLinkValue);
@@ -113,7 +111,7 @@ export default function ProjectLinkTab() {
       key: 'unit', 
       label: 'Unit', 
       summary: getUniqueCount('unit'),
-      renderCell: renderTextCell('unit')
+      renderCell: renderUnitCell()
     },
     {
       key: 'unitLink',
