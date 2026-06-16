@@ -169,10 +169,13 @@ export default function DataTable<T extends Record<string, any>>({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const updateFileInputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const { isSaving } = useData();
+  const { isSaving, isAppLocked, setIsAppLocked } = useData();
   const [filters, setFilters] = useState<Record<string, string>>(defaultFilters || {});
   const [showFilters, setShowFilters] = useState(false);
-  const [isLocked, setIsLocked] = useState(true);
+  
+  const isLocked = isAppLocked;
+  const setIsLocked = setIsAppLocked;
+  
   const [showPasswordPrompt, setShowPasswordPrompt] = useState(false);
   const [password, setPassword] = useState('');
   const [containerHeight, setContainerHeight] = useState(400);

@@ -62,6 +62,8 @@ interface DataContextType {
   spreadsheetId: string | null;
   setSpreadsheetId: (id: string | null) => void;
   store: StoreRegion;
+  isAppLocked: boolean;
+  setIsAppLocked: (v: boolean) => void;
 }
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
@@ -121,6 +123,8 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
   const [hasLocalFolder, setHasLocalFolder] = useState(false);
   const [needsPermission, setNeedsPermission] = useState(false);
   
+  const [isAppLocked, setIsAppLocked] = useState(true);
+
   const dirHandleRef = useRef<any>(null);
   const isInitialMount = useRef(true);
 
@@ -764,7 +768,9 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
       needsPermission,
       setNeedsPermission,
       requestFolderPermission,
-      store
+      store,
+      isAppLocked,
+      setIsAppLocked
     }}>
       {children}
     </DataContext.Provider>
