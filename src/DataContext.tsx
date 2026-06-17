@@ -458,9 +458,32 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
         }
 
         if (hasPerm) {
-          const fileHandle = await activeHandle.getFileHandle(`SheetSyncData_${store}.json`, { create: true });
-          const writable = await fileHandle.createWritable();
           const timestamp = new Date().toISOString();
+          const targetFile = `SheetSyncData_${store}.json`;
+          
+          let fileHandle = null;
+          let writable = null;
+          let retries = 3;
+          while (retries > 0) {
+            try {
+              fileHandle = await activeHandle.getFileHandle(targetFile, { create: true });
+              writable = await fileHandle.createWritable();
+              break;
+            } catch (err: any) {
+              retries--;
+              if (err.name === 'InvalidStateError' || (err.message && err.message.includes('cached in an interface object'))) {
+                // If it fails with InvalidStateError, the file is possibly locked or obsolete due to Drive sync.
+                // Try to forcefully remove the entry and retry.
+                try {
+                  await activeHandle.removeEntry(targetFile);
+                } catch (e) {}
+              }
+              if (retries === 0) throw err;
+              await new Promise(r => setTimeout(r, 500));
+            }
+          }
+          if (!writable) throw new Error('Could not create writable stream');
+
           // Use 0 indentation for performance and smaller file size
           await writable.write(JSON.stringify({ 
             classInfo: c, 
@@ -492,13 +515,31 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
           await writable.close();
 
           try {
-            const sharedHandle = await activeHandle.getFileHandle('SheetSyncData_Shared.json', { create: true });
-            const sharedWritable = await sharedHandle.createWritable();
-            await sharedWritable.write(JSON.stringify({
-              classInfo: c,
-              actualClassInfo: ac
-            }));
-            await sharedWritable.close();
+            let sharedRetries = 3;
+            let sharedWritable = null;
+            while (sharedRetries > 0) {
+              try {
+                const sharedHandle = await activeHandle.getFileHandle('SheetSyncData_Shared.json', { create: true });
+                sharedWritable = await sharedHandle.createWritable();
+                break;
+              } catch (err: any) {
+                sharedRetries--;
+                if (err.name === 'InvalidStateError' || (err.message && err.message.includes('cached in an interface object'))) {
+                  try {
+                    await activeHandle.removeEntry('SheetSyncData_Shared.json');
+                  } catch (e) {}
+                }
+                if (sharedRetries === 0) throw err;
+                await new Promise(r => setTimeout(r, 500));
+              }
+            }
+            if (sharedWritable) {
+                await sharedWritable.write(JSON.stringify({
+                  classInfo: c,
+                  actualClassInfo: ac
+                }));
+                await sharedWritable.close();
+            }
           } catch(e) {
             console.warn('Failed to save shared data locally', e);
           }
