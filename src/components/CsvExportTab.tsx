@@ -3,7 +3,7 @@ import * as XLSX from 'xlsx';
 
 const TAB_CONFIG: Record<string, any> = {
   project: { id: 'project', label: 'Xuất Project', columns: ['store', 'location', 'year', 'code', 'name'], fileNamePrefix: 'taka_projects_exported', icon: 'ph-file-csv', exportType: 'csv' },
-  task: { id: 'task', label: 'Xuất Task detail', columns: ['store', 'location', 'projectCode', 'YEAR', 'Task name', 'start', 'finish', 'party', 'Predecessor', 'delegation'], fileNamePrefix: 'taka_tasks_exported', icon: 'ph-list-dashes', exportType: 'csv' },
+  task: { id: 'task', label: 'Xuất Task detail', columns: ['store', 'location', 'projectYear', 'projectCode', 'Task name', 'start', 'finish', 'duration', 'party', 'predecessor', 'delegation'], fileNamePrefix: 'taka_tasks_exported', icon: 'ph-list-dashes', exportType: 'csv' },
   budget: { id: 'budget', label: 'Xuất Task budget', columns: ['location', 'code', 'name', 'budget', 'actual/forecast', 'variance', 'type', 'note'], fileNamePrefix: 'taka_projects_budget_exported', icon: 'ph-calculator', exportType: 'csv' },
   cost: { id: 'cost', label: 'Xuất Cost', columns: ['projectCode', 'budget', 'actual', 'firstPaid', 'firstPaidAt', 'secondPaid', 'secondPaidAt', 'thirdPaid', 'thirdPaidAt', 'supportingFee', 'description', 'vendor'], fileNamePrefix: 'taka_costs_exported', icon: 'ph-receipt', exportType: 'csv' },
   investment: { 
@@ -17,10 +17,10 @@ const TAB_CONFIG: Record<string, any> = {
   mass_task: { 
     id: 'mass_task', 
     label: 'Mass-import Task', 
-    columns: ['store', 'location', 'projectCode', 'YEAR', 'Task name', 'start', 'finish', 'party', 'Predecessor', 'delegation'], 
+    columns: ['store', 'location', 'projectYear', 'projectCode', 'Task name', 'start', 'finish', 'duration', 'party', 'predecessor', 'delegation'], 
     fileNamePrefix: 'taka_mass_tasks_exported', 
     icon: 'ph-copy', 
-    exportType: 'excel' 
+    exportType: 'csv' 
   },
   brand: { 
     id: 'brand', 
@@ -406,6 +406,63 @@ export default function CsvExportTab() {
     return val !== undefined && val !== null ? val : '';
   };
 
+  const previewData = useMemo(() => {
+    if (!excelData || excelData.length === 0) return [];
+    
+    if (activeTab === 'mass_task') {
+      if (!templateData || templateData.length === 0) return [];
+      
+      const finalJson: any[] = [];
+      excelData.forEach(proj => {
+        if (finalJson.length >= 10) return; // Only need 10 for preview
+        const projStore = getCellValue(proj, 'store');
+        const projLocation = getCellValue(proj, 'location');
+        const projCode = getCellValue(proj, 'projectCode');
+        const projYear = getCellValue(proj, 'projectYear') || getCellValue(proj, 'YEAR');
+        
+        templateData.forEach(taskDef => {
+          if (finalJson.length >= 10) return;
+          const taskName = taskDef['Task name'] || '';
+          let start = taskDef['start'] || '';
+          let finish = taskDef['finish'] || '';
+          if (typeof start === 'number') start = XLSX.SSF.format('m/d/yyyy h:mm', start);
+          if (typeof finish === 'number') finish = XLSX.SSF.format('m/d/yyyy h:mm', finish);
+          
+          const party = taskDef['party'] || '';
+          const duration = taskDef['duration'] !== undefined ? taskDef['duration'] : '';
+          let pred = taskDef['Predecessor'] || taskDef['predecessor'] || '';
+          if (pred !== undefined && pred !== null && String(pred).trim() !== '') {
+             pred = `${projCode}-${pred}`;
+          }
+          let delegation = taskDef['delegation'] !== undefined ? taskDef['delegation'] : (constantMapping['delegation'] || 'true');
+          
+          finalJson.push({
+            'store': projStore,
+            'location': projLocation,
+            'projectYear': projYear,
+            'projectCode': projCode,
+            'Task name': taskName,
+            'start': start,
+            'finish': finish,
+            'duration': duration,
+            'party': party,
+            'predecessor': pred,
+            'delegation': delegation
+          });
+        });
+      });
+      return finalJson;
+    }
+    
+    return excelData.slice(0, 10).map((row) => {
+      const parsedRow: any = {};
+      TAB_CONFIG[activeTab].columns.forEach((c: string) => {
+        parsedRow[c] = getCellValue(row, c);
+      });
+      return parsedRow;
+    });
+  }, [activeTab, excelData, templateData, mapping, constantMapping]);
+
   const exportData = () => {
     const targetCols = TAB_CONFIG[activeTab].columns;
     
@@ -454,7 +511,7 @@ export default function CsvExportTab() {
         const projStore = getCellValue(proj, 'store');
         const projLocation = getCellValue(proj, 'location');
         const projCode = getCellValue(proj, 'projectCode');
-        const projYear = getCellValue(proj, 'YEAR');
+        const projYear = getCellValue(proj, 'projectYear') || getCellValue(proj, 'YEAR');
         
         templateData.forEach(taskDef => {
           const taskName = taskDef['Task name'] || '';
@@ -464,7 +521,8 @@ export default function CsvExportTab() {
           if (typeof finish === 'number') finish = XLSX.SSF.format('m/d/yyyy h:mm', finish);
           
           const party = taskDef['party'] || '';
-          let pred = taskDef['Predecessor'] || '';
+          const duration = taskDef['duration'] !== undefined ? taskDef['duration'] : '';
+          let pred = taskDef['Predecessor'] || taskDef['predecessor'] || '';
           if (pred !== undefined && pred !== null && String(pred).trim() !== '') {
              pred = `${projCode}-${pred}`;
           }
@@ -473,22 +531,38 @@ export default function CsvExportTab() {
           finalJson.push({
             'store': projStore,
             'location': projLocation,
+            'projectYear': projYear,
             'projectCode': projCode,
-            'YEAR': projYear,
             'Task name': taskName,
             'start': start,
             'finish': finish,
+            'duration': duration,
             'party': party,
-            'Predecessor': pred,
+            'predecessor': pred,
             'delegation': delegation
           });
         });
       });
       
-      const wb = XLSX.utils.book_new();
-      const ws = XLSX.utils.json_to_sheet(finalJson, { header: targetCols });
-      XLSX.utils.book_append_sheet(wb, ws, "Mass-import Tasks");
-      XLSX.writeFile(wb, `${TAB_CONFIG[activeTab].fileNamePrefix}.xlsx`);
+      const csvRows = [targetCols.join(',')];
+      finalJson.forEach(row => {
+        const values = targetCols.map((col: string) => {
+          let val = row[col];
+          if (val === undefined || val === null) val = '';
+          return `"${String(val).replace(/"/g, '""')}"`;
+        });
+        csvRows.push(values.join(','));
+      });
+      
+      const csvContent = '\uFEFF' + csvRows.join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `${TAB_CONFIG[activeTab].fileNamePrefix}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
     } else {
       const csvRows = [targetCols.join(',')];
       excelData.forEach(row => {
@@ -551,7 +625,7 @@ export default function CsvExportTab() {
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="font-bold flex items-center gap-2 text-slate-700">
-                  <i className="ph ph-upload-simple text-indigo-600 text-lg"></i> 1. Tải file
+                  <i className="ph ph-upload-simple text-indigo-600 text-lg"></i> 1. {activeTab === 'mass_task' ? 'Tải file mass project name' : 'Tải file'}
                 </h2>
                 {file && (
                   <button 
@@ -680,7 +754,7 @@ export default function CsvExportTab() {
                 </button>
               </div>
               
-              {excelData.length > 0 ? (
+              {previewData.length > 0 ? (
                 <div className="overflow-x-auto flex-1 rounded-xl border border-slate-200">
                   <table className="w-full text-sm text-left">
                     <thead className="bg-slate-50 text-slate-600 border-b border-slate-200 uppercase text-xs tracking-wider">
@@ -691,10 +765,10 @@ export default function CsvExportTab() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {excelData.slice(0, 10).map((row, i) => (
+                      {previewData.map((row: any, i: number) => (
                         <tr key={i} className="hover:bg-slate-50 transition-colors">
                           {TAB_CONFIG[activeTab].columns.map((c: string) => {
-                            let displayVal = getCellValue(row, c);
+                            let displayVal = row[c];
 
                             return (
                               <td key={c} className="px-4 py-3 text-slate-600 truncate max-w-[150px]" title={displayVal || ''}>
@@ -706,16 +780,18 @@ export default function CsvExportTab() {
                       ))}
                     </tbody>
                   </table>
-                  {excelData.length > 10 && (
+                  {excelData.length > 0 && (
                     <div className="text-center py-3 text-xs text-slate-400 bg-slate-50 border-t border-slate-100">
-                      Đang hiển thị 10 dòng đầu tiên. File tải xuống sẽ chứa toàn bộ {excelData.length} dòng.
+                      Đang hiển thị tối đa 10 dòng đầu tiên. File tải xuống sẽ chứa toàn bộ {activeTab === 'mass_task' ? `dữ liệu từ ${excelData.length} project` : `${excelData.length} dòng`}.
                     </div>
                   )}
                 </div>
               ) : (
                 <div className="flex-1 flex flex-col items-center justify-center text-slate-400 bg-slate-50/50 rounded-xl border border-dashed border-slate-200">
                   <i className="ph ph-file-search text-6xl mb-4 text-slate-300"></i>
-                  <p className="font-medium">Vui lòng tải lên một file để xem dữ liệu</p>
+                  <p className="font-medium">
+                    {activeTab === 'mass_task' && (!templateFile || excelData.length === 0) ? 'Vui lòng tải lên cả file mass project name và file Attached' : 'Vui lòng tải lên một file để xem dữ liệu'}
+                  </p>
                 </div>
               )}
             </div>
