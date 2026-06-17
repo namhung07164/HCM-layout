@@ -242,6 +242,17 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
       if (parsed.activeMapVersionId) setActiveMapVersionIdState(parsed.activeMapVersionId);
       if (parsed.reviewSelectedLabels) setReviewSelectedLabelsState(parsed.reviewSelectedLabels);
       
+      try {
+        const sharedHandle = await handle.getFileHandle('SheetSyncData_Shared.json');
+        const sharedFile = await sharedHandle.getFile();
+        const sharedText = await sharedFile.text();
+        const sharedParsed = JSON.parse(sharedText);
+        if (sharedParsed.classInfo) setClassInfoState(sharedParsed.classInfo);
+        if (sharedParsed.actualClassInfo) setActualClassInfoState(sharedParsed.actualClassInfo);
+      } catch (e) {
+        console.log('No shared class/brand info found, using store-specific data.');
+      }
+
       let salesData = parsed.sales || [];
       let profitsData = parsed.profits || [];
       // One-time migration: divide by 1000 if not already migrated
@@ -479,6 +490,18 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
             }
           }));
           await writable.close();
+
+          try {
+            const sharedHandle = await activeHandle.getFileHandle('SheetSyncData_Shared.json', { create: true });
+            const sharedWritable = await sharedHandle.createWritable();
+            await sharedWritable.write(JSON.stringify({
+              classInfo: c,
+              actualClassInfo: ac
+            }));
+            await sharedWritable.close();
+          } catch(e) {
+            console.warn('Failed to save shared data locally', e);
+          }
           setLastBackup(timestamp);
           if (isManualClick) {
               alert(`Lưu thành công file SheetSyncData_${store}.json vào thư mục được chọn!`);

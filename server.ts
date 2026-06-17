@@ -116,16 +116,22 @@ async function startServer() {
       const store = req.query.store || 'HCM';
       const persistFile = path.join(DATA_DIR, `persist_${store}.json`);
       const legacyFile = path.join(DATA_DIR, 'persist.json');
+      const sharedFile = path.join(DATA_DIR, 'persist_Shared.json');
 
+      let responseData: any = { classInfo: [], sales: [] };
       if (fs.existsSync(persistFile)) {
-        const raw = fs.readFileSync(persistFile, 'utf-8');
-        res.json(JSON.parse(raw));
+        responseData = JSON.parse(fs.readFileSync(persistFile, 'utf-8'));
       } else if (store === 'HCM' && fs.existsSync(legacyFile)) {
-        const raw = fs.readFileSync(legacyFile, 'utf-8');
-        res.json(JSON.parse(raw));
-      } else {
-        res.json({ classInfo: [], sales: [] });
+        responseData = JSON.parse(fs.readFileSync(legacyFile, 'utf-8'));
       }
+
+      if (fs.existsSync(sharedFile)) {
+        const sharedData = JSON.parse(fs.readFileSync(sharedFile, 'utf-8'));
+        if (sharedData.classInfo) responseData.classInfo = sharedData.classInfo;
+        if (sharedData.actualClassInfo) responseData.actualClassInfo = sharedData.actualClassInfo;
+      }
+
+      res.json(responseData);
     } catch (error: any) {
       res.status(500).json({ error: 'Failed to load persistent data' });
     }
@@ -135,12 +141,21 @@ async function startServer() {
     try {
       const store = req.query.store || 'HCM';
       const persistFile = path.join(DATA_DIR, `persist_${store}.json`);
+      const sharedFile = path.join(DATA_DIR, 'persist_Shared.json');
       const bodyData = req.body;
       const data = { 
         ...bodyData,
         lastUpdated: new Date().toISOString()
       };
+      
+      const sharedData = {
+        classInfo: data.classInfo,
+        actualClassInfo: data.actualClassInfo
+      };
+      
       fs.writeFileSync(persistFile, JSON.stringify(data, null, 2));
+      fs.writeFileSync(sharedFile, JSON.stringify(sharedData, null, 2));
+      
       res.json({ success: true, timestamp: data.lastUpdated });
     } catch (error: any) {
       res.status(500).json({ error: 'Failed to save backup' });

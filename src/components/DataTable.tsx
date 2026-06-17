@@ -1,7 +1,7 @@
 import React, { useRef, useState, useMemo, useEffect } from 'react';
 import Papa from 'papaparse';
 import { Upload, Trash2, Database, Search, Lock, Unlock, Download, X, RefreshCw, Eye, EyeOff, Plus, Copy } from 'lucide-react';
-import { cn } from '../lib/utils';
+import { cn, autoFormatRow } from '../lib/utils';
 import { useData } from '../DataContext';
 import { motion, AnimatePresence } from 'motion/react';
 import { FixedSizeList } from 'react-window';
@@ -191,6 +191,7 @@ export default function DataTable<T extends Record<string, any>>({
     return new Set();
   });
   const [showColumnToggle, setShowColumnToggle] = useState(false);
+  const [enableAutoFormat, setEnableAutoFormat] = useState(true);
 
   useEffect(() => {
     localStorage.setItem(`datatable_hidden_${title}`, JSON.stringify(Array.from(hiddenColumnKeys)));
@@ -256,6 +257,10 @@ export default function DataTable<T extends Record<string, any>>({
           importedData = results.data.map(importConfig.mapping);
         } else {
           importedData = results.data as T[];
+        }
+
+        if (enableAutoFormat) {
+          importedData = importedData.map(autoFormatRow);
         }
 
         // Add default update date to imported data
@@ -528,6 +533,17 @@ export default function DataTable<T extends Record<string, any>>({
 
           {!readonly && (
             <>
+              <label className="flex items-center gap-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest whitespace-nowrap px-2 cursor-pointer hover:text-slate-300">
+                <input 
+                  type="checkbox" 
+                  checked={enableAutoFormat} 
+                  onChange={(e) => setEnableAutoFormat(e.target.checked)}
+                  className="rounded border-slate-700 bg-slate-800 text-blue-500 focus:ring-blue-500/50 w-3.5 h-3.5 cursor-pointer"
+                  disabled={isLocked}
+                />
+                Auto-Format
+              </label>
+
               <button
                 onClick={handleImportClick}
                 disabled={isLocked}

@@ -5,7 +5,41 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+export function autoFormatRow(row: any): any {
+  if (!row || typeof row !== 'object') return row;
+
+  const newRow = { ...row };
+  for (const key in newRow) {
+    if (Object.prototype.hasOwnProperty.call(newRow, key)) {
+      const val = newRow[key];
+      if (typeof val === 'string') {
+        const lowerKey = key.toLowerCase();
+        
+        // Auto-format dates
+        if (lowerKey.includes('date') || lowerKey.includes('ngày') || lowerKey.includes('ngay') || lowerKey.includes('time') || lowerKey.includes('update')) {
+          newRow[key] = standardizeDateToMMDDYYYY(val);
+        }
+        
+        // Auto-format phone numbers
+        if (lowerKey.includes('phone') || lowerKey.includes('điện thoại') || lowerKey.includes('sđt') || lowerKey.includes('sdt') || lowerKey.includes('tel')) {
+          let cleaned = val.replace(/\D/g, '');
+          if (cleaned.startsWith('84') && cleaned.length >= 10) {
+            cleaned = '0' + cleaned.substring(2);
+          } else if (cleaned.length >= 9 && !cleaned.startsWith('0')) {
+             if (cleaned.length === 9) cleaned = '0' + cleaned;
+          }
+          if (cleaned) {
+             newRow[key] = cleaned;
+          }
+        }
+      }
+    }
+  }
+  return newRow;
+}
+
 export function standardizeDateToMMDDYYYY(dateStr: string): string {
+
   if (!dateStr) return '';
   const str = String(dateStr).trim();
 

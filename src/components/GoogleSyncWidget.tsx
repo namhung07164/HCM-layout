@@ -75,6 +75,18 @@ export default function GoogleSyncWidget() {
             mimeType: "application/json"
         });
 
+        const sharedBlob = new Blob([JSON.stringify({
+            classInfo: dataContext.classInfo,
+            actualClassInfo: dataContext.actualClassInfo
+        })], { type: "application/json" });
+
+        await uploadFileToDrive({
+            accessToken: token,
+            fileBlob: sharedBlob,
+            fileName: `SheetSyncData_Shared.json`,
+            mimeType: "application/json"
+        });
+
         alert("Đã lưu toàn bộ dữ liệu lên Google Drive thành công!");
     } catch (err: any) {
         console.error(err);
@@ -127,6 +139,29 @@ export default function GoogleSyncWidget() {
         if (!fetchRes.ok) throw new Error("Failed to download file from Google Drive");
         
         const data = await fetchRes.json();
+        
+        try {
+            const sharedQuery = encodeURIComponent(`name='SheetSyncData_Shared.json' and trashed=false`);
+            const sharedListRes = await fetch(`https://www.googleapis.com/drive/v3/files?q=${sharedQuery}&fields=files(id,name)`, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            if (sharedListRes.ok) {
+                const sharedListData = await sharedListRes.json();
+                if (sharedListData.files && sharedListData.files.length > 0) {
+                    const sharedFileId = sharedListData.files[0].id;
+                    const sharedFetchRes = await fetch(`https://www.googleapis.com/drive/v3/files/${sharedFileId}?alt=media`, {
+                        headers: { Authorization: `Bearer ${token}` }
+                    });
+                    if (sharedFetchRes.ok) {
+                        const sharedData = await sharedFetchRes.json();
+                        if (sharedData.classInfo) data.classInfo = sharedData.classInfo;
+                        if (sharedData.actualClassInfo) data.actualClassInfo = sharedData.actualClassInfo;
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn("Could not load shared data", e);
+        }
         
         if (data.classInfo) dataContext.setClassInfo(data.classInfo);
         if (data.actualClassInfo) dataContext.setActualClassInfo(data.actualClassInfo);
