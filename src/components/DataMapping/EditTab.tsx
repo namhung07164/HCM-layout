@@ -645,6 +645,17 @@ export default function EditTab({ units, setUnits, versions, setVersions, active
     }
   }, [selectedId, activeTool, units]);
 
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isDrawing) {
+        setIsDrawing(false);
+        setNewShape(null);
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [isDrawing]);
+
   const handleDelete = () => {
     if (selectedId) {
         handleSetUnitsWithHistory(units.filter(u => u.id !== selectedId));

@@ -34,11 +34,12 @@ import InputTab from "./components/InputTab";
 import DashboardTab from "./components/DashboardTab";
 import DataMappingTab from "./components/DataMappingTab";
 import MappingTab from "./components/MappingTab";
+import CsvExportTab from "./components/CsvExportTab";
 import ReviewOnlyView from "./components/DataMapping/ReviewOnlyView";
 import { useData } from "./DataContext";
 import DriveAutoExporter from "./components/DriveAutoExporter";
 
-type TabId = "input" | "dashboard" | "dataMapping" | "mapping" | "picture";
+type TabId = "input" | "dashboard" | "dataMapping" | "mapping" | "picture" | "csv";
 
 import GoogleSyncWidget from "./components/GoogleSyncWidget";
 import {DataProvider} from "./DataContext";
@@ -62,6 +63,7 @@ function MainApp({ store, onSwitchStore }: { store: StoreRegion, onSwitchStore: 
     { id: "mapping", label: "Mapping", icon: Split, shortcut: "⌥+M" },
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, shortcut: "⌥+D" },
     { id: "picture", label: "Picture", icon: ImageIcon, shortcut: "⌥+P" },
+    { id: "csv", label: "CSV", icon: Table2, shortcut: "⌥+C" },
   ];
 
   const {
@@ -108,6 +110,12 @@ function MainApp({ store, onSwitchStore }: { store: StoreRegion, onSwitchStore: 
       if ((e.ctrlKey || e.metaKey) && e.altKey && e.key.toLowerCase() === 'p') {
         e.preventDefault();
         setActiveTab('picture');
+      }
+
+      // CSV shortcut (Ctrl+Alt+C)
+      if ((e.ctrlKey || e.metaKey) && e.altKey && e.key.toLowerCase() === 'c') {
+        e.preventDefault();
+        setActiveTab('csv');
       }
     };
 
@@ -557,9 +565,11 @@ function MainApp({ store, onSwitchStore }: { store: StoreRegion, onSwitchStore: 
                 <DashboardTab />
               ) : activeTab === "mapping" ? (
                 <MappingTab />
-              ) : (
+              ) : activeTab === "picture" ? (
                 <DataMappingTab />
-              )}
+              ) : activeTab === "csv" ? (
+                <CsvExportTab />
+              ) : null}
             </motion.div>
           </AnimatePresence>
         </div>
