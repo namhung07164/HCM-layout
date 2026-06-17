@@ -460,32 +460,8 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
         if (hasPerm) {
           const timestamp = new Date().toISOString();
           const targetFile = `SheetSyncData_${store}.json`;
-          
-          let fileHandle = null;
-          let writable = null;
-          let retries = 3;
-          while (retries > 0) {
-            try {
-              fileHandle = await activeHandle.getFileHandle(targetFile, { create: true });
-              writable = await fileHandle.createWritable();
-              break;
-            } catch (err: any) {
-              retries--;
-              if (err.name === 'InvalidStateError' || (err.message && err.message.includes('cached in an interface object'))) {
-                // If it fails with InvalidStateError, the file is possibly locked or obsolete due to Drive sync.
-                // Try to forcefully remove the entry and retry.
-                try {
-                  await activeHandle.removeEntry(targetFile);
-                } catch (e) {}
-              }
-              if (retries === 0) throw err;
-              await new Promise(r => setTimeout(r, 500));
-            }
-          }
-          if (!writable) throw new Error('Could not create writable stream');
-
-          // Use 0 indentation for performance and smaller file size
-          await writable.write(JSON.stringify({ 
+          const tempFile = `.__tmp_${targetFile}`;
+          const jsonPayload = JSON.stringify({ 
             classInfo: c, 
             actualClassInfo: ac,
             sales: s, 
@@ -511,34 +487,61 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
               cfZoneId: localStorage.getItem('cf_zone_id') || '',
               cfApiToken: localStorage.getItem('cf_api_token') || ''
             }
-          }));
-          await writable.close();
+          });
+
+          // Write to temp file then rename to bypass Chrome network drive timestamp mismatch bugs
+          try {
+            try { await activeHandle.removeEntry(tempFile); } catch(e) {}
+            const tempFileHandle = await activeHandle.getFileHandle(tempFile, { create: true });
+            const tempWritable = await tempFileHandle.createWritable();
+            await tempWritable.write(jsonPayload);
+            await tempWritable.close();
+
+            // Try to move/rename
+            if (typeof (tempFileHandle as any).move === 'function') {
+               try { await activeHandle.removeEntry(targetFile); } catch(e) {}
+               await (tempFileHandle as any).move(targetFile);
+            } else {
+               throw new Error("move_not_supported"); // Trigger fallback
+            }
+          } catch(err: any) {
+            // Fallback for older browsers
+            try { await activeHandle.removeEntry(targetFile); } catch(e) {}
+            const targetHandle = await activeHandle.getFileHandle(targetFile, { create: true });
+            const targetWritable = await targetHandle.createWritable();
+            await targetWritable.write(jsonPayload);
+            await targetWritable.close();
+            try { await activeHandle.removeEntry(tempFile); } catch(e) {}
+          }
 
           try {
-            let sharedRetries = 3;
-            let sharedWritable = null;
-            while (sharedRetries > 0) {
-              try {
-                const sharedHandle = await activeHandle.getFileHandle('SheetSyncData_Shared.json', { create: true });
-                sharedWritable = await sharedHandle.createWritable();
-                break;
-              } catch (err: any) {
-                sharedRetries--;
-                if (err.name === 'InvalidStateError' || (err.message && err.message.includes('cached in an interface object'))) {
-                  try {
-                    await activeHandle.removeEntry('SheetSyncData_Shared.json');
-                  } catch (e) {}
-                }
-                if (sharedRetries === 0) throw err;
-                await new Promise(r => setTimeout(r, 500));
+            const targetSharedFile = 'SheetSyncData_Shared.json';
+            const tempSharedFile = `.__tmp_${targetSharedFile}`;
+            const sharedPayload = JSON.stringify({
+              classInfo: c,
+              actualClassInfo: ac
+            });
+
+            try {
+              try { await activeHandle.removeEntry(tempSharedFile); } catch(e) {}
+              const tempSharedHandle = await activeHandle.getFileHandle(tempSharedFile, { create: true });
+              const tempSharedWritable = await tempSharedHandle.createWritable();
+              await tempSharedWritable.write(sharedPayload);
+              await tempSharedWritable.close();
+
+              if (typeof (tempSharedHandle as any).move === 'function') {
+                 try { await activeHandle.removeEntry(targetSharedFile); } catch(e) {}
+                 await (tempSharedHandle as any).move(targetSharedFile);
+              } else {
+                 throw new Error("move_not_supported");
               }
-            }
-            if (sharedWritable) {
-                await sharedWritable.write(JSON.stringify({
-                  classInfo: c,
-                  actualClassInfo: ac
-                }));
-                await sharedWritable.close();
+            } catch(err: any) {
+              try { await activeHandle.removeEntry(targetSharedFile); } catch(e) {}
+              const targetSharedHandle = await activeHandle.getFileHandle(targetSharedFile, { create: true });
+              const targetSharedWritable = await targetSharedHandle.createWritable();
+              await targetSharedWritable.write(sharedPayload);
+              await targetSharedWritable.close();
+              try { await activeHandle.removeEntry(tempSharedFile); } catch(e) {}
             }
           } catch(e) {
             console.warn('Failed to save shared data locally', e);
