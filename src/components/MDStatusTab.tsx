@@ -7,7 +7,7 @@ import AutocompleteCell from './AutocompleteCell';
 import { useSummaryData } from '../lib/summaryData';
 
 export default function MDStatusTab() {
-  const { mdStatus, setMdStatus, classInfo } = useData();
+  const { mdStatus, setMdStatus, classInfo, projectStatus } = useData();
   const summaryData = useSummaryData();
 
   const handleDataChange = (newData: MDStatusInfo[]) => {
@@ -72,21 +72,20 @@ export default function MDStatusTab() {
   }, [summaryData]);
 
   const renderUnitLinkCell = React.useCallback(() => (val: any, row: MDStatusInfo, updateRow: (newRow: MDStatusInfo) => void, isLocked: boolean) => {
+    const parentUnits = Array.from(new Set(projectStatus.map(p => String(p.unit || '')).filter(Boolean)));
+    const options = parentUnits.map(unit => ({ value: unit, label: '', item: unit }));
     return (
-      <input 
-        type="text"
-        list="unitLinkOptions"
+      <AutocompleteCell 
         value={val || ''}
-        onChange={(e) => handleUnitLinkChange(row, updateRow, e.target.value)}
-        disabled={isLocked}
-        className={cn(
-          "bg-transparent border-0 text-slate-300 w-full outline-none",
-          isLocked ? "bg-transparent opacity-50 cursor-not-allowed" : "cursor-text bg-slate-900/80 hover:bg-slate-800 transition-colors focus:bg-blue-600/20 focus:text-white rounded px-3 py-1.5 shadow-inner shadow-black/40 border border-slate-700/50 hover:border-slate-500 focus:border-blue-500/50 text-xs"
-        )}
+        onChange={(newVal) => handleUnitLinkChange(row, updateRow, newVal)}
+        onSelect={(item) => handleUnitLinkChange(row, updateRow, item)}
+        options={options}
+        minChars={0}
+        isLocked={isLocked}
         placeholder="Select Unit..."
       />
     );
-  }, [handleUnitLinkChange]);
+  }, [handleUnitLinkChange, projectStatus]);
 
   const renderBrandCodeCell = React.useCallback(() => (val: any, row: MDStatusInfo, updateRow: (newRow: MDStatusInfo) => void, isLocked: boolean) => {
     const options = classInfo.map(c => ({
@@ -135,21 +134,17 @@ export default function MDStatusTab() {
   }, [classInfo]);
 
   const renderStatusCell = React.useCallback(() => (val: any, row: MDStatusInfo, updateRow: (newRow: MDStatusInfo) => void, isLocked: boolean) => {
+    const options = statusOptions.map(opt => ({ value: opt, label: '', item: opt }));
     return (
-      <select 
+      <AutocompleteCell 
         value={val || ''} 
-        onChange={(e) => updateRow({ ...row, status: e.target.value })}
-        disabled={isLocked}
-        className={cn(
-          "w-full bg-slate-700 border border-slate-600 text-slate-100 rounded px-3 py-1.5 text-xs outline-none focus:border-blue-500 transition-all focus:bg-slate-600 focus:text-white",
-          isLocked ? "opacity-50 cursor-not-allowed" : "cursor-pointer hover:border-blue-500/50"
-        )}
-      >
-        <option className="bg-slate-700 text-white" value="">--Select--</option>
-        {statusOptions.map(opt => (
-          <option className="bg-slate-700 text-white" key={opt} value={opt}>{opt}</option>
-        ))}
-      </select>
+        onChange={(newVal) => updateRow({ ...row, status: newVal })}
+        onSelect={(item) => updateRow({ ...row, status: item })}
+        options={options}
+        minChars={0}
+        isLocked={isLocked}
+        placeholder="--Select--"
+      />
     );
   }, []);
 

@@ -3,6 +3,7 @@ import DataTable from './DataTable';
 import { ProfitInfo } from '../types';
 import { useData } from '../DataContext';
 import { standardizeDateToMMDDYYYY, cn } from '../lib/utils';
+import AutocompleteCell from './AutocompleteCell';
 
 // Using an extended interface internally for rendering to show 'margin'
 interface EnrichedProfitInfo extends ProfitInfo {
@@ -71,19 +72,20 @@ export default function ProfitTab() {
     });
   }, [profits, sales]);
 
-  const renderTextCell = React.useCallback((key: keyof ProfitInfo) => (val: any, row: ProfitInfo, updateRow: (newRow: ProfitInfo) => void, isLocked: boolean) => (
-    <input 
-      type="text"
-      value={val || ''} 
-      onChange={(e) => updateRow({ ...row, [key]: e.target.value })}
-      disabled={isLocked}
-      className={cn(
-        "bg-transparent border-0 text-slate-300 w-full outline-none",
-        isLocked ? "bg-transparent opacity-50 cursor-not-allowed" : "cursor-text bg-slate-900/50 hover:bg-slate-800/80 focus:bg-blue-900/40 focus:text-blue-100 rounded px-2 py-1.5 transition-all shadow-inner shadow-black/20 border border-slate-700/50 hover:border-slate-600 focus:border-blue-500/50"
-      )}
-      placeholder="..."
-    />
-  ), []);
+  const renderTextCell = React.useCallback((key: keyof ProfitInfo) => (val: any, row: ProfitInfo, updateRow: (newRow: ProfitInfo) => void, isLocked: boolean) => {
+    const options = Array.from(new Set(profits.map(item => String(item[key] || '')).filter(Boolean))).map(opt => ({ value: opt, label: '', item: opt }));
+    return (
+      <AutocompleteCell 
+        value={val || ''} 
+        onChange={(newVal) => updateRow({ ...row, [key]: newVal })}
+        onSelect={(item) => updateRow({ ...row, [key]: item })}
+        options={options}
+        minChars={0}
+        isLocked={isLocked}
+        placeholder="..."
+      />
+    );
+  }, [profits]);
 
   const renderNumericCell = React.useCallback((key: keyof ProfitInfo) => (val: any, row: ProfitInfo, updateRow: (newRow: ProfitInfo) => void, isLocked: boolean) => {
     const [isFocused, setIsFocused] = React.useState(false);

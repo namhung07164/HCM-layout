@@ -345,7 +345,7 @@ export default function ReviewTab({ units, setUnits, versions, setVersions, acti
         dataMap[key].mgmtFee = sumData.mgmtFee || 0;
         dataMap[key].mdStatus = sumData.mdStatus || "";
         dataMap[key].projectStatus = sumData.projectStatus || "";
-        dataMap[key].projectLink = sumData.projectLink || ""; // Will be overridden or already exists in projectStatus
+        dataMap[key].projectLink = (sumData as any).projectLink || ""; // Will be overridden or already exists in projectStatus
         dataMap[key].actStatus = sumData.actStatus || "";
         dataMap[key].taskDelegation = sumData.taskDelegation || "";
         dataMap[key].flowStatus = sumData.flowStatus || "";

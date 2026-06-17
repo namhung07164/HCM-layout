@@ -48,7 +48,27 @@ export default function UnitInfoTab() {
       const key = `${item.floor || ""}|${item.unit || ""}|${item.brandCode || ""}`;
       uniqueMap.set(key, item);
     });
-    setUnitInfo(Array.from(uniqueMap.values()));
+    
+    let deduplicated = Array.from(uniqueMap.values());
+    
+    // Auto-update parent brand names based on children
+    const activeData = deduplicated.filter(r => r.status === "Active" || r.status === "act" || !r.status);
+    
+    deduplicated = deduplicated.map(row => {
+      if (row.unit && !row.unit.match(/\(\d+\)$/)) {
+        const children = activeData.filter(c => c.unit && c.unit.startsWith(`${row.unit}(`) && c.unit.match(/\(\d+\)$/));
+        if (children.length > 0) {
+          const combinedBrandName = Array.from(new Set(children.map(c => c.brandName).filter(Boolean))).join(" + ");
+          const combinedBrandCode = Array.from(new Set(children.map(c => c.brandCode).filter(Boolean))).join(" + ");
+          if (row.brandName !== combinedBrandName || row.brandCode !== combinedBrandCode) {
+             return { ...row, brandName: combinedBrandName, brandCode: combinedBrandCode };
+          }
+        }
+      }
+      return row;
+    });
+
+    setUnitInfo(deduplicated);
   };
 
   const handleUpdateData = (newData: UnitInfo[]) => {
@@ -165,22 +185,36 @@ export default function UnitInfoTab() {
         row: UnitInfo,
         updateRow: (newRow: UnitInfo) => void,
         isLocked: boolean,
-      ) => (
-        <input
-          type="text"
-          value={val || ""}
-          onChange={(e) => updateRow({ ...row, [key]: e.target.value })}
-          disabled={isLocked || !!row.locked || isReadOnly}
-          className={cn(
-            "bg-transparent border-0 text-slate-300 w-full outline-none",
-            isLocked || !!row.locked || isReadOnly
-              ? "bg-transparent opacity-50 cursor-not-allowed"
-              : "cursor-text bg-slate-900/80 hover:bg-slate-800 transition-colors focus:bg-blue-600/20 focus:text-white rounded px-3 py-1.5 shadow-inner shadow-black/40 border border-slate-700/50 hover:border-slate-500 focus:border-blue-500/50",
-          )}
-          placeholder={isReadOnly ? "" : "..."}
-        />
-      ),
-    [],
+      ) => {
+        const options = Array.from(new Set(unitInfo.map(item => String(item[key] || '')).filter(Boolean))).map(opt => ({ value: opt, label: '', item: opt }));
+        if (isReadOnly) {
+          return (
+            <input
+              type="text"
+              value={val || ""}
+              onChange={(e) => updateRow({ ...row, [key]: e.target.value })}
+              disabled={true}
+              className={cn(
+                "bg-transparent border-0 text-slate-300 w-full outline-none",
+                "bg-transparent opacity-50 cursor-not-allowed"
+              )}
+              placeholder=""
+            />
+          );
+        }
+        return (
+          <AutocompleteCell
+            value={val || ""}
+            onChange={(newVal) => updateRow({ ...row, [key]: newVal })}
+            onSelect={(item) => updateRow({ ...row, [key]: item })}
+            options={options}
+            minChars={0}
+            isLocked={isLocked || !!row.locked}
+            placeholder="..."
+          />
+        );
+      },
+    [unitInfo],
   );
 
   const renderUnitCell = React.useCallback(

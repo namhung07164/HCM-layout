@@ -68,6 +68,17 @@ function SearchableSelect({
         opt.label.toLowerCase().includes(searchTerm.toLowerCase()) || opt.value.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            if (filteredOptions.length > 0) {
+                onChange(filteredOptions[0].value);
+                setSearchTerm(filteredOptions[0].label);
+                setIsOpen(false);
+            }
+        }
+    };
+
     return (
         <div ref={wrapperRef} className="relative w-full">
             <div className="relative">
@@ -82,6 +93,7 @@ function SearchableSelect({
                     onFocus={(e) => {
                         setIsOpen(true);
                     }}
+                    onKeyDown={handleKeyDown}
                     placeholder="Search unit..."
                 />
                 <button

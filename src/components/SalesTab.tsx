@@ -3,6 +3,7 @@ import DataTable from "./DataTable";
 import { SalesInfo } from "../types";
 import { useData } from "../DataContext";
 import { standardizeDateToMMDDYYYY, cn } from "../lib/utils";
+import AutocompleteCell from "./AutocompleteCell";
 
 export default function SalesTab() {
   const { sales, setSales } = useData();
@@ -25,28 +26,29 @@ export default function SalesTab() {
     0,
   );
 
-  const renderTextCell =
+  const renderTextCell = React.useCallback(
     (key: keyof SalesInfo) =>
     (
       val: any,
       row: SalesInfo,
       updateRow: (newRow: SalesInfo) => void,
       isLocked: boolean,
-    ) => (
-      <input
-        type="text"
-        value={val || ""}
-        onChange={(e) => updateRow({ ...row, [key]: e.target.value })}
-        disabled={isLocked}
-        className={cn(
-          "bg-transparent border-0 text-slate-300 w-full outline-none",
-          isLocked
-            ? "bg-transparent opacity-50 cursor-not-allowed"
-            : "cursor-text bg-slate-900/80 hover:bg-slate-800 transition-colors focus:bg-blue-600/20 focus:text-white rounded px-3 py-1.5 shadow-inner shadow-black/40 border border-slate-700/50 hover:border-slate-500 focus:border-blue-500/50",
-        )}
-        placeholder="..."
-      />
-    );
+    ) => {
+      const options = Array.from(new Set(sales.map(item => String(item[key] || '')).filter(Boolean))).map(opt => ({ value: opt, label: '', item: opt }));
+      return (
+        <AutocompleteCell
+          value={val || ""}
+          onChange={(newVal) => updateRow({ ...row, [key]: newVal })}
+          onSelect={(item) => updateRow({ ...row, [key]: item })}
+          options={options}
+          minChars={0}
+          isLocked={isLocked}
+          placeholder="..."
+        />
+      );
+    },
+    [sales]
+  );
 
   const renderNumericCell =
     (key: keyof SalesInfo) =>

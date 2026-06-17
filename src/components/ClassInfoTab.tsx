@@ -3,6 +3,7 @@ import DataTable from './DataTable';
 import { ClassInfo } from '../types';
 import { useData } from '../DataContext';
 import { cn } from '../lib/utils';
+import AutocompleteCell from './AutocompleteCell';
 
 export default function ClassInfoTab() {
   const { classInfo, setClassInfo } = useData();
@@ -65,19 +66,20 @@ export default function ClassInfoTab() {
     return new Set(classInfo.map(item => item[key]).filter(Boolean)).size;
   };
 
-  const renderTextCell = React.useCallback((key: keyof ClassInfo) => (val: any, row: ClassInfo, updateRow: (newRow: ClassInfo) => void, isLocked: boolean) => (
-    <input 
-      type="text"
-      value={val || ''} 
-      onChange={(e) => updateRow({ ...row, [key]: e.target.value })}
-      disabled={isLocked}
-      className={cn(
-        "bg-transparent border-0 text-slate-300 w-full outline-none",
-        isLocked ? "bg-transparent opacity-50 cursor-not-allowed" : "cursor-text bg-slate-900/80 hover:bg-slate-800 transition-colors focus:bg-blue-600/20 focus:text-white rounded px-3 py-1.5 shadow-inner shadow-black/40 border border-slate-700/50 hover:border-slate-500 focus:border-blue-500/50"
-      )}
-      placeholder="..."
-    />
-  ), []);
+  const renderTextCell = React.useCallback((key: keyof ClassInfo) => (val: any, row: ClassInfo, updateRow: (newRow: ClassInfo) => void, isLocked: boolean) => {
+    const options = Array.from(new Set(classInfo.map(item => String(item[key] || '')).filter(Boolean))).map(opt => ({ value: opt, label: '', item: opt }));
+    return (
+      <AutocompleteCell 
+        value={val || ''} 
+        onChange={(newVal) => updateRow({ ...row, [key]: newVal })}
+        onSelect={(item) => updateRow({ ...row, [key]: item })}
+        options={options}
+        minChars={0}
+        isLocked={isLocked}
+        placeholder="..."
+      />
+    );
+  }, [classInfo]);
 
   const renderNumericCell = React.useCallback((key: keyof ClassInfo) => (val: any, row: ClassInfo, updateRow: (newRow: ClassInfo) => void, isLocked: boolean) => (
     <input 

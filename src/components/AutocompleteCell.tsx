@@ -60,6 +60,19 @@ export default function AutocompleteCell({
             }
           }
         }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && show && filtered.length > 0) {
+            e.preventDefault();
+            isSelectingRef.current = true;
+            const success = onSelect(filtered[0].item);
+            if (success === false) {
+              setLocalVal(value || "");
+              onChange(value || "");
+            }
+            setShow(false);
+            setTimeout(() => { isSelectingRef.current = false; }, 200);
+          }
+        }}
         disabled={isLocked}
         className={cn(
           "bg-transparent border-0 text-slate-300 w-full outline-none",

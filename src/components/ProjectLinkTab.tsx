@@ -3,6 +3,7 @@ import DataTable from './DataTable';
 import { ProjectLinkInfo } from '../types';
 import { useData } from '../DataContext';
 import { cn, standardizeDateToMMDDYYYY } from '../lib/utils';
+import AutocompleteCell from './AutocompleteCell';
 
 export default function ProjectLinkTab() {
   const { projectLink, setProjectLink, projectStatus, units } = useData();
@@ -29,36 +30,35 @@ export default function ProjectLinkTab() {
     });
   };
 
-  const renderTextCell = React.useCallback((key: keyof ProjectLinkInfo) => (val: any, row: ProjectLinkInfo, updateRow: (newRow: ProjectLinkInfo) => void, isLocked: boolean) => (
-    <input 
-      type="text"
-      value={val || ''} 
-      onChange={(e) => updateRow({ ...row, [key]: e.target.value })}
-      disabled={isLocked}
-      className={cn(
-        "bg-transparent border-0 text-slate-300 w-full outline-none",
-        isLocked ? "bg-transparent opacity-50 cursor-not-allowed" : "cursor-text bg-slate-900/80 hover:bg-slate-800 transition-colors focus:bg-blue-600/20 focus:text-white rounded px-3 py-1.5 shadow-inner shadow-black/40 border border-slate-700/50 hover:border-slate-500 focus:border-blue-500/50 text-xs"
-      )}
-      placeholder="..."
-    />
-  ), []);
-
-  const renderUnitCell = React.useCallback(() => (val: any, row: ProjectLinkInfo, updateRow: (newRow: ProjectLinkInfo) => void, isLocked: boolean) => {
+  const renderTextCell = React.useCallback((key: keyof ProjectLinkInfo) => (val: any, row: ProjectLinkInfo, updateRow: (newRow: ProjectLinkInfo) => void, isLocked: boolean) => {
+    const options = Array.from(new Set(projectLink.map(item => String(item[key] || '')).filter(Boolean))).map(opt => ({ value: opt, label: '', item: opt }));
     return (
-      <input 
-        type="text"
-        list="projectLinkUnitOptions"
-        value={val || ''}
-        onChange={(e) => updateRow({ ...row, unit: e.target.value })}
-        disabled={isLocked}
-        className={cn(
-          "bg-transparent border-0 text-slate-300 w-full outline-none",
-          isLocked ? "bg-transparent opacity-50 cursor-not-allowed" : "cursor-text bg-slate-900/80 hover:bg-slate-800 transition-colors focus:bg-blue-600/20 focus:text-white rounded px-3 py-1.5 shadow-inner shadow-black/40 border border-slate-700/50 hover:border-slate-500 focus:border-blue-500/50 text-xs"
-        )}
+      <AutocompleteCell 
+        value={val || ''} 
+        onChange={(newVal) => updateRow({ ...row, [key]: newVal })}
+        onSelect={(item) => updateRow({ ...row, [key]: item })}
+        options={options}
+        minChars={0}
+        isLocked={isLocked}
         placeholder="..."
       />
     );
-  }, []);
+  }, [projectLink]);
+
+  const renderUnitCell = React.useCallback(() => (val: any, row: ProjectLinkInfo, updateRow: (newRow: ProjectLinkInfo) => void, isLocked: boolean) => {
+    const options = uniqueUnits.map(unit => ({ value: unit, label: '', item: unit }));
+    return (
+      <AutocompleteCell 
+        value={val || ''} 
+        onChange={(newVal) => updateRow({ ...row, unit: newVal })}
+        onSelect={(item) => updateRow({ ...row, unit: item })}
+        options={options}
+        minChars={0}
+        isLocked={isLocked}
+        placeholder="..."
+      />
+    );
+  }, [uniqueUnits]);
 
   const handleUnitLinkChange = React.useCallback((row: ProjectLinkInfo, updateRow: (newRow: ProjectLinkInfo) => void, unitLinkValue: string) => {
     const parentUnitRow = projectStatus.find(p => p.unit === unitLinkValue);
@@ -87,21 +87,19 @@ export default function ProjectLinkTab() {
   }, [projectStatus]);
 
   const renderUnitLinkCell = React.useCallback(() => (val: any, row: ProjectLinkInfo, updateRow: (newRow: ProjectLinkInfo) => void, isLocked: boolean) => {
+    const options = uniqueUnits.map(unit => ({ value: unit, label: '', item: unit }));
     return (
-      <input 
-        type="text"
-        list="projectLinkUnitOptions"
+      <AutocompleteCell 
         value={val || ''}
-        onChange={(e) => handleUnitLinkChange(row, updateRow, e.target.value)}
-        disabled={isLocked}
-        className={cn(
-          "bg-transparent border-0 text-slate-300 w-full outline-none",
-          isLocked ? "bg-transparent opacity-50 cursor-not-allowed" : "cursor-text bg-slate-900/80 hover:bg-slate-800 transition-colors focus:bg-blue-600/20 focus:text-white rounded px-3 py-1.5 shadow-inner shadow-black/40 border border-slate-700/50 hover:border-slate-500 focus:border-blue-500/50 text-xs"
-        )}
+        onChange={(newVal) => handleUnitLinkChange(row, updateRow, newVal)}
+        onSelect={(item) => handleUnitLinkChange(row, updateRow, item)}
+        options={options}
+        minChars={0}
+        isLocked={isLocked}
         placeholder="Select Unit..."
       />
     );
-  }, [handleUnitLinkChange]);
+  }, [handleUnitLinkChange, uniqueUnits]);
 
   const columns: { key: keyof ProjectLinkInfo; label: string; summary?: React.ReactNode; renderCell?: any }[] = React.useMemo(() => [
     { key: 'update', label: 'Year', summary: getUniqueCount('update'), renderCell: renderTextCell('update') },

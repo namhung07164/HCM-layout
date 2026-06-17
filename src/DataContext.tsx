@@ -514,17 +514,33 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
       }
     } catch (error: any) {
       console.error('Auto-backup failed:', error);
-      if (error.name === 'InvalidStateError' || error.message.includes('cached in an interface object')) {
-        errorToReport = `Lỗi hệ thống tệp đĩa: Dữ liệu trên thư mục cục bộ đã thay đổi hoặc bị ứng dụng khác khóa. Vui lòng bấm vào "Sync to Local Folder" để CHỌN LẠI THƯ MỤC.`;
+      const errMsg = error?.message || String(error);
+      
+      // If we encounter ANY error while trying to write using the directory handle,
+      // invalidate it so the user can re-select it instead of failing silently or loudly forever.
+      if (dirHandleRef.current && (errMsg.includes('cached in an interface object') || error?.name === 'ValidStateError' || error?.name === 'InvalidStateError' || error?.name === 'NotAllowedError')) {
+        errorToReport = `Lỗi hệ thống tệp đĩa: Kết nối thư mục bị gián đoạn. Vui lòng bấm vào "Sync to Local Folder" để CHỌN LẠI THƯ MỤC. (${errMsg})`;
         setHasLocalFolder(false);
         dirHandleRef.current = null;
       } else {
-        errorToReport = `Lỗi khi lưu: ${error.message}`;
+        errorToReport = `Lỗi hệ thống lưu: ${errMsg}`;
+        // Still clear the dirHandle just in case the exception was something else but related to file system
+        if (dirHandleRef.current) {
+           setHasLocalFolder(false);
+           dirHandleRef.current = null;
+        }
       }
     } finally {
       setIsSaving(false);
+      // Wait, if it auto-saves and fails, it might spam alerts if we aren't careful.
+      // But since we setHasLocalFolder(false), it will NOT try to save to local folder next time
+      // so it will only alert once if we let it.
+      // But we ONLY alert on manual click to avoid interrupting the user.
       if (errorToReport && isManualClick) {
           alert(errorToReport);
+      } else if (errorToReport) {
+          // If auto-saving, we can log it or show a non-intrusive toast, but alert is too intrusive.
+          console.warn('Auto-save error:', errorToReport);
       }
     }
   };

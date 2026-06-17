@@ -3,6 +3,7 @@ import DataTable from './DataTable';
 import { UnitDataInfo } from '../types';
 import { useData } from '../DataContext';
 import { cn } from '../lib/utils';
+import AutocompleteCell from './AutocompleteCell';
 
 export default function UnitsTab() {
   const { units, setUnits } = useData();
@@ -76,19 +77,20 @@ export default function UnitsTab() {
     return sum.toLocaleString("en-US", { maximumFractionDigits: 2 });
   };
 
-  const renderTextCell = React.useCallback((key: keyof UnitDataInfo) => (val: any, row: UnitDataInfo, updateRow: (newRow: UnitDataInfo) => void, isLocked: boolean) => (
-    <input 
-      type="text"
-      value={val || ''} 
-      onChange={(e) => updateRow({ ...row, [key]: e.target.value })}
-      disabled={isLocked}
-      className={cn(
-        "bg-transparent border-0 text-slate-300 w-full outline-none",
-        isLocked ? "bg-transparent opacity-50 cursor-not-allowed" : "cursor-text bg-slate-900/80 hover:bg-slate-800 transition-colors focus:bg-blue-600/20 focus:text-white rounded px-3 py-1.5 shadow-inner shadow-black/40 border border-slate-700/50 hover:border-slate-500 focus:border-blue-500/50"
-      )}
-      placeholder="..."
-    />
-  ), []);
+  const renderTextCell = React.useCallback((key: keyof UnitDataInfo) => (val: any, row: UnitDataInfo, updateRow: (newRow: UnitDataInfo) => void, isLocked: boolean) => {
+    const options = Array.from(new Set(units.map(item => String(item[key] || '')).filter(Boolean))).map(opt => ({ value: opt, label: '', item: opt }));
+    return (
+      <AutocompleteCell 
+        value={val || ''} 
+        onChange={(newVal) => updateRow({ ...row, [key]: newVal })}
+        onSelect={(item) => updateRow({ ...row, [key]: item })}
+        options={options}
+        minChars={0}
+        isLocked={isLocked}
+        placeholder="..."
+      />
+    );
+  }, [units]);
 
   const renderNumericCell = React.useCallback((key: keyof UnitDataInfo) => (val: any, row: UnitDataInfo, updateRow: (newRow: UnitDataInfo) => void, isLocked: boolean) => {
     const [isFocused, setIsFocused] = React.useState(false);
