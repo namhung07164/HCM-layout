@@ -514,7 +514,13 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
       }
     } catch (error: any) {
       console.error('Auto-backup failed:', error);
-      errorToReport = `Lỗi khi lưu: ${error.message}`;
+      if (error.name === 'InvalidStateError' || error.message.includes('cached in an interface object')) {
+        errorToReport = `Lỗi hệ thống tệp đĩa: Dữ liệu trên thư mục cục bộ đã thay đổi hoặc bị ứng dụng khác khóa. Vui lòng bấm vào "Sync to Local Folder" để CHỌN LẠI THƯ MỤC.`;
+        setHasLocalFolder(false);
+        dirHandleRef.current = null;
+      } else {
+        errorToReport = `Lỗi khi lưu: ${error.message}`;
+      }
     } finally {
       setIsSaving(false);
       if (errorToReport && isManualClick) {
