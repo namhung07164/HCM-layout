@@ -3,7 +3,7 @@ import * as XLSX from 'xlsx';
 
 const TAB_CONFIG: Record<string, any> = {
   project: { id: 'project', label: 'Xuất Project', columns: ['store', 'location', 'year', 'code', 'name'], fileNamePrefix: 'taka_projects_exported', icon: 'ph-file-csv', exportType: 'csv' },
-  task: { id: 'task', label: 'Xuất Task detail', columns: ['store', 'location', 'projectCode', 'YEAR', 'Task name', 'start', 'finish', 'party', 'Predecessor'], fileNamePrefix: 'taka_tasks_exported', icon: 'ph-list-dashes', exportType: 'csv' },
+  task: { id: 'task', label: 'Xuất Task detail', columns: ['store', 'location', 'projectCode', 'YEAR', 'Task name', 'start', 'finish', 'party', 'Predecessor', 'delegation'], fileNamePrefix: 'taka_tasks_exported', icon: 'ph-list-dashes', exportType: 'csv' },
   budget: { id: 'budget', label: 'Xuất Task budget', columns: ['location', 'code', 'name', 'budget', 'actual/forecast', 'variance', 'type', 'note'], fileNamePrefix: 'taka_projects_budget_exported', icon: 'ph-calculator', exportType: 'csv' },
   cost: { id: 'cost', label: 'Xuất Cost', columns: ['projectCode', 'budget', 'actual', 'firstPaid', 'firstPaidAt', 'secondPaid', 'secondPaidAt', 'thirdPaid', 'thirdPaidAt', 'supportingFee', 'description', 'vendor'], fileNamePrefix: 'taka_costs_exported', icon: 'ph-receipt', exportType: 'csv' },
   investment: { 
@@ -99,7 +99,7 @@ export default function CsvExportTab() {
   const [constantMapping, setConstantMapping] = useState<Record<string, string>>(() => {
     const saved = safeGetStorage(`taka_constant_project`);
     const parsed = safeJSONParse(saved);
-    return TAB_CONFIG['project'].columns.reduce((acc: any, col: string) => ({ ...acc, [col]: parsed[col] || '' }), {});
+    return TAB_CONFIG['project'].columns.reduce((acc: any, col: string) => ({ ...acc, [col]: parsed[col] !== undefined ? parsed[col] : (col === 'delegation' ? 'true' : '') }), {});
   });
 
   const unitSizeMap = useMemo(() => {
@@ -136,7 +136,13 @@ export default function CsvExportTab() {
 
     const savedConstant = safeGetStorage(`taka_constant_${tabId}`);
     const parsedConstant = safeJSONParse(savedConstant);
-    setConstantMapping(TAB_CONFIG[tabId].columns.reduce((acc: any, col: string) => ({ ...acc, [col]: parsedConstant[col] || '' }), {}));
+    setConstantMapping(TAB_CONFIG[tabId].columns.reduce((acc: any, col: string) => {
+      let val = parsedConstant[col];
+      if (val === undefined || (!savedConstant)) {
+        val = col === 'delegation' ? 'true' : (val || '');
+      }
+      return { ...acc, [col]: val };
+    }, {}));
 
     setIsLocked(safeGetStorage(`taka_locked_${tabId}`) === 'true');
   };
