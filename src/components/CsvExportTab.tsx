@@ -14,6 +14,14 @@ const TAB_CONFIG: Record<string, any> = {
     icon: 'ph-chart-line-up', 
     exportType: 'excel' 
   },
+  mass_task: { 
+    id: 'mass_task', 
+    label: 'Mass-import Task', 
+    columns: ['store', 'location', 'projectCode', 'YEAR', 'Task name', 'start', 'finish', 'party', 'Predecessor', 'delegation'], 
+    fileNamePrefix: 'taka_mass_tasks_exported', 
+    icon: 'ph-copy', 
+    exportType: 'excel' 
+  },
   brand: { 
     id: 'brand', 
     label: 'Xuất Brand', 
@@ -80,6 +88,8 @@ export default function CsvExportTab() {
   const [activeSheet, setActiveSheet] = useState<string>('');
   const [excelData, setExcelData] = useState<any[]>([]);
   const [excelHeaders, setExcelHeaders] = useState<string[]>([]);
+  const [templateFile, setTemplateFile] = useState<File | null>(null);
+  const [templateData, setTemplateData] = useState<any[]>([]);
   const [error, setError] = useState<string>('');
   const [activeTab, setActiveTab] = useState<string>('project');
   const [showUnlockModal, setShowUnlockModal] = useState(false);
@@ -128,6 +138,8 @@ export default function CsvExportTab() {
     setWorkbook(null);
     setSheetNames([]);
     setActiveSheet('');
+    setTemplateFile(null);
+    setTemplateData([]);
     setError('');
     
     const savedMapping = safeGetStorage(`taka_mapping_${tabId}`);
@@ -175,6 +187,42 @@ export default function CsvExportTab() {
       setExcelData([]);
       setExcelHeaders([]);
     }
+  };
+
+  const handleTemplateUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const uploadedFile = e.target.files?.[0];
+    if (!uploadedFile) return;
+    setTemplateFile(uploadedFile);
+    
+    const isCSV = uploadedFile.name.toLowerCase().endsWith('.csv');
+    const reader = new FileReader();
+    
+    reader.onload = (event) => {
+      try {
+        const result = event.target?.result;
+        if (!result) throw new Error("File tải lên trống.");
+        
+        let wb;
+        if (isCSV) {
+          wb = XLSX.read(result, { type: 'string' });
+        } else {
+          wb = XLSX.read(new Uint8Array(result as ArrayBuffer), { type: 'array' });
+        }
+        
+        const firstSheet = wb.SheetNames[0];
+        const json = XLSX.utils.sheet_to_json(wb.Sheets[firstSheet], { defval: '' }) as any[];
+        setTemplateData(json);
+      } catch (err: any) {
+        setError(`Lỗi đọc template: ${err.message}`);
+      }
+    };
+    
+    if (isCSV) {
+      reader.readAsText(uploadedFile, 'UTF-8');
+    } else {
+      reader.readAsArrayBuffer(uploadedFile);
+    }
+    e.target.value = '';
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -395,6 +443,52 @@ export default function CsvExportTab() {
         XLSX.utils.book_append_sheet(wb, ws, name.substring(0, 31));
       });
       XLSX.writeFile(wb, `${TAB_CONFIG[activeTab].fileNamePrefix}.xlsx`);
+    } else if (activeTab === 'mass_task') {
+      if (!templateData || templateData.length === 0) {
+        setError('Vui lòng tải lên file template (Attached)');
+        return;
+      }
+      
+      const finalJson: any[] = [];
+      excelData.forEach(proj => {
+        const projStore = getCellValue(proj, 'store');
+        const projLocation = getCellValue(proj, 'location');
+        const projCode = getCellValue(proj, 'projectCode');
+        const projYear = getCellValue(proj, 'YEAR');
+        
+        templateData.forEach(taskDef => {
+          const taskName = taskDef['Task name'] || '';
+          let start = taskDef['start'] || '';
+          let finish = taskDef['finish'] || '';
+          if (typeof start === 'number') start = XLSX.SSF.format('m/d/yyyy h:mm', start);
+          if (typeof finish === 'number') finish = XLSX.SSF.format('m/d/yyyy h:mm', finish);
+          
+          const party = taskDef['party'] || '';
+          let pred = taskDef['Predecessor'] || '';
+          if (pred !== undefined && pred !== null && String(pred).trim() !== '') {
+             pred = `${projCode}-${pred}`;
+          }
+          let delegation = taskDef['delegation'] !== undefined ? taskDef['delegation'] : (constantMapping['delegation'] || 'true');
+          
+          finalJson.push({
+            'store': projStore,
+            'location': projLocation,
+            'projectCode': projCode,
+            'YEAR': projYear,
+            'Task name': taskName,
+            'start': start,
+            'finish': finish,
+            'party': party,
+            'Predecessor': pred,
+            'delegation': delegation
+          });
+        });
+      });
+      
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet(finalJson, { header: targetCols });
+      XLSX.utils.book_append_sheet(wb, ws, "Mass-import Tasks");
+      XLSX.writeFile(wb, `${TAB_CONFIG[activeTab].fileNamePrefix}.xlsx`);
     } else {
       const csvRows = [targetCols.join(',')];
       excelData.forEach(row => {
@@ -495,6 +589,31 @@ export default function CsvExportTab() {
               )}
             </div>
 
+            {activeTab === 'mass_task' && (
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="font-bold flex items-center gap-2 text-slate-700">
+                    <i className="ph ph-paperclip text-indigo-600 text-lg"></i> 1b. Tải file Attached
+                  </h2>
+                  {templateFile && (
+                    <button 
+                      onClick={() => { setTemplateFile(null); setTemplateData([]); }}
+                      className="text-xs px-3 py-1.5 rounded-lg flex items-center gap-1 font-bold text-red-600 bg-red-50 hover:bg-red-100 transition-colors"
+                    >
+                      <i className="ph-fill ph-x-circle text-sm"></i> Hủy
+                    </button>
+                  )}
+                </div>
+                <label className="border-2 border-dashed border-slate-200 rounded-xl p-8 flex flex-col items-center justify-center cursor-pointer hover:bg-slate-50 transition-colors group">
+                  <i className={`ph ${templateFile ? 'ph-file-csv' : 'ph-cloud-arrow-up'} text-4xl mb-2 transition-colors ${templateFile ? 'text-indigo-500' : 'text-slate-300 group-hover:text-indigo-400'}`}></i>
+                  <span className={`text-sm text-center font-medium ${templateFile ? 'text-indigo-600' : 'text-slate-500'}`}>
+                    {templateFile ? templateFile.name : 'Chọn file attached (Template)'}
+                  </span>
+                  <input type="file" className="hidden" accept=".xlsx,.xls,.csv" onChange={handleTemplateUpload} />
+                </label>
+              </div>
+            )}
+
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 relative">
               <div className="flex justify-between items-center mb-4 pb-3 border-b border-slate-100">
                 <h2 className="font-bold flex items-center gap-2 text-slate-700">
@@ -510,7 +629,14 @@ export default function CsvExportTab() {
               </div>
               
               <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
-                {TAB_CONFIG[activeTab].columns.map((col: string) => (
+                {TAB_CONFIG[activeTab].columns
+                  .filter((col: string) => {
+                    if (activeTab === 'mass_task') {
+                      return ['store', 'location', 'projectCode', 'YEAR'].includes(col);
+                    }
+                    return true;
+                  })
+                  .map((col: string) => (
                   <div key={col} className="space-y-1.5">
                     <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">{col}</label>
                     <div className="flex gap-2">
