@@ -1103,6 +1103,7 @@ const HiddenExportStage = ({ version, units, summaryData, selectedLabels, paperS
 
 export const ExportAllManager = ({ versions, units, summaryData, format, paperSize, quality, selectedLabels, onComplete }: any) => {
     const [stagesReady, setStagesReady] = useState<Record<number, any>>({});
+    const hasExportedRef = React.useRef(false);
     
     const handleStageReady = React.useCallback((index: number, stage: any) => {
         setStagesReady(prev => ({ ...prev, [index]: stage }));
@@ -1111,6 +1112,8 @@ export const ExportAllManager = ({ versions, units, summaryData, format, paperSi
     useEffect(() => {
         const readyCount = Object.keys(stagesReady).length;
         if (readyCount === versions.length && readyCount > 0) {
+            if (hasExportedRef.current) return;
+            hasExportedRef.current = true;
             // all stages loaded
             const doExport = async () => {
                 
