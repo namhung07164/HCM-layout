@@ -174,15 +174,20 @@ export function useProjectStatusSync(validUnits: string[], activeStore: string) 
       });
 
       let taskLines: string[] = [];
+      let taskUpdateLines: string[] = [];
       activeTasks.forEach(t => {
         if (t.name) {
           taskLines.push(...t.name.split('\n').filter((l: string) => l.trim() !== ''));
+        }
+        if (t.update) {
+          taskUpdateLines.push(t.update.trim());
         }
       });
       const detailString = taskLines.length > 0 ? taskLines.join('\n') : (p.detail || '');
 
       const computedOpening = p.opening;
       const statusStr = getStatus(computedTakStart, computedTakCompl, computedOpening, code);
+      const computedActStatus = taskUpdateLines.length > 0 ? taskUpdateLines.filter(Boolean).join(' | ') : statusStr;
 
       const finalStartDate = parseDate(computedTakStart);
       const finalEndDate = parseDate(computedTakCompl);
@@ -193,7 +198,7 @@ export function useProjectStatusSync(validUnits: string[], activeStore: string) 
         projectName: p.project || p.PROJECT || p.name || 'Unnamed Project',
         unit: p.code || p.CODE || 'N/A',
         status: p.status || statusStr,
-        actStatus: statusStr,
+        actStatus: computedActStatus,
         startDate: formatDateToMMM_DD_YYYY(finalStartDate),
         endDate: formatDateToMMM_DD_YYYY(finalEndDate),
         task: String(detailString),
