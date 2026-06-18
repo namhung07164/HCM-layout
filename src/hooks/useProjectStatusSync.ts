@@ -84,15 +84,17 @@ const getStatus = (start: any, handover: any, opening: any, code: any) => {
 export function useProjectStatusSync(validUnits: string[], activeStore: string) {
   const [rawProjects, setRawProjects] = useState<any[]>([]);
   const [rawTasks, setRawTasks] = useState<any[]>([]);
+  const [rawDelegationGroups, setRawDelegationGroups] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let projectsLoaded = false;
     let tasksLoaded = false;
+    let delegationLoaded = false;
 
     const checkLoading = () => {
-      if (projectsLoaded && tasksLoaded) {
+      if (projectsLoaded && tasksLoaded && delegationLoaded) {
         setLoading(false);
       }
     };
@@ -124,9 +126,23 @@ export function useProjectStatusSync(validUnits: string[], activeStore: string) 
       checkLoading();
     });
 
+    const unsubDelegation = onSnapshot(collection(defaultDb, 'artifacts/taka-projects-app-v1/public/data/delegationGroups'), (snapshot) => {
+      const dg = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      console.log("Raw delegationGroups loaded from Firebase:", dg.length);
+      setRawDelegationGroups(dg);
+      delegationLoaded = true;
+      checkLoading();
+    }, (err) => {
+      handleFirestoreError(err, OperationType.LIST, 'artifacts/taka-projects-app-v1/public/data/delegationGroups');
+      // Intentionally not setting global error to avoid breaking main sync if this collection is newly introduced
+      delegationLoaded = true;
+      checkLoading();
+    });
+
     return () => {
       unsubProjects();
       unsubTasks();
+      unsubDelegation();
     };
   }, []);
 
@@ -187,7 +203,22 @@ export function useProjectStatusSync(validUnits: string[], activeStore: string) 
 
       const computedOpening = p.opening;
       const statusStr = getStatus(computedTakStart, computedTakCompl, computedOpening, code);
-      const computedActStatus = taskUpdateLines.length > 0 ? taskUpdateLines.filter(Boolean).join(' | ') : statusStr;
+      let computedActStatus = taskUpdateLines.length > 0 ? taskUpdateLines.filter(Boolean).join(' | ') : statusStr;
+
+      let foundDelegationStatus = '';
+      for (const dg of rawDelegationGroups) {
+        if (dg.subTasks && Array.isArray(dg.subTasks)) {
+          const matchingSubTask = dg.subTasks.find((st: any) => st.id === code || st.taskId === code);
+          if (matchingSubTask && matchingSubTask.delegationStatus) {
+            foundDelegationStatus = matchingSubTask.delegationStatus;
+            break;
+          }
+        }
+      }
+
+      if (foundDelegationStatus) {
+        computedActStatus = foundDelegationStatus;
+      }
 
       const finalStartDate = parseDate(computedTakStart);
       const finalEndDate = parseDate(computedTakCompl);
@@ -207,7 +238,7 @@ export function useProjectStatusSync(validUnits: string[], activeStore: string) 
         flowStatus: p.location || p.LOCATION || ''
       };
     });
-  }, [rawProjects, rawTasks, validUnits]);
+  }, [rawProjects, rawTasks, rawDelegationGroups, validUnits, activeStore]);
 
   return { projectStatus, loading, error };
 }
