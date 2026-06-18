@@ -127,22 +127,40 @@ export function useProjectStatusSync(validUnits: string[], activeStore: string) 
     });
 
     const unsubDelegation = onSnapshot(collection(defaultDb, 'artifacts/taka-projects-app-v1/public/data/delegationGroups'), (snapshot) => {
-      const dg = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      let dg = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       console.log("Raw delegationGroups loaded from Firebase:", dg.length);
       setRawDelegationGroups(dg);
       delegationLoaded = true;
       checkLoading();
     }, (err) => {
+      // If artifacts path fails or is empty, try root as fallback
       handleFirestoreError(err, OperationType.LIST, 'artifacts/taka-projects-app-v1/public/data/delegationGroups');
-      // Intentionally not setting global error to avoid breaking main sync if this collection is newly introduced
       delegationLoaded = true;
       checkLoading();
     });
+
+    const unsubDelegationRoot = onSnapshot(collection(defaultDb, 'delegationGroups'), (snapshot) => {
+      const dgRoot = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      if (dgRoot.length > 0) {
+        console.log("Raw root delegationGroups loaded from Firebase:", dgRoot.length);
+        // We accumulate both in case they use either
+        setRawDelegationGroups(prev => {
+          const combined = [...prev];
+          dgRoot.forEach(rootDoc => {
+             if (!combined.find(d => d.id === rootDoc.id)) {
+                 combined.push(rootDoc);
+             }
+          });
+          return combined;
+        });
+      }
+    }, () => {});
 
     return () => {
       unsubProjects();
       unsubTasks();
       unsubDelegation();
+      if (unsubDelegationRoot) unsubDelegationRoot();
     };
   }, []);
 
@@ -206,18 +224,43 @@ export function useProjectStatusSync(validUnits: string[], activeStore: string) 
       let computedActStatus = taskUpdateLines.length > 0 ? taskUpdateLines.filter(Boolean).join(' | ') : statusStr;
 
       let foundDelegationStatus = '';
-      for (const dg of rawDelegationGroups) {
-        if (dg.subTasks && Array.isArray(dg.subTasks)) {
-          const matchingSubTask = dg.subTasks.find((st: any) => st.id === code || st.taskId === code);
-          if (matchingSubTask && matchingSubTask.delegationStatus) {
-            foundDelegationStatus = matchingSubTask.delegationStatus;
+      
+      // Look through active tasks first
+      for (const t of activeTasks) {
+        const dg = rawDelegationGroups.find(d => d.id === t.id);
+        if (dg && dg.subTasks && Array.isArray(dg.subTasks)) {
+          // Find any subTask that has a delegationStatus
+          const subWithStatus = dg.subTasks.find((st: any) => st.delegationStatus);
+          if (subWithStatus) {
+            foundDelegationStatus = subWithStatus.delegationStatus;
             break;
           }
         }
       }
 
+      // If no active task has a delegationStatus, optionally check ALL project tasks
+      if (!foundDelegationStatus) {
+        for (const t of projectTasks) {
+          const dg = rawDelegationGroups.find(d => d.id === t.id);
+          if (dg && dg.subTasks && Array.isArray(dg.subTasks)) {
+            const subWithStatus = dg.subTasks.find((st: any) => st.delegationStatus && String(st.delegationStatus).toLowerCase() !== 'done');
+            if (subWithStatus) {
+              foundDelegationStatus = subWithStatus.delegationStatus;
+              break;
+            }
+          }
+        }
+      }
+
       if (foundDelegationStatus) {
-        computedActStatus = foundDelegationStatus;
+        // Taka PM has convention "act:pending approval" -> "Pending Approval" or similar.
+        // The user showed "Act: Pending Approval", so we'll prepend "Act: " to match the app mẹ's behavior if needed.
+        // Wait, the status is "pending approval", we'll just use it directly.
+        // If it already says "Act:" we can leave it.
+        computedActStatus = foundDelegationStatus.replace(/^act:\s*/i, 'Act: ');
+        if (!computedActStatus.toLowerCase().startsWith('act:')) {
+            computedActStatus = 'Act: ' + computedActStatus.charAt(0).toUpperCase() + computedActStatus.slice(1);
+        }
       }
 
       const finalStartDate = parseDate(computedTakStart);
