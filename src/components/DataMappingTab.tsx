@@ -85,7 +85,7 @@ export default React.memo(function DataMappingTab() {
       <div className="z-50 p-2">
         <div className="glass rounded-xl p-3 border border-slate-800 shadow-2xl flex items-center justify-between bg-slate-950/80 backdrop-blur-xl">
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 bg-blue-600/20 border border-blue-500/30 rounded-lg flex items-center justify-center text-blue-400">
+            <div className="w-7 h-7 bg-brand-600/20 border border-brand-500/30 rounded-lg flex items-center justify-center text-brand-400">
               <Split size={14} />
             </div>
             <div>
@@ -103,7 +103,7 @@ export default React.memo(function DataMappingTab() {
                 className={cn(
                   "flex items-center gap-2 px-3 py-1 rounded-md text-[9px] font-bold uppercase tracking-widest transition-all duration-300",
                   activeSubTab === 'edit' 
-                    ? "bg-blue-600/20 text-blue-400 border border-blue-500/30" 
+                    ? "bg-brand-600/20 text-brand-400 border border-brand-500/30" 
                     : "text-slate-500 hover:text-slate-300"
                 )}
               >
@@ -139,7 +139,7 @@ export default React.memo(function DataMappingTab() {
                 className={cn(
                   "flex items-center gap-2 px-3 py-1 rounded-md text-[9px] font-bold uppercase tracking-widest transition-all duration-300",
                   activeSubTab === 'review' 
-                    ? "bg-emerald-600/20 text-emerald-400 border border-emerald-500/30" 
+                    ? "bg-brand-600/20 text-brand-400 border border-brand-500/30" 
                     : "text-slate-500 hover:text-slate-300"
                 )}
               >
@@ -189,7 +189,7 @@ export default React.memo(function DataMappingTab() {
                   onClick={() => setActiveSubTab('edit')}
                   className={cn(
                     "flex items-center gap-2 px-8 py-3 rounded-lg text-sm font-bold uppercase transition-all",
-                    activeSubTab === 'edit' ? "bg-blue-600 text-white shadow-lg" : "text-slate-500 hover:text-slate-200"
+                    activeSubTab === 'edit' ? "bg-brand-600 text-white shadow-lg" : "text-slate-500 hover:text-slate-200"
                   )}
                 >
                   <Edit3 size={16} /> Edit
@@ -216,7 +216,7 @@ export default React.memo(function DataMappingTab() {
                   onClick={() => setActiveSubTab('review')}
                   className={cn(
                     "flex items-center gap-2 px-8 py-3 rounded-lg text-sm font-bold uppercase transition-all",
-                    activeSubTab === 'review' ? "bg-emerald-600 text-white shadow-lg" : "text-slate-500 hover:text-slate-200"
+                    activeSubTab === 'review' ? "bg-brand-600 text-white shadow-lg" : "text-slate-500 hover:text-slate-200"
                   )}
                 >
                   <Eye size={16} /> Review

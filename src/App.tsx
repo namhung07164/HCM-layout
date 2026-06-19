@@ -128,7 +128,7 @@ function MainApp({ store, onSwitchStore }: { store: StoreRegion, onSwitchStore: 
   }
 
   return (
-    <div className="flex h-screen bg-[#0F1115] text-[#E2E8F0] font-sans overflow-hidden selection:bg-blue-500/30">
+    <div className={`flex h-screen bg-[#0F1115] text-[#E2E8F0] font-sans overflow-hidden selection:bg-brand-500/30 ${store === 'HN' ? 'store-hn' : ''}`}>
       {/* Permission Overlay */}
       <AnimatePresence>
         {needsPermission && (
@@ -140,9 +140,9 @@ function MainApp({ store, onSwitchStore }: { store: StoreRegion, onSwitchStore: 
             className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-md flex flex-col items-center justify-center cursor-pointer"
           >
             <div className="relative mb-6">
-              <div className="w-24 h-24 border-4 border-blue-500/20 rounded-full animate-pulse" />
+              <div className="w-24 h-24 border-4 border-brand-500/20 rounded-full animate-pulse" />
               <HardDrive
-                className="absolute inset-0 m-auto animate-bounce text-blue-500"
+                className="absolute inset-0 m-auto animate-bounce text-brand-500"
                 size={40}
               />
             </div>
@@ -155,7 +155,7 @@ function MainApp({ store, onSwitchStore }: { store: StoreRegion, onSwitchStore: 
               </p>
               <button 
                 onClick={(e) => { e.stopPropagation(); requestFolderPermission(); }}
-                className="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg shadow-lg shadow-blue-500/20 transition-all font-medium flex items-center gap-2 mx-auto"
+                className="px-6 py-2 bg-brand-600 hover:bg-brand-500 text-white rounded-lg shadow-lg shadow-brand-500/20 transition-all font-medium flex items-center gap-2 mx-auto"
               >
                 <FolderOpen size={18} />
                 Click để kết nối ngay
@@ -175,9 +175,9 @@ function MainApp({ store, onSwitchStore }: { store: StoreRegion, onSwitchStore: 
             className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-md flex flex-col items-center justify-center space-y-6"
           >
             <div className="relative">
-              <div className="w-24 h-24 border-4 border-blue-500/20 rounded-full animate-pulse" />
+              <div className="w-24 h-24 border-4 border-brand-500/20 rounded-full animate-pulse" />
               <Loader2
-                className="absolute inset-0 m-auto animate-spin text-blue-500"
+                className="absolute inset-0 m-auto animate-spin text-brand-500"
                 size={40}
               />
             </div>
@@ -213,7 +213,7 @@ function MainApp({ store, onSwitchStore }: { store: StoreRegion, onSwitchStore: 
             >
               <div className="h-16 flex items-center justify-between px-6 border-b border-slate-800/50 glass">
                 <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 bg-blue-600 rounded flex items-center justify-center text-white font-bold text-xs shadow-lg shadow-blue-900/40">
+                  <div className="w-8 h-8 bg-brand-600 rounded flex items-center justify-center text-white font-bold text-xs shadow-lg shadow-brand-900/40">
                     DM
                   </div>
                   <h1 className="font-light serif italic tracking-wide text-lg text-white">
@@ -245,7 +245,7 @@ function MainApp({ store, onSwitchStore }: { store: StoreRegion, onSwitchStore: 
                       className={cn(
                         "w-full flex items-center justify-between px-4 py-3 rounded-lg transition-all duration-300 group text-sm font-medium border border-transparent",
                         isActive
-                          ? "bg-blue-600/10 text-blue-400 border-blue-500/20 shadow-[0_0_15px_rgba(59,130,246,0.1)]"
+                          ? "bg-brand-600/10 text-brand-400 border-brand-500/20 shadow-[0_0_15px_rgba(59,130,246,0.1)]"
                           : "text-slate-400 hover:bg-slate-800/50 hover:text-slate-200",
                       )}
                     >
@@ -255,7 +255,7 @@ function MainApp({ store, onSwitchStore }: { store: StoreRegion, onSwitchStore: 
                           className={cn(
                             "transition-colors",
                             isActive
-                              ? "text-blue-400"
+                              ? "text-brand-400"
                               : "text-slate-500 group-hover:text-slate-400",
                           )}
                         />
@@ -278,14 +278,14 @@ function MainApp({ store, onSwitchStore }: { store: StoreRegion, onSwitchStore: 
                     }}
                     className={cn(
                         "w-full flex items-center justify-between p-3 rounded-xl border transition-all text-left group",
-                        store === 'HCM' ? "border-blue-500/30 bg-blue-900/10 hover:bg-blue-900/20" : "border-emerald-500/30 bg-emerald-900/10 hover:bg-emerald-900/20"
+                        "border-brand-500/30 bg-brand-900/10 hover:bg-brand-900/20"
                     )}
                   >
                         <div className="flex flex-col">
                             <span className="text-[9px] uppercase tracking-widest text-slate-500 font-bold">Cơ Sở Hoạt Động</span>
                             <span className={cn(
                                 "text-sm font-bold leading-tight mt-0.5",
-                                store === 'HCM' ? "text-blue-400" : "text-emerald-400"
+                                "text-brand-400"
                             )}>
                                 {store === 'HCM' ? 'Hồ Chí Minh' : 'Hà Nội'}
                             </span>
@@ -307,7 +307,7 @@ function MainApp({ store, onSwitchStore }: { store: StoreRegion, onSwitchStore: 
                         {isSaving && (
                           <Loader2
                             size={10}
-                            className="animate-spin text-blue-400"
+                            className="animate-spin text-brand-400"
                           />
                         )}
                       </div>
@@ -321,14 +321,14 @@ function MainApp({ store, onSwitchStore }: { store: StoreRegion, onSwitchStore: 
                         }}
                         className={cn(
                           "w-full flex items-center gap-3 mb-3 p-2 bg-slate-800/50 hover:bg-slate-800 transition-colors rounded-lg border border-slate-700/50 text-left",
-                          hasLocalFolder && "border-blue-500/30 bg-blue-950/10",
+                          hasLocalFolder && "border-brand-500/30 bg-brand-950/10",
                         )}
                       >
                         <div
                           className={cn(
                             "w-8 h-8 rounded shrink-0 flex items-center justify-center border transition-colors",
                             hasLocalFolder
-                              ? "bg-blue-950 text-blue-400 border-blue-900/40"
+                              ? "bg-brand-950 text-brand-400 border-brand-900/40"
                               : "bg-slate-900/50 text-slate-600 border-slate-800",
                           )}
                         >
@@ -355,20 +355,20 @@ function MainApp({ store, onSwitchStore }: { store: StoreRegion, onSwitchStore: 
                           <button
                             onClick={() => triggerManualBackup()}
                             disabled={isSaving}
-                            className="w-full flex items-center justify-between px-3 py-2 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed group"
+                            className="w-full flex items-center justify-between px-3 py-2 bg-brand-600/20 hover:bg-brand-600/40 text-brand-400 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed group"
                           >
                             <div className="flex items-center gap-2">
                               {isSaving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
                               <span className="text-[10px] uppercase tracking-widest font-bold">Lưu Dữ Liệu Cục Bộ (Ổ D)</span>
                             </div>
-                            <span className="text-[10px] uppercase font-mono text-blue-400/50 group-hover:text-blue-400/80 transition-colors">
+                            <span className="text-[10px] uppercase font-mono text-brand-400/50 group-hover:text-brand-400/80 transition-colors">
                               ⌘S
                             </span>
                           </button>
                           <button
                             onClick={() => triggerManualLoad()}
                             disabled={isLoading}
-                            className="w-full flex items-center justify-between px-3 py-2 bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-400 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed group"
+                            className="w-full flex items-center justify-between px-3 py-2 bg-brand-600/20 hover:bg-brand-600/40 text-brand-400 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed group"
                           >
                             <div className="flex items-center gap-2">
                               {isLoading ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
@@ -388,7 +388,7 @@ function MainApp({ store, onSwitchStore }: { store: StoreRegion, onSwitchStore: 
                         <motion.div
                           initial={{ width: 0 }}
                           animate={{ width: isSaving ? "100%" : "65%" }}
-                          className="bg-blue-500 h-full rounded-full shadow-[0_0_10px_rgba(59,130,246,0.5)] transition-all duration-1000"
+                          className="bg-brand-500 h-full rounded-full shadow-[0_0_10px_rgba(59,130,246,0.5)] transition-all duration-1000"
                         />
                       </div>
                       <p className="text-[9px] mt-2 text-slate-500 flex items-center justify-between">
@@ -443,13 +443,13 @@ function MainApp({ store, onSwitchStore }: { store: StoreRegion, onSwitchStore: 
               onClick={onSwitchStore}
               className={cn(
                 "hidden sm:flex flex-col items-start px-3 py-1 bg-slate-900 border rounded-lg transition-colors group",
-                store === 'HCM' ? "border-blue-500/30 hover:bg-blue-900/20" : "border-emerald-500/30 hover:bg-emerald-900/20"
+                "border-brand-500/30 hover:bg-brand-900/20"
               )}
             >
               <span className="text-[8px] uppercase tracking-widest text-slate-500 font-bold">Cơ Sở Hoạt Động</span>
               <span className={cn(
                 "text-xs font-bold leading-tight transition-colors",
-                store === 'HCM' ? "text-blue-400 group-hover:text-blue-300" : "text-emerald-400 group-hover:text-emerald-300"
+                "text-brand-400 group-hover:text-brand-300"
               )}>
                 {store === 'HCM' ? 'Hồ Chí Minh' : 'Hà Nội'}
               </span>
@@ -519,12 +519,12 @@ function MainApp({ store, onSwitchStore }: { store: StoreRegion, onSwitchStore: 
                               key={notif.id} 
                               className={cn(
                                 "flex items-start gap-3 p-3 border-b border-slate-800/50 last:border-0",
-                                notif.read ? "opacity-70" : "bg-blue-900/10"
+                                notif.read ? "opacity-70" : "bg-brand-900/10"
                               )}
                             >
                               <div className={cn(
                                 "w-2 h-2 rounded-full mt-1.5 shrink-0",
-                                notif.read ? "bg-slate-700" : "bg-blue-500"
+                                notif.read ? "bg-slate-700" : "bg-brand-500"
                               )} />
                               <div className="flex-1">
                                 <p className={cn(
@@ -605,13 +605,13 @@ export default function App() {
           <div className="space-y-4">
             <button
               onClick={() => handleSelectStore('HCM')}
-              className="w-full flex items-center justify-between p-4 rounded-xl border border-blue-500/30 bg-blue-900/20 hover:bg-blue-600/20 transition-all group"
+              className="w-full flex items-center justify-between p-4 rounded-xl border border-brand-500/30 bg-brand-900/20 hover:bg-brand-600/20 transition-all group"
             >
               <div className="flex flex-col text-left">
-                <span className="text-lg font-bold text-white group-hover:text-blue-400 transition-colors">Hồ Chí Minh</span>
+                <span className="text-lg font-bold text-white group-hover:text-brand-400 transition-colors">Hồ Chí Minh</span>
                 <span className="text-xs text-slate-500">Giữ nguyên dữ liệu hiện tại</span>
               </div>
-              <ChevronRight className="text-blue-500 group-hover:translate-x-1 transition-transform" />
+              <ChevronRight className="text-brand-500 group-hover:translate-x-1 transition-transform" />
             </button>
             <button
               onClick={() => handleSelectStore('HN')}

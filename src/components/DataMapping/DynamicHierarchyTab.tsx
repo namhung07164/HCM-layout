@@ -473,7 +473,7 @@ export default function DynamicHierarchyTab({
         <div className="flex items-center justify-between mb-8 shrink-0">
           <div className="flex items-center gap-4">
             <h3 className="text-lg font-bold text-white uppercase tracking-widest flex items-center gap-3">
-              <Calculator className="text-blue-500" /> Dynamic Hierarchy
+              <Calculator className="text-brand-500" /> Dynamic Hierarchy
             </h3>
             <select
               className="bg-slate-950 text-white text-sm px-4 py-2 rounded-lg border border-slate-700 outline-none"
@@ -498,7 +498,7 @@ export default function DynamicHierarchyTab({
                   className={cn(
                     "px-4 py-2 rounded-lg text-xs font-bold uppercase transition-colors shrink-0",
                     isVersionActive
-                      ? "bg-blue-600/20 text-blue-400 border border-blue-500/50"
+                      ? "bg-brand-600/20 text-brand-400 border border-brand-500/50"
                       : "bg-slate-800 text-slate-400 border border-slate-700 hover:bg-slate-700",
                   )}
                 >
@@ -506,7 +506,7 @@ export default function DynamicHierarchyTab({
                 </button>
                 <button
                   onClick={duplicateVersion}
-                  className="p-2 hover:bg-slate-800 rounded-lg text-slate-500 hover:text-blue-400 transition-colors"
+                  className="p-2 hover:bg-slate-800 rounded-lg text-slate-500 hover:text-brand-400 transition-colors"
                   title="Duplicate version"
                 >
                   <Copy size={16} />
@@ -524,7 +524,7 @@ export default function DynamicHierarchyTab({
           <div className="flex gap-3">
             <button
               onClick={addVersion}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white text-xs font-bold uppercase shadow-lg hover:bg-blue-500 transition-colors"
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-brand-600 text-white text-xs font-bold uppercase shadow-lg hover:bg-brand-500 transition-colors"
             >
               <Plus size={14} /> New Version
             </button>
@@ -547,14 +547,14 @@ export default function DynamicHierarchyTab({
                   </button>
                   <button
                     onClick={addGroup}
-                    className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-blue-400 text-xs font-bold uppercase transition-colors"
+                    className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-brand-400 text-xs font-bold uppercase transition-colors"
                   >
                     <Plus size={12} /> Create Group
                   </button>
 
                   {versions.length > 1 && (
                     <select
-                      className="bg-slate-800 hover:bg-slate-700 text-emerald-400 text-xs font-bold uppercase px-3 py-1.5 rounded-lg border border-slate-700 outline-none transition-colors cursor-pointer"
+                      className="bg-slate-800 hover:bg-slate-700 text-brand-400 text-xs font-bold uppercase px-3 py-1.5 rounded-lg border border-slate-700 outline-none transition-colors cursor-pointer"
                       value=""
                       onChange={(e) => {
                         if (e.target.value) {
@@ -577,7 +577,7 @@ export default function DynamicHierarchyTab({
                   <p className="mb-2">This version has no groups.</p>
                   <button
                     onClick={addGroup}
-                    className="text-blue-400 hover:underline"
+                    className="text-brand-400 hover:underline"
                   >
                     Create the first group
                   </button>
@@ -591,7 +591,7 @@ export default function DynamicHierarchyTab({
                   return (
                     <div
                       key={group.id}
-                      className="border border-slate-700 rounded-xl overflow-hidden bg-slate-900/80 hover:border-blue-500/50 transition-colors"
+                      className="border border-slate-700 rounded-xl overflow-hidden bg-slate-900/80 hover:border-brand-500/50 transition-colors"
                     >
                       <div className="px-4 py-3 bg-slate-800 border-b border-slate-700 flex items-center justify-between">
                         <div className="flex items-center gap-2">
@@ -613,10 +613,10 @@ export default function DynamicHierarchyTab({
                                 parseFloat(e.target.value),
                               )
                             }
-                            className="w-12 h-1 accent-blue-500 shrink-0 cursor-pointer"
+                            className="w-12 h-1 accent-brand-500 shrink-0 cursor-pointer"
                           />
                           <span 
-                            className="text-sm font-bold text-white ml-2 cursor-pointer hover:text-blue-400 transition-colors flex items-center gap-2 group/title"
+                            className="text-sm font-bold text-white ml-2 cursor-pointer hover:text-brand-400 transition-colors flex items-center gap-2 group/title"
                             onClick={(e) => renameGroup(group.id, e)}
                           >
                             {group.name}
@@ -644,7 +644,7 @@ export default function DynamicHierarchyTab({
                           </span>
                           <button
                             onClick={() => addRuleToGroup(group.id)}
-                            className="text-[10px] uppercase font-bold text-blue-400 hover:text-blue-300 flex items-center gap-1"
+                            className="text-[10px] uppercase font-bold text-brand-400 hover:text-brand-300 flex items-center gap-1"
                           >
                             <Plus size={12} /> Add Rule
                           </button>
@@ -734,7 +734,7 @@ export default function DynamicHierarchyTab({
 
                               <input
                                 type="text"
-                                className="bg-transparent text-slate-300 text-sm flex-1 outline-none border-b border-slate-700 focus:border-blue-500 px-1"
+                                className="bg-transparent text-slate-300 text-sm flex-1 outline-none border-b border-slate-700 focus:border-brand-500 px-1"
                                 value={rule.value}
                                 onChange={(e) =>
                                   updateRule(
