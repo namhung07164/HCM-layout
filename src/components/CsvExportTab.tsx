@@ -591,7 +591,7 @@ export default function CsvExportTab() {
         
         <div className="bg-white p-6 rounded-2xl shadow-sm flex flex-col xl:flex-row justify-between items-center gap-4 border border-slate-200">
           <div className="flex items-center gap-3 w-full xl:w-auto">
-            <div className="bg-indigo-600 p-3 rounded-xl text-white">
+            <div className="bg-brand-600 p-3 rounded-xl text-white">
               <i className="ph-fill ph-file-spreadsheet text-2xl"></i>
             </div>
             <div>
@@ -604,7 +604,7 @@ export default function CsvExportTab() {
               <button 
                 key={tab.id} 
                 onClick={() => switchTab(tab.id)} 
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap flex items-center gap-2 ${activeTab === tab.id ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap flex items-center gap-2 ${activeTab === tab.id ? 'bg-white text-brand-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
               >
                 <i className={`ph ${tab.icon} text-lg`}></i>{tab.label}
               </button>
@@ -625,7 +625,7 @@ export default function CsvExportTab() {
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="font-bold flex items-center gap-2 text-slate-700">
-                  <i className="ph ph-upload-simple text-indigo-600 text-lg"></i> 1. {activeTab === 'mass_task' ? 'Tải file mass project name' : 'Tải file'}
+                  <i className="ph ph-upload-simple text-brand-600 text-lg"></i> 1. {activeTab === 'mass_task' ? 'Tải file mass project name' : 'Tải file'}
                 </h2>
                 {file && (
                   <button 
@@ -637,8 +637,8 @@ export default function CsvExportTab() {
                 )}
               </div>
               <label className="border-2 border-dashed border-slate-200 rounded-xl p-8 flex flex-col items-center justify-center cursor-pointer hover:bg-slate-50 transition-colors group">
-                <i className={`ph ${file ? 'ph-file-csv' : 'ph-cloud-arrow-up'} text-4xl mb-2 transition-colors ${file ? 'text-indigo-500' : 'text-slate-300 group-hover:text-indigo-400'}`}></i>
-                <span className={`text-sm text-center font-medium ${file ? 'text-indigo-600' : 'text-slate-500'}`}>
+                <i className={`ph ${file ? 'ph-file-csv' : 'ph-cloud-arrow-up'} text-4xl mb-2 transition-colors ${file ? 'text-brand-500' : 'text-slate-300 group-hover:text-brand-400'}`}></i>
+                <span className={`text-sm text-center font-medium ${file ? 'text-brand-600' : 'text-slate-500'}`}>
                   {file ? file.name : 'Chọn file Excel gốc'}
                 </span>
                 <input type="file" className="hidden" onChange={handleFileUpload} accept=".xlsx,.xls,.csv" />
@@ -648,7 +648,7 @@ export default function CsvExportTab() {
                 <div className="mt-4">
                   <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">Chọn Sheet</label>
                   <select 
-                    className="w-full p-2 border border-slate-200 rounded-lg text-sm bg-slate-50 outline-none focus:border-indigo-500 text-slate-800" 
+                    className="w-full p-2 border border-slate-200 rounded-lg text-sm bg-slate-50 outline-none focus:border-brand-500 text-slate-800" 
                     value={activeSheet} 
                     onChange={(e) => {
                       setActiveSheet(e.target.value); 
@@ -667,7 +667,7 @@ export default function CsvExportTab() {
               <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
                 <div className="flex justify-between items-center mb-4">
                   <h2 className="font-bold flex items-center gap-2 text-slate-700">
-                    <i className="ph ph-paperclip text-indigo-600 text-lg"></i> 1b. Tải file Attached
+                    <i className="ph ph-paperclip text-brand-600 text-lg"></i> 1b. Tải file Attached
                   </h2>
                   {templateFile && (
                     <button 
@@ -679,8 +679,8 @@ export default function CsvExportTab() {
                   )}
                 </div>
                 <label className="border-2 border-dashed border-slate-200 rounded-xl p-8 flex flex-col items-center justify-center cursor-pointer hover:bg-slate-50 transition-colors group">
-                  <i className={`ph ${templateFile ? 'ph-file-csv' : 'ph-cloud-arrow-up'} text-4xl mb-2 transition-colors ${templateFile ? 'text-indigo-500' : 'text-slate-300 group-hover:text-indigo-400'}`}></i>
-                  <span className={`text-sm text-center font-medium ${templateFile ? 'text-indigo-600' : 'text-slate-500'}`}>
+                  <i className={`ph ${templateFile ? 'ph-file-csv' : 'ph-cloud-arrow-up'} text-4xl mb-2 transition-colors ${templateFile ? 'text-brand-500' : 'text-slate-300 group-hover:text-brand-400'}`}></i>
+                  <span className={`text-sm text-center font-medium ${templateFile ? 'text-brand-600' : 'text-slate-500'}`}>
                     {templateFile ? templateFile.name : 'Chọn file attached (Template)'}
                   </span>
                   <input type="file" className="hidden" accept=".xlsx,.xls,.csv" onChange={handleTemplateUpload} />
@@ -691,11 +691,11 @@ export default function CsvExportTab() {
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 relative">
               <div className="flex justify-between items-center mb-4 pb-3 border-b border-slate-100">
                 <h2 className="font-bold flex items-center gap-2 text-slate-700">
-                  <i className="ph ph-intersect text-indigo-600 text-lg"></i> 2. Cấu hình cột
+                  <i className="ph ph-intersect text-brand-600 text-lg"></i> 2. Cấu hình cột
                 </h2>
                 <button 
                   onClick={isLocked ? () => setShowUnlockModal(true) : handleSaveMapping} 
-                  className={`text-xs px-3 py-1.5 rounded-lg flex items-center gap-1 font-bold transition-colors ${isLocked ? 'bg-amber-50 text-amber-600 hover:bg-amber-100' : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100'}`}
+                  className={`text-xs px-3 py-1.5 rounded-lg flex items-center gap-1 font-bold transition-colors ${isLocked ? 'bg-amber-50 text-amber-600 hover:bg-amber-100' : 'bg-brand-50 text-brand-600 hover:bg-brand-100'}`}
                 >
                   <i className={isLocked ? "ph-fill ph-lock-key" : "ph ph-floppy-disk"}></i> 
                   {isLocked ? 'Đã khóa' : 'Lưu & Khóa'}
@@ -716,7 +716,7 @@ export default function CsvExportTab() {
                     <div className="flex gap-2">
                       <select 
                         disabled={isLocked} 
-                        className="flex-1 w-0 p-2 border border-slate-200 rounded-lg text-xs bg-slate-50 disabled:bg-slate-100 disabled:text-slate-400 outline-none focus:border-indigo-500 text-slate-800" 
+                        className="flex-1 w-0 p-2 border border-slate-200 rounded-lg text-xs bg-slate-50 disabled:bg-slate-100 disabled:text-slate-400 outline-none focus:border-brand-500 text-slate-800" 
                         value={mapping[col] || ''} 
                         onChange={e => setMapping({...mapping, [col]: e.target.value})}
                       >
@@ -727,7 +727,7 @@ export default function CsvExportTab() {
                         disabled={isLocked} 
                         type="text" 
                         placeholder="Giá trị tĩnh..." 
-                        className="w-24 p-2 border border-slate-200 rounded-lg text-xs disabled:bg-slate-100 disabled:text-slate-400 outline-none focus:border-indigo-500 text-slate-800" 
+                        className="w-24 p-2 border border-slate-200 rounded-lg text-xs disabled:bg-slate-100 disabled:text-slate-400 outline-none focus:border-brand-500 text-slate-800" 
                         value={constantMapping[col] || ''} 
                         onChange={e => setConstantMapping({...constantMapping, [col]: e.target.value})} 
                       />
@@ -742,7 +742,7 @@ export default function CsvExportTab() {
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 min-h-[500px] flex flex-col">
               <div className="flex justify-between items-center mb-6 pb-3 border-b border-slate-100">
                 <h2 className="font-bold flex items-center gap-2 text-slate-700">
-                  <i className="ph ph-eye text-indigo-600 text-lg"></i> 3. Xem trước & Xuất bản
+                  <i className="ph ph-eye text-brand-600 text-lg"></i> 3. Xem trước & Xuất bản
                 </h2>
                 <button 
                   disabled={!file} 
@@ -809,7 +809,7 @@ export default function CsvExportTab() {
               <input 
                 type="password" 
                 autoFocus 
-                className="w-full p-3 border border-slate-200 rounded-xl mb-2 text-center text-xl tracking-widest outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-all text-slate-800" 
+                className="w-full p-3 border border-slate-200 rounded-xl mb-2 text-center text-xl tracking-widest outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100 transition-all text-slate-800" 
                 placeholder="••••••" 
                 value={passwordInput} 
                 onChange={e => setPasswordInput(e.target.value)} 
@@ -820,7 +820,7 @@ export default function CsvExportTab() {
               </div>
               <div className="flex gap-3 mt-2">
                 <button onClick={() => setShowUnlockModal(false)} className="flex-1 py-2.5 text-slate-500 bg-slate-100 hover:bg-slate-200 rounded-xl font-bold text-sm transition-colors">Hủy</button>
-                <button onClick={handleUnlock} className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-sm shadow-md transition-colors">Xác nhận</button>
+                <button onClick={handleUnlock} className="flex-1 py-2.5 bg-brand-600 hover:bg-brand-700 text-white rounded-xl font-bold text-sm shadow-md transition-colors">Xác nhận</button>
               </div>
             </div>
           </div>

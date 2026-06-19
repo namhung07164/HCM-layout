@@ -5,7 +5,7 @@
   --font-sans: "Inter", "Helvetica Neue", Arial, sans-serif;
   --font-serif: "Georgia", serif;
   
-  --color-bg-dark: #0F1115;
+  --color-bg-dark: var(--theme-bg-dark);
   --color-glass-dark: rgba(30, 41, 59, 0.5);
   --color-border-dark: rgba(255, 255, 255, 0.05);
 
@@ -24,6 +24,7 @@
 
 @layer base {
   :root {
+    --theme-bg-dark: #0F1115;
     --brand-50: #eff6ff;
     --brand-100: #dbeafe;
     --brand-200: #bfdbfe;
@@ -38,6 +39,7 @@
   }
   
   .store-hn {
+    --theme-bg-dark: #0A1410;
     --brand-50: #ecfdf5;
     --brand-100: #d1fae5;
     --brand-200: #a7f3d0;

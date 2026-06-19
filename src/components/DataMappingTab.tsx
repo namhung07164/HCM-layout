@@ -127,7 +127,7 @@ export default React.memo(function DataMappingTab() {
                 className={cn(
                   "flex items-center gap-2 px-3 py-1 rounded-md text-[9px] font-bold uppercase tracking-widest transition-all duration-300",
                   activeSubTab === 'dynamic-hierarchy' 
-                    ? "bg-indigo-600/20 text-indigo-400 border border-indigo-500/30" 
+                    ? "bg-brand-600/20 text-brand-400 border border-brand-500/30" 
                     : "text-slate-500 hover:text-slate-300"
                 )}
               >
@@ -181,7 +181,7 @@ export default React.memo(function DataMappingTab() {
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.95 }}
-            className="fixed inset-0 z-[100] bg-[#0F1115] p-6 lg:p-12 overflow-hidden flex flex-col"
+            className="fixed inset-0 z-[100] bg-bg-dark p-6 lg:p-12 overflow-hidden flex flex-col"
           >
             <div className="flex items-center justify-between mb-8">
               <div className="flex bg-slate-900/50 p-1 rounded-xl border border-slate-800">
@@ -207,7 +207,7 @@ export default React.memo(function DataMappingTab() {
                   onClick={() => setActiveSubTab('dynamic-hierarchy')}
                   className={cn(
                     "flex items-center gap-2 px-8 py-3 rounded-lg text-sm font-bold uppercase transition-all",
-                    activeSubTab === 'dynamic-hierarchy' ? "bg-indigo-600 text-white shadow-lg" : "text-slate-500 hover:text-slate-200"
+                    activeSubTab === 'dynamic-hierarchy' ? "bg-brand-600 text-white shadow-lg" : "text-slate-500 hover:text-slate-200"
                   )}
                 >
                   <GitMerge size={16} /> Dynamic Hierarchy

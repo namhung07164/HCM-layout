@@ -558,7 +558,7 @@ export default function DynamicHierarchyTab({
                 <div className="flex gap-2">
                   <button
                     onClick={applyRules}
-                    className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold uppercase transition-colors shadow-lg shadow-indigo-900/20 box-border border-2 border-indigo-400"
+                    className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold uppercase transition-colors shadow-lg shadow-brand-900/20 box-border border-2 border-brand-400"
                   >
                     <Calculator size={12} /> Apply Rules
                   </button>

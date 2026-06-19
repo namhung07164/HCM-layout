@@ -128,7 +128,7 @@ function MainApp({ store, onSwitchStore }: { store: StoreRegion, onSwitchStore: 
   }
 
   return (
-    <div className={`flex h-screen bg-[#0F1115] text-[#E2E8F0] font-sans overflow-hidden selection:bg-brand-500/30 ${store === 'HN' ? 'store-hn' : ''}`}>
+    <div className={`flex h-screen bg-bg-dark text-[#E2E8F0] font-sans overflow-hidden selection:bg-brand-500/30 ${store === 'HN' ? 'store-hn' : ''}`}>
       {/* Permission Overlay */}
       <AnimatePresence>
         {needsPermission && (
@@ -209,7 +209,7 @@ function MainApp({ store, onSwitchStore }: { store: StoreRegion, onSwitchStore: 
               animate={{ x: 0 }}
               exit={{ x: "-100%" }}
               transition={{ type: "spring", damping: 25, stiffness: 200 }}
-              className="fixed inset-y-0 left-0 w-72 bg-[#0F1115] border-r border-slate-800/50 z-50 flex flex-col shadow-2xl"
+              className="fixed inset-y-0 left-0 w-72 bg-bg-dark border-r border-slate-800/50 z-50 flex flex-col shadow-2xl"
             >
               <div className="h-16 flex items-center justify-between px-6 border-b border-slate-800/50 glass">
                 <div className="flex items-center gap-3">
@@ -480,7 +480,7 @@ function MainApp({ store, onSwitchStore }: { store: StoreRegion, onSwitchStore: 
               >
                 <Bell size={18} />
                 {notifications && notifications.filter(n => !n.read).length > 0 && (
-                  <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full animate-pulse border border-[#0F1115]" />
+                  <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full animate-pulse border border-bg-dark" />
                 )}
               </button>
 
@@ -549,7 +549,7 @@ function MainApp({ store, onSwitchStore }: { store: StoreRegion, onSwitchStore: 
           </div>
         </header>
 
-        <div className="flex-1 overflow-auto bg-[#0F1115]">
+        <div className="flex-1 overflow-auto bg-bg-dark">
           <AnimatePresence mode="wait">
             <motion.div
               key={activeTab}
@@ -592,7 +592,7 @@ export default function App() {
 
   if (!store) {
     return (
-      <div className="flex h-screen bg-[#0F1115] text-[#E2E8F0] font-sans items-center justify-center p-6">
+      <div className="flex h-screen bg-bg-dark text-[#E2E8F0] font-sans items-center justify-center p-6">
         <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-2xl glass">
           <div className="text-center mb-8">
             <h1 className="text-3xl font-light serif italic tracking-wide text-white mb-3">

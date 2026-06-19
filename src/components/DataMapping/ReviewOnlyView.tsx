@@ -180,7 +180,7 @@ export default function ReviewOnlyView() {
 
   if (reviewVersionId === 'all') {
     return (
-      <div className="fixed inset-0 bg-[#0F1115] overflow-y-auto overflow-x-hidden p-8">
+      <div className="fixed inset-0 bg-bg-dark overflow-y-auto overflow-x-hidden p-8">
         <div className="max-w-[100vw] mx-auto flex flex-col items-center">
             {mapVersions.map(version => (
               <VersionStage key={version.id} version={version} mapUnits={mapUnits} summaryData={summaryData} selectedLabels={selectedLabels} windowSize={windowSize} />
@@ -197,7 +197,7 @@ export default function ReviewOnlyView() {
   }
 
   return (
-    <div className="fixed inset-0 bg-[#0F1115] overflow-hidden">
+    <div className="fixed inset-0 bg-bg-dark overflow-hidden">
         <VersionStage version={activeVersion} mapUnits={mapUnits} summaryData={summaryData} selectedLabels={selectedLabels} windowSize={{width: windowSize.width + 64, height: windowSize.height + 100}} />
     </div>
   );

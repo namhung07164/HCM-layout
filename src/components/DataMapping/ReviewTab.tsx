@@ -524,7 +524,7 @@ export default function ReviewTab({ units, setUnits, versions, setVersions, acti
         <div className="flex items-center gap-4">
           <button
             onClick={applyAllDynamicRules}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold uppercase transition-colors shadow-lg shadow-indigo-900/20 box-border border-2 border-indigo-400 mr-2"
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold uppercase transition-colors shadow-lg shadow-brand-900/20 box-border border-2 border-brand-400 mr-2"
           >
             <Calculator size={14} /> Apply Rules To All
           </button>
@@ -745,7 +745,7 @@ export default function ReviewTab({ units, setUnits, versions, setVersions, acti
                     </div>
                 </div>
                 
-                <div className="flex-1 overflow-auto p-6 bg-[#0F1115] flex justify-center items-center">
+                <div className="flex-1 overflow-auto p-6 bg-bg-dark flex justify-center items-center">
                     {shareImage && <img src={shareImage} alt="Share preview" className="max-w-full max-h-full object-contain rounded-xl border border-slate-800 shadow-xl" />}
                 </div>
 
