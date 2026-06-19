@@ -212,7 +212,7 @@ export default function DriveAutoExporter() {
           </div>
           <div className="flex justify-between">
             <span>Exporting:</span>
-            <span className={triggerExport ? 'text-blue-400 font-bold' : 'text-slate-500'}>
+            <span className={triggerExport ? 'text-brand-400 font-bold' : 'text-slate-500'}>
               {triggerExport ? 'Active' : 'Idle'}
             </span>
           </div>

@@ -307,6 +307,8 @@ export default function ReviewTab({ units, setUnits, versions, setVersions, acti
       dataMap[u.name.toLowerCase()] = {
         name: u.name,
         id: u.id,
+        unit: u.name,
+        size: 0,
         sales: 0,
         salesByCp: 0,
         salesByHcmcate: 0,
@@ -315,25 +317,27 @@ export default function ReviewTab({ units, setUnits, versions, setVersions, acti
         profitByHcmcate: 0,
         margin: 0,
         marginByCp: 0,
-        mgmtFee: 0,
+        hcmSalesEffi: 0,
+        hcmMargin: 0,
         mdStatus: "",
+        task: "",
         projectStatus: "",
-        projectLink: "",
         actStatus: "",
+        startDate: "",
+        endDate: "",
+        status: "",
         vendorCode: "",
         brandCode: "",
         brandName: "",
         classCode: "",
         floor: "",
-        taskDelegation: "",
-        flowStatus: "",
-        party: "",
       };
     });
 
     summaryData.forEach((sumData) => {
       const key = sumData.unit?.toLowerCase();
       if (key && dataMap[key]) {
+        dataMap[key].size = sumData.size || 0;
         dataMap[key].sales = sumData.salesAmount || 0;
         dataMap[key].salesByCp = sumData.salesByCp || 0;
         dataMap[key].salesByHcmcate = sumData.salesByHcmcate || 0;
@@ -342,14 +346,15 @@ export default function ReviewTab({ units, setUnits, versions, setVersions, acti
         dataMap[key].profitByHcmcate = sumData.profitByHcmcate || 0;
         dataMap[key].margin = sumData.margin || 0;
         dataMap[key].marginByCp = sumData.marginByCp || 0;
-        dataMap[key].mgmtFee = sumData.mgmtFee || 0;
+        dataMap[key].hcmSalesEffi = sumData.hcmSalesEffi || 0;
+        dataMap[key].hcmMargin = sumData.hcmMargin || 0;
         dataMap[key].mdStatus = sumData.mdStatus || "";
+        dataMap[key].task = sumData.task || "";
         dataMap[key].projectStatus = sumData.projectStatus || "";
-        dataMap[key].projectLink = (sumData as any).projectLink || ""; // Will be overridden or already exists in projectStatus
         dataMap[key].actStatus = sumData.actStatus || "";
-        dataMap[key].taskDelegation = sumData.taskDelegation || "";
-        dataMap[key].flowStatus = sumData.flowStatus || "";
-        dataMap[key].party = sumData.party || "";
+        dataMap[key].startDate = sumData.startDate || "";
+        dataMap[key].endDate = sumData.endDate || "";
+        dataMap[key].status = sumData.status || "";
         dataMap[key].vendorCode = sumData.vendorCode || "";
         dataMap[key].brandCode = sumData.brandCode || "";
         dataMap[key].brandName = sumData.brandName || "";
@@ -496,7 +501,7 @@ export default function ReviewTab({ units, setUnits, versions, setVersions, acti
       {/* Selection Header */}
       <div className="flex items-center justify-between p-4 bg-slate-900/50 rounded-2xl border border-slate-800/50 glass relative z-50">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-emerald-600/20 text-emerald-400 rounded-lg flex items-center justify-center">
+          <div className="w-8 h-8 bg-brand-600/20 text-brand-400 rounded-lg flex items-center justify-center">
             <Eye size={18} />
           </div>
           <div>
@@ -520,7 +525,7 @@ export default function ReviewTab({ units, setUnits, versions, setVersions, acti
              <button onClick={handleExportPDF} title="Save to PDF" className="px-3 py-1.5 hover:bg-slate-800 text-slate-400 hover:text-white rounded flex items-center justify-center transition-colors">
                <FileDown size={14} className="mr-2" /> PDF
              </button>
-             <button onClick={handleExportDrive} title="Upload to Google Drive" className="px-3 py-1.5 hover:bg-slate-800 text-slate-400 hover:text-blue-400 rounded flex items-center justify-center transition-colors">
+             <button onClick={handleExportDrive} title="Upload to Google Drive" className="px-3 py-1.5 hover:bg-slate-800 text-slate-400 hover:text-brand-400 rounded flex items-center justify-center transition-colors">
                <CloudUpload size={14} className="mr-2" /> Drive
              </button>
              <button onClick={handleExportR2} title="Upload to Cloudflare R2" className="px-3 py-1.5 hover:bg-slate-800 text-slate-400 hover:text-amber-400 rounded flex items-center justify-center transition-colors">
@@ -529,7 +534,7 @@ export default function ReviewTab({ units, setUnits, versions, setVersions, acti
              <div className="relative">
                 <button 
                   onClick={() => setShowLabelSettings(!showLabelSettings)} 
-                  className={cn("px-3 py-1.5 rounded flex items-center justify-center transition-colors", showLabelSettings ? "bg-blue-600 text-white" : "hover:bg-slate-800 text-slate-400 hover:text-blue-400")}
+                  className={cn("px-3 py-1.5 rounded flex items-center justify-center transition-colors", showLabelSettings ? "bg-brand-600 text-white" : "hover:bg-slate-800 text-slate-400 hover:text-brand-400")}
                 >
                   <Tags size={14} className="mr-2" /> Labels
                 </button>
@@ -540,7 +545,7 @@ export default function ReviewTab({ units, setUnits, versions, setVersions, acti
                       <label key={label} className="flex items-center gap-2 cursor-pointer group">
                         <input 
                           type="checkbox" 
-                          className="rounded border-slate-600 bg-slate-800 focus:ring-blue-500"
+                          className="rounded border-slate-600 bg-slate-800 focus:ring-brand-500"
                           checked={selectedLabels.includes(label)}
                           onChange={(e) => {
                             if (e.target.checked) {
@@ -562,7 +567,7 @@ export default function ReviewTab({ units, setUnits, versions, setVersions, acti
           <select 
             value={activeVersionId || ''} 
             onChange={(e) => setActiveVersionId(e.target.value)}
-            className="bg-slate-950 border border-slate-800 text-slate-300 text-xs font-bold rounded-lg px-4 py-2 outline-none focus:border-blue-500 transition-all min-w-[160px] uppercase tracking-wider"
+            className="bg-slate-950 border border-slate-800 text-slate-300 text-xs font-bold rounded-lg px-4 py-2 outline-none focus:border-brand-500 transition-all min-w-[160px] uppercase tracking-wider"
           >
             {versions.length === 0 && <option value="">No versions available</option>}
             {versions.map(v => (
@@ -720,7 +725,7 @@ export default function ReviewTab({ units, setUnits, versions, setVersions, acti
                     <X size={20} />
                 </button>
                 <div className="p-6 border-b border-slate-800 flex items-center gap-4">
-                    <div className="w-10 h-10 rounded-xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400">
+                    <div className="w-10 h-10 rounded-xl bg-brand-600/20 border border-brand-500/30 flex items-center justify-center text-brand-400">
                         <LinkIcon size={20} />
                     </div>
                     <div>
@@ -742,7 +747,7 @@ export default function ReviewTab({ units, setUnits, versions, setVersions, acti
                     />
                     <button 
                       onClick={copyToClipboard}
-                      className="px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg flex items-center gap-2 transition-colors"
+                      className="px-6 py-3 bg-brand-600 hover:bg-brand-500 text-white font-bold rounded-lg flex items-center gap-2 transition-colors"
                     >
                       {copiedLink ? <Check size={18} /> : <Copy size={18} />} 
                       {copiedLink ? 'Copied' : 'Copy Link'}
@@ -848,7 +853,7 @@ export default function ReviewTab({ units, setUnits, versions, setVersions, acti
                                 versions.forEach(v => newSel[v.id] = e.target.checked);
                                 setSelectedVersionsToExport(newSel);
                             }}
-                            className="w-5 h-5 rounded bg-slate-900 border-slate-600 focus:ring-blue-500"
+                            className="w-5 h-5 rounded bg-slate-900 border-slate-600 focus:ring-brand-500"
                         />
                         <span className="text-white font-bold">Select All</span>
                     </label>
@@ -861,7 +866,7 @@ export default function ReviewTab({ units, setUnits, versions, setVersions, acti
                                 onChange={(e) => {
                                     setSelectedVersionsToExport(prev => ({ ...prev, [v.id]: e.target.checked }));
                                 }}
-                                className="w-5 h-5 rounded bg-slate-900 border-slate-600 focus:ring-blue-500"
+                                className="w-5 h-5 rounded bg-slate-900 border-slate-600 focus:ring-brand-500"
                             />
                             <span className="text-slate-300">{v.name}</span>
                         </label>
@@ -1275,7 +1280,7 @@ export const ExportAllManager = ({ versions, units, summaryData, format, paperSi
     return (
         <>
             <div className="fixed inset-0 z-[9999] bg-black/80 flex flex-col items-center justify-center text-white backdrop-blur-sm">
-                <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-6"></div>
+                <div className="w-16 h-16 border-4 border-brand-500 border-t-transparent rounded-full animate-spin mb-6"></div>
                 <h3 className="text-xl font-bold tracking-wider">Generating Export...</h3>
                 <p className="text-slate-400 mt-2">Loading maps and generating {format.toUpperCase()} ( {Object.keys(stagesReady).length} / {versions.length} )</p>
             </div>

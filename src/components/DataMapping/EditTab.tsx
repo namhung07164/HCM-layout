@@ -84,7 +84,7 @@ function SearchableSelect({
             <div className="relative">
                 <input 
                     type="text"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-3 pr-8 py-2 text-sm text-slate-200 outline-none focus:border-blue-500 transition-colors"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-3 pr-8 py-2 text-sm text-slate-200 outline-none focus:border-brand-500 transition-colors"
                     value={searchTerm}
                     onChange={(e) => {
                         setSearchTerm(e.target.value);
@@ -117,7 +117,7 @@ function SearchableSelect({
                         filteredOptions.map(opt => (
                             <div 
                                 key={opt.value}
-                                className={`px-3 py-2 text-sm cursor-pointer transition-colors ${value === opt.value ? 'bg-blue-600/30 text-blue-300 font-medium' : 'text-slate-300 hover:bg-slate-800'}`}
+                                className={`px-3 py-2 text-sm cursor-pointer transition-colors ${value === opt.value ? 'bg-brand-600/30 text-brand-300 font-medium' : 'text-slate-300 hover:bg-slate-800'}`}
                                 onClick={() => {
                                     onChange(opt.value);
                                     setSearchTerm(opt.label);
@@ -965,7 +965,7 @@ export default function EditTab({ units, setUnits, versions, setVersions, active
                         {alignStep === 'none' ? (
                             <button 
                                 onClick={() => setAlignStep('bg1')}
-                                className="text-[10px] font-bold uppercase text-blue-400 hover:text-blue-300 flex items-center gap-1"
+                                className="text-[10px] font-bold uppercase text-brand-400 hover:text-brand-300 flex items-center gap-1"
                             >
                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12A9 9 0 1 1 3 12a9 9 0 0 1 18 0z"></path><path d="M12 8v8"></path><path d="M8 12h8"></path></svg>
                                 2-Point Align
@@ -1007,7 +1007,7 @@ export default function EditTab({ units, setUnits, versions, setVersions, active
                 {localImageUrl && !activeVersionId && isLocked && (
                     <button 
                         onClick={handleCreateVersion}
-                        className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white border border-blue-500 text-xs font-bold uppercase shadow-lg hover:bg-blue-500"
+                        className="flex items-center gap-2 px-4 py-2 rounded-lg bg-brand-600 text-white border border-brand-500 text-xs font-bold uppercase shadow-lg hover:bg-brand-500"
                     >
                         <Save size={14} /> Save Version
                     </button>
@@ -1081,7 +1081,7 @@ export default function EditTab({ units, setUnits, versions, setVersions, active
 
         {isLoading && (
             <div className="absolute inset-0 z-[100] bg-slate-950/80 backdrop-blur-sm flex flex-col items-center justify-center pointer-events-auto">
-                <div className="w-12 h-12 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin mb-4" />
+                <div className="w-12 h-12 border-4 border-brand-500/30 border-t-brand-500 rounded-full animate-spin mb-4" />
                 <p className="text-sm font-bold text-slate-300 uppercase tracking-widest animate-pulse">Processing File...</p>
             </div>
         )}
@@ -1090,7 +1090,7 @@ export default function EditTab({ units, setUnits, versions, setVersions, active
              <div {...getRootProps()} className="absolute inset-0 flex items-center justify-center cursor-pointer hover:bg-slate-800/20 transition-colors z-10 pointer-events-auto">
                <input {...getInputProps()} />
                <div className="text-center p-8 bg-slate-900/40 rounded-3xl border border-dashed border-slate-700 max-w-md backdrop-blur-sm">
-                 <div className="w-16 h-16 bg-blue-600/20 text-blue-400 rounded-2xl mx-auto flex items-center justify-center mb-4">
+                 <div className="w-16 h-16 bg-brand-600/20 text-brand-400 rounded-2xl mx-auto flex items-center justify-center mb-4">
                    <Upload size={32} />
                  </div>
                  <h3 className="text-xl text-white font-medium mb-2">Start Mapping Units</h3>
@@ -1405,7 +1405,7 @@ export default function EditTab({ units, setUnits, versions, setVersions, active
                 <input 
                   type="text"
                   placeholder="Search units..."
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-4 py-2 text-xs text-slate-200 outline-none focus:border-blue-500 transition-all"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-4 py-2 text-xs text-slate-200 outline-none focus:border-brand-500 transition-all"
                   value={librarySearchTerm}
                   onChange={(e) => setLibrarySearchTerm(e.target.value)}
                 />
@@ -1466,7 +1466,7 @@ export default function EditTab({ units, setUnits, versions, setVersions, active
                     <button 
                         onClick={handleToggleAllVisibility}
                         disabled={filteredUnits.length === 0 || !filteredUnits.some(u => !u.locked)}
-                        className="text-[10px] font-bold text-blue-400 hover:text-blue-300 disabled:opacity-30 disabled:cursor-not-allowed uppercase transition-colors flex items-center gap-1"
+                        className="text-[10px] font-bold text-brand-400 hover:text-brand-300 disabled:opacity-30 disabled:cursor-not-allowed uppercase transition-colors flex items-center gap-1"
                         title="Toggle Visibility for Unlocked Filtered Units"
                     >
                         <Eye size={10} /> All
@@ -1495,7 +1495,7 @@ export default function EditTab({ units, setUnits, versions, setVersions, active
                         key={unit.id}
                         className={cn(
                             "flex items-center justify-between p-2 rounded-lg border text-sm cursor-pointer transition-colors",
-                            selectedId === unit.id ? "bg-blue-900/20 border-blue-500/50 text-blue-300" : "bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-800"
+                            selectedId === unit.id ? "bg-brand-900/20 border-brand-500/50 text-brand-300" : "bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-800"
                         )}
                         onClick={() => {
                             setActiveTool('select');
@@ -1514,7 +1514,7 @@ export default function EditTab({ units, setUnits, versions, setVersions, active
                                 disabled={unit.locked}
                                 className={cn(
                                     "p-1 rounded transition-colors",
-                                    unit.visible ? "text-blue-400 hover:bg-blue-500/10" : "text-slate-600 hover:bg-slate-700",
+                                    unit.visible ? "text-brand-400 hover:bg-brand-500/10" : "text-slate-600 hover:bg-slate-700",
                                     unit.locked && "opacity-30 cursor-not-allowed"
                                 )}
                                 title={unit.locked ? "Unlock to toggle visibility" : (unit.visible ? "Hide Unit" : "Show Unit")}
@@ -1570,7 +1570,7 @@ export default function EditTab({ units, setUnits, versions, setVersions, active
                   autoFocus
                   type="text"
                   placeholder="Search units..."
-                  className="w-full bg-slate-800 border border-slate-700 rounded-xl pl-10 pr-4 py-2 text-sm text-white outline-none focus:border-blue-500 transition-all font-medium"
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl pl-10 pr-4 py-2 text-sm text-white outline-none focus:border-brand-500 transition-all font-medium"
                   value={searchUnit}
                   onChange={(e) => setSearchUnit(e.target.value)}
                 />
@@ -1594,7 +1594,7 @@ export default function EditTab({ units, setUnits, versions, setVersions, active
                         </div>
                       </div>
                       <div className="opacity-0 group-hover:opacity-100 transition-opacity">
-                         <div className="px-2 py-1 bg-blue-600/20 text-blue-400 text-[10px] font-bold rounded uppercase">Select</div>
+                         <div className="px-2 py-1 bg-brand-600/20 text-brand-400 text-[10px] font-bold rounded uppercase">Select</div>
                       </div>
                     </button>
                   ))}
@@ -1621,7 +1621,7 @@ function ToolButton({ icon: Icon, active, onClick, title, disabled }: { icon: an
             className={cn(
                 "p-3 rounded-xl transition-all",
                 disabled ? "opacity-30 cursor-not-allowed" : "hover:bg-slate-800",
-                active ? "bg-blue-600/20 text-blue-400 shadow-inner" : "text-slate-400"
+                active ? "bg-brand-600/20 text-brand-400 shadow-inner" : "text-slate-400"
             )}
         >
             <Icon size={18} />

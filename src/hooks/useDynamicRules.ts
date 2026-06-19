@@ -16,6 +16,8 @@ export function useDynamicRules(
       dataMap[u.name.toLowerCase()] = {
         name: u.name,
         id: u.id,
+        unit: u.name,
+        size: 0,
         sales: 0,
         salesByCp: 0,
         salesByHcmcate: 0,
@@ -24,25 +26,27 @@ export function useDynamicRules(
         profitByHcmcate: 0,
         margin: 0,
         marginByCp: 0,
-        mgmtFee: 0,
+        hcmSalesEffi: 0,
+        hcmMargin: 0,
         mdStatus: "",
+        task: "",
         projectStatus: "",
-        projectLink: "",
         actStatus: "",
+        startDate: "",
+        endDate: "",
+        status: "",
         vendorCode: "",
         brandCode: "",
         brandName: "",
         classCode: "",
         floor: "",
-        taskDelegation: "",
-        flowStatus: "",
-        party: "",
       };
     });
 
     summaryData.forEach((sumData) => {
       const key = sumData.unit?.toLowerCase();
       if (key && dataMap[key]) {
+        dataMap[key].size = sumData.size || 0;
         dataMap[key].sales = sumData.salesAmount || 0;
         dataMap[key].salesByCp = sumData.salesByCp || 0;
         dataMap[key].salesByHcmcate = sumData.salesByHcmcate || 0;
@@ -51,14 +55,15 @@ export function useDynamicRules(
         dataMap[key].profitByHcmcate = sumData.profitByHcmcate || 0;
         dataMap[key].margin = sumData.margin || 0;
         dataMap[key].marginByCp = sumData.marginByCp || 0;
-        dataMap[key].mgmtFee = sumData.mgmtFee || 0;
+        dataMap[key].hcmSalesEffi = sumData.hcmSalesEffi || 0;
+        dataMap[key].hcmMargin = sumData.hcmMargin || 0;
         dataMap[key].mdStatus = sumData.mdStatus || "";
+        dataMap[key].task = sumData.task || "";
         dataMap[key].projectStatus = sumData.projectStatus || "";
-        dataMap[key].projectLink = sumData.projectLink || ""; // Will be overridden or already exists in projectStatus
         dataMap[key].actStatus = sumData.actStatus || "";
-        dataMap[key].taskDelegation = sumData.taskDelegation || "";
-        dataMap[key].flowStatus = sumData.flowStatus || "";
-        dataMap[key].party = sumData.party || "";
+        dataMap[key].startDate = sumData.startDate || "";
+        dataMap[key].endDate = sumData.endDate || "";
+        dataMap[key].status = sumData.status || "";
         dataMap[key].vendorCode = sumData.vendorCode || "";
         dataMap[key].brandCode = sumData.brandCode || "";
         dataMap[key].brandName = sumData.brandName || "";

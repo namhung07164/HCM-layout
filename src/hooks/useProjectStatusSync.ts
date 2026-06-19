@@ -167,11 +167,10 @@ export function useProjectStatusSync(validUnits: string[], activeStore: string) 
   const projectStatus = useMemo(() => {
     // Only map projects that have a code matching units from the Summary tab
     // Also restrict strictly to activeStore
-    const normalizedValidUnits = validUnits.map(u => u.toLowerCase().trim());
     const filteredProjects = rawProjects.filter(p => {
-      const code = String(p.code || p.CODE || '').trim().toLowerCase();
+      const code = String(p.code || p.CODE || '').trim();
       const store = String(p.store || p.STORE || '').trim().toUpperCase();
-      return normalizedValidUnits.includes(code) && store === activeStore;
+      return validUnits.includes(code) && store === activeStore;
     });
 
     return filteredProjects.map(p => {

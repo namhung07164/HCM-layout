@@ -203,7 +203,7 @@ export default React.memo(function DashboardTab() {
       <div className="glass rounded-3xl p-8 border border-slate-800/50 shadow-2xl flex-shrink-0 relative z-40">
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-blue-600/20 border border-blue-500/30 rounded-xl flex items-center justify-center text-blue-400">
+            <div className="w-10 h-10 bg-brand-600/20 border border-brand-500/30 rounded-xl flex items-center justify-center text-brand-400">
               <Filter size={20} />
             </div>
             <div>
@@ -266,7 +266,7 @@ export default React.memo(function DashboardTab() {
                 <div key={key} className="space-y-2 relative group flex flex-col">
                   <div className="flex justify-between items-center">
                     <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                      <Icon size={12} className="text-blue-500" /> {filterConfig.label}
+                      <Icon size={12} className="text-brand-500" /> {filterConfig.label}
                     </label>
                     <button 
                       onClick={() => removeFilterField(key)}
@@ -281,7 +281,7 @@ export default React.memo(function DashboardTab() {
                     <select
                       value={filters.mdStatus}
                       onChange={(e) => handleFilterChange('mdStatus', e.target.value)}
-                      className="w-full bg-slate-900/50 border border-slate-800 text-slate-200 px-4 py-2 rounded-xl text-sm outline-none focus:border-blue-500 transition-all font-sans h-10 mt-auto"
+                      className="w-full bg-slate-900/50 border border-slate-800 text-slate-200 px-4 py-2 rounded-xl text-sm outline-none focus:border-brand-500 transition-all font-sans h-10 mt-auto"
                     >
                       <option value="">-- All --</option>
                       {mdStatusOptions.map(opt => (
@@ -292,7 +292,7 @@ export default React.memo(function DashboardTab() {
                     <select
                       value={filters.projectStatus}
                       onChange={(e) => handleFilterChange('projectStatus', e.target.value)}
-                      className="w-full bg-slate-900/50 border border-slate-800 text-slate-200 px-4 py-2 rounded-xl text-sm outline-none focus:border-blue-500 transition-all font-sans h-10 mt-auto"
+                      className="w-full bg-slate-900/50 border border-slate-800 text-slate-200 px-4 py-2 rounded-xl text-sm outline-none focus:border-brand-500 transition-all font-sans h-10 mt-auto"
                     >
                       <option value="">-- All --</option>
                       {projectStatusOptions.map(opt => (
@@ -304,7 +304,7 @@ export default React.memo(function DashboardTab() {
                       type="date"
                       value={filters[key]}
                       onChange={(e) => handleFilterChange(key, e.target.value)}
-                      className="w-full bg-slate-900/50 border border-slate-800 text-slate-200 px-4 flex-[1] rounded-xl text-sm outline-none focus:border-blue-500 transition-all font-sans min-h-[40px] mt-auto"
+                      className="w-full bg-slate-900/50 border border-slate-800 text-slate-200 px-4 flex-[1] rounded-xl text-sm outline-none focus:border-brand-500 transition-all font-sans min-h-[40px] mt-auto"
                     />
                   ) : (
                     <input
@@ -312,7 +312,7 @@ export default React.memo(function DashboardTab() {
                       value={filters[key]}
                       onChange={(e) => handleFilterChange(key, e.target.value)}
                       placeholder={`${filterConfig.label}...`}
-                      className="w-full bg-slate-900/50 border border-slate-800 text-slate-200 px-4 flex-[1] rounded-xl text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20 transition-all font-sans min-h-[40px] mt-auto"
+                      className="w-full bg-slate-900/50 border border-slate-800 text-slate-200 px-4 flex-[1] rounded-xl text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500/20 transition-all font-sans min-h-[40px] mt-auto"
                     />
                   )}
                 </div>
@@ -326,7 +326,7 @@ export default React.memo(function DashboardTab() {
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
         {/* Metric Cards */}
         <div className="flex flex-col space-y-6">
-          <div className="glass rounded-3xl p-6 border border-slate-800/50 flex flex-col justify-between h-32 group hover:border-blue-500/30 transition-all">
+          <div className="glass rounded-3xl p-6 border border-slate-800/50 flex flex-col justify-between h-32 group hover:border-brand-500/30 transition-all">
             <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Tổng Doanh Thu</p>
             <div>
               <p className="text-2xl font-light text-white serif italic truncate">
@@ -339,7 +339,7 @@ export default React.memo(function DashboardTab() {
           <div className="glass rounded-3xl p-6 border border-slate-800/50 flex flex-col justify-between h-32 group hover:border-cyan-500/30 transition-all">
             <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Sales by Cp</p>
             <div>
-              <p className="text-2xl font-light text-blue-400 serif italic truncate">
+              <p className="text-2xl font-light text-brand-400 serif italic truncate">
                 {Number(totalSalesByCp).toLocaleString('en-US', { maximumFractionDigits: 2 })}
                 <span className="text-xs text-slate-500 ml-2 italic">vnđ</span>
               </p>
@@ -366,12 +366,12 @@ export default React.memo(function DashboardTab() {
             </div>
           </div>
 
-          <div className="glass rounded-3xl p-6 border border-slate-800/50 flex flex-col justify-between h-32 group hover:border-emerald-500/30 transition-all">
+          <div className="glass rounded-3xl p-6 border border-slate-800/50 flex flex-col justify-between h-32 group hover:border-brand-500/30 transition-all">
             <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Tỉ suất Margin</p>
             <div>
               <p className="text-2xl font-light text-white serif italic truncate">
                 {overallMargin.toFixed(2)}
-                <span className="text-xs text-emerald-500 ml-2 italic">%</span>
+                <span className="text-xs text-brand-500 ml-2 italic">%</span>
               </p>
             </div>
           </div>
@@ -381,7 +381,7 @@ export default React.memo(function DashboardTab() {
         <div className="lg:col-span-3 glass rounded-3xl p-8 border border-slate-800/50 min-h-[500px] flex flex-col">
           <div className="flex items-center justify-between mb-8 text-[10px] font-bold text-slate-500 uppercase tracking-widest">
             <span>Biểu đồ Lợi Nhuận Kép (Sales & Profit & Margin)</span>
-            <span className="text-blue-400">Yearly Performance</span>
+            <span className="text-brand-400">Yearly Performance</span>
           </div>
           
           <div className="flex-1 w-full">

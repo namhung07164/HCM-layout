@@ -78,7 +78,7 @@ export default function AutocompleteCell({
           "bg-transparent border-0 text-slate-300 w-full outline-none",
           isLocked
             ? "bg-transparent opacity-50 cursor-not-allowed"
-            : "cursor-text bg-slate-900/80 hover:bg-slate-800 transition-colors focus:bg-blue-600/20 focus:text-white rounded px-3 py-1.5 shadow-inner shadow-black/40 border border-slate-700/50 hover:border-slate-500 focus:border-blue-500/50",
+            : "cursor-text bg-slate-900/80 hover:bg-slate-800 transition-colors focus:bg-brand-600/20 focus:text-white rounded px-3 py-1.5 shadow-inner shadow-black/40 border border-slate-700/50 hover:border-slate-500 focus:border-brand-500/50",
         )}
         placeholder={placeholder}
       />
@@ -100,7 +100,7 @@ export default function AutocompleteCell({
               }}
               className="px-3 py-2 hover:bg-slate-700 cursor-pointer text-xs flex flex-col gap-0.5"
             >
-              <span className="font-medium text-blue-400">{opt.value || "-"}</span>
+              <span className="font-medium text-brand-400">{opt.value || "-"}</span>
               {opt.label && (
                 <span className="text-[10px] text-slate-300">{opt.label}</span>
               )}
