@@ -147,6 +147,12 @@ export default function EditTab({ units, setUnits, versions, setVersions, active
     return Array.from(map.values()).sort((a, b) => a.unit.localeCompare(b.unit));
   }, [summaryData]);
 
+  const summaryMap = React.useMemo(() => {
+    const map = new Map();
+    summaryData.forEach(u => map.set(u.unit, u));
+    return map;
+  }, [summaryData]);
+
   const activeVersion = versions.find(v => v.id === activeVersionId);
 
   const [localImageUrl, setLocalImageUrl] = useState<string | null>(null);
@@ -214,6 +220,11 @@ export default function EditTab({ units, setUnits, versions, setVersions, active
   const [image] = useImage(localImageUrl || '', 'anonymous');
   const [activeTool, setActiveTool] = useState<ShapeType | 'select' | 'edit-bg'>('select');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const selectedUnit = React.useMemo(() => {
+    return selectedId ? units.find(u => u.id === selectedId) : null;
+  }, [units, selectedId]);
+
   const [isDrawing, setIsDrawing] = useState(false);
   const [newShape, setNewShape] = useState<Partial<UnitShape> | null>(null);
 
@@ -853,9 +864,9 @@ export default function EditTab({ units, setUnits, versions, setVersions, active
         <ToolButton icon={CircleIcon} active={activeTool === 'circle'} onClick={() => setActiveTool('circle')} title="Circle" />
         <ToolButton icon={Hexagon} active={activeTool === 'polygon'} onClick={() => setActiveTool('polygon')} title="Polygon (Double click to finish)" />
         <div className="w-8 h-px bg-slate-800 my-2" />
-        <ToolButton icon={RotateCw} active={false} onClick={handleRotate} title="Rotate 90°" disabled={!selectedId || units.find(u => u.id === selectedId)?.locked} />
+        <ToolButton icon={RotateCw} active={false} onClick={handleRotate} title="Rotate 90°" disabled={!selectedId || selectedUnit?.locked} />
         <ToolButton icon={Undo2} active={false} onClick={handleUndo} title="Undo (Ctrl+Z)" disabled={history.length === 0} />
-        <ToolButton icon={Trash2} active={false} onClick={handleDelete} title="Delete Selected" disabled={!selectedId || units.find(u => u.id === selectedId)?.locked} />
+        <ToolButton icon={Trash2} active={false} onClick={handleDelete} title="Delete Selected" disabled={!selectedId || selectedUnit?.locked} />
       </div>
 
       {portalNode && createPortal(
@@ -1312,7 +1323,7 @@ export default function EditTab({ units, setUnits, versions, setVersions, active
                                     />
                                 )}
                                 {unit.visible && unit.name && scale > 0.4 && (() => {
-                                    const uInfo = summaryData.find((s) => s.unit === unit.name);
+                                    const uInfo = summaryMap.get(unit.name);
                                     const sizeLabel = uInfo?.size ? `${unit.name}\n${uInfo.size} SQM` : unit.name;
                                     return (
                                         <Text
@@ -1383,8 +1394,8 @@ export default function EditTab({ units, setUnits, versions, setVersions, active
                         )}
                         <Transformer 
                             ref={trRef} 
-                            enabledAnchors={units.find(u => u.id === selectedId)?.locked ? [] : undefined}
-                            rotateEnabled={!units.find(u => u.id === selectedId)?.locked}
+                            enabledAnchors={selectedUnit?.locked ? [] : undefined}
+                            rotateEnabled={!selectedUnit?.locked}
                             boundBoxFunc={(oldBox, newBox) => {
                                 if (newBox.width < 10 || newBox.height < 10) return oldBox;
                                 return newBox;
@@ -1417,7 +1428,7 @@ export default function EditTab({ units, setUnits, versions, setVersions, active
                 <div className="space-y-1">
                     <label className="text-[10px] uppercase text-slate-500 font-bold">Unit Name</label>
                     <SearchableSelect 
-                        value={units.find(u => u.id === selectedId)?.name || ''}
+                        value={selectedUnit?.name || ''}
                         onChange={(val) => {
                             handleSetUnitsWithHistory(units.map(u => u.id === selectedId ? { ...u, name: val } : u));
                         }}
@@ -1429,9 +1440,9 @@ export default function EditTab({ units, setUnits, versions, setVersions, active
                     <div className="flex items-center gap-2">
                         <div className={cn(
                             "p-2 rounded-lg",
-                            units.find(u => u.id === selectedId)?.locked ? "bg-amber-500/10 text-amber-500" : "bg-slate-800 text-slate-400"
+                            selectedUnit?.locked ? "bg-amber-500/10 text-amber-500" : "bg-slate-800 text-slate-400"
                         )}>
-                            {units.find(u => u.id === selectedId)?.locked ? <Lock size={16} /> : <Unlock size={16} />}
+                            {selectedUnit?.locked ? <Lock size={16} /> : <Unlock size={16} />}
                         </div>
                         <span className="text-xs font-bold text-slate-300 uppercase">Lock Position</span>
                     </div>
@@ -1441,13 +1452,13 @@ export default function EditTab({ units, setUnits, versions, setVersions, active
                         }}
                         className={cn(
                             "relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none",
-                            units.find(u => u.id === selectedId)?.locked ? "bg-amber-500" : "bg-slate-700"
+                            selectedUnit?.locked ? "bg-amber-500" : "bg-slate-700"
                         )}
                     >
                         <span
                             className={cn(
                                 "inline-block h-4 w-4 transform rounded-full bg-white transition-transform",
-                                units.find(u => u.id === selectedId)?.locked ? "translate-x-6" : "translate-x-1"
+                                selectedUnit?.locked ? "translate-x-6" : "translate-x-1"
                             )}
                         />
                     </button>

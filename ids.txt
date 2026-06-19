@@ -1,0 +1,35 @@
+222:  const [selectedId, setSelectedId] = useState<string | null>(null);
+256:          } else if (selectedId && (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+271:                 u.id === selectedId ? { ...u, x: (u.x || 0) + dx, y: (u.y || 0) + dy } : u
+277:  }, [handleUndo, selectedId, magneticGrid, gridSize, units, setUnits]);
+643:    if (activeTool === 'select' && selectedId && trRef.current) {
+644:      const node = stageRef.current.findOne(`#${selectedId}`);
+652:  }, [selectedId, activeTool, units]);
+666:    if (selectedId) {
+667:        handleSetUnitsWithHistory(units.filter(u => u.id !== selectedId));
+673:    if (selectedId) {
+675:        u.id === selectedId ? { ...u, rotation: ((u.rotation || 0) + 90) % 360 } : u
+784:      if (selectedId && idsToDelete.has(selectedId)) {
+862:        <ToolButton icon={RotateCw} active={false} onClick={handleRotate} title="Rotate 90°" disabled={!selectedId || units.find(u => u.id === selectedId)?.locked} />
+864:        <ToolButton icon={Trash2} active={false} onClick={handleDelete} title="Delete Selected" disabled={!selectedId || units.find(u => u.id === selectedId)?.locked} />
+1123:                    draggable={!isLocked && activeTool === 'select' && !selectedId}
+1194:                                        stroke={selectedId === unit.id ? '#3b82f6' : 'rgba(0,0,0,0.3)'}
+1195:                                        strokeWidth={selectedId === unit.id ? 3 : 2}
+1196:                                        shadowBlur={selectedId === unit.id ? 10 : 0}
+1238:                                        stroke={selectedId === unit.id ? '#3b82f6' : 'rgba(0,0,0,0.3)'}
+1239:                                        strokeWidth={selectedId === unit.id ? 3 : 2}
+1240:                                        shadowBlur={selectedId === unit.id ? 10 : 0}
+1280:                                        stroke={selectedId === unit.id ? '#3b82f6' : 'rgba(0,0,0,0.3)'}
+1281:                                        strokeWidth={selectedId === unit.id ? 3 : 2}
+1282:                                        shadowBlur={selectedId === unit.id ? 10 : 0}
+1392:                            enabledAnchors={units.find(u => u.id === selectedId)?.locked ? [] : undefined}
+1393:                            rotateEnabled={!units.find(u => u.id === selectedId)?.locked}
+1421:        {selectedId ? (
+1426:                        value={units.find(u => u.id === selectedId)?.name || ''}
+1428:                            handleSetUnitsWithHistory(units.map(u => u.id === selectedId ? { ...u, name: val } : u));
+1438:                            units.find(u => u.id === selectedId)?.locked ? "bg-amber-500/10 text-amber-500" : "bg-slate-800 text-slate-400"
+1440:                            {units.find(u => u.id === selectedId)?.locked ? <Lock size={16} /> : <Unlock size={16} />}
+1446:                            handleSetUnitsWithHistory(units.map(u => u.id === selectedId ? { ...u, locked: !u.locked } : u));
+1450:                            units.find(u => u.id === selectedId)?.locked ? "bg-amber-500" : "bg-slate-700"
+1456:                                units.find(u => u.id === selectedId)?.locked ? "translate-x-6" : "translate-x-1"
+1504:                            selectedId === unit.id ? "bg-brand-900/20 border-brand-500/50 text-brand-300" : "bg-slate-950 border-slate-800 text-slate-400 hover:bg-slate-800"

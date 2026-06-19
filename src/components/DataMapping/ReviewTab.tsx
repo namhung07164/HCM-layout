@@ -57,11 +57,14 @@ export default function ReviewTab({ units, setUnits, versions, setVersions, acti
       });
     });
 
+    const summaryMap = new Map();
+    summaryData.forEach(s => summaryMap.set(s.unit, s));
+
     return units
       .filter(unit => unitToGroupStyle.has(unit.id))
       .map(unit => {
         const style = unitToGroupStyle.get(unit.id)!;
-        const uInfo = summaryData.find((s) => s.unit === unit.name);
+        const uInfo = summaryMap.get(unit.name);
         const sizeLabel = generateSizeLabel(unit, uInfo, selectedLabels);
         return {
           ...unit,
@@ -394,8 +397,16 @@ export default function ReviewTab({ units, setUnits, versions, setVersions, acti
               case ">=": return isNum ? Number(val) >= numVal : false;
               case "<=": return isNum ? Number(val) <= numVal : false;
               case "=": return String(val || "").toLowerCase().trim() === String(rule.value || "").toLowerCase().trim();
-              case "contains": return String(val || "").toLowerCase().includes(String(rule.value || "").toLowerCase().trim());
-              case "exclude": return !String(val || "").toLowerCase().includes(String(rule.value || "").toLowerCase().trim());
+              case "contains": {
+                const searchTerms = String(rule.value || "").toLowerCase().trim().split(/\s+/);
+                const targetStr = String(val || "").toLowerCase();
+                return searchTerms.every(term => targetStr.includes(term));
+              }
+              case "exclude": {
+                const searchTerms = String(rule.value || "").toLowerCase().trim().split(/\s+/);
+                const targetStr = String(val || "").toLowerCase();
+                return !searchTerms.some(term => targetStr.includes(term));
+              }
               default: return false;
             }
           });
@@ -892,11 +903,14 @@ const HiddenExportStage = ({ version, units, summaryData, selectedLabels, paperS
       });
     });
 
+    const summaryMap = new Map();
+    summaryData.forEach((s: any) => summaryMap.set(s.unit, s));
+
     return units
       .filter((unit: any) => unitToGroupStyle.has(unit.id))
       .map((unit: any) => {
         const style = unitToGroupStyle.get(unit.id)!;
-        const uInfo = summaryData.find((s: any) => s.unit === unit.name);
+        const uInfo = summaryMap.get(unit.name);
         const sizeLabel = generateSizeLabel(unit, uInfo, selectedLabels);
         return {
           ...unit,

@@ -20,11 +20,14 @@ const VersionStage = ({ version, mapUnits, summaryData, selectedLabels, windowSi
       });
     });
 
+    const summaryMap = new Map();
+    summaryData.forEach((s: any) => summaryMap.set(s.unit, s));
+
     return mapUnits
       .filter((unit: any) => unitToGroupStyle.has(unit.id))
       .map((unit: any) => {
         const style = unitToGroupStyle.get(unit.id)!;
-        const uInfo = summaryData.find((s: any) => s.unit === unit.name);
+        const uInfo = summaryMap.get(unit.name);
         const sizeLabel = generateSizeLabel(unit, uInfo, selectedLabels || ['Unit ID', 'Size SQM']);
         return {
           ...unit,

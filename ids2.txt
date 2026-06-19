@@ -1,0 +1,10 @@
+225:    return selectedId ? units.find(u => u.id === selectedId) : null;
+867:        <ToolButton icon={RotateCw} active={false} onClick={handleRotate} title="Rotate 90°" disabled={!selectedId || units.find(u => u.id === selectedId)?.locked} />
+869:        <ToolButton icon={Trash2} active={false} onClick={handleDelete} title="Delete Selected" disabled={!selectedId || units.find(u => u.id === selectedId)?.locked} />
+1397:                            enabledAnchors={units.find(u => u.id === selectedId)?.locked ? [] : undefined}
+1398:                            rotateEnabled={!units.find(u => u.id === selectedId)?.locked}
+1431:                        value={units.find(u => u.id === selectedId)?.name || ''}
+1443:                            units.find(u => u.id === selectedId)?.locked ? "bg-amber-500/10 text-amber-500" : "bg-slate-800 text-slate-400"
+1445:                            {units.find(u => u.id === selectedId)?.locked ? <Lock size={16} /> : <Unlock size={16} />}
+1455:                            units.find(u => u.id === selectedId)?.locked ? "bg-amber-500" : "bg-slate-700"
+1461:                                units.find(u => u.id === selectedId)?.locked ? "translate-x-6" : "translate-x-1"

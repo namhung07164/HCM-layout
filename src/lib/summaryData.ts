@@ -42,112 +42,117 @@ export function useSummaryData() {
   } = useData();
 
   const summaryData = useMemo(() => {
+    // 1. Build Index Maps for fast lookup
+    const normalize = (s: any) => String(s || "").toLowerCase().trim();
+
+    const profitMap = new Map();
+    (profitData || []).forEach(p => {
+      if (!p?.brandCode) return;
+      if (!profitMap.has(p.brandCode)) profitMap.set(p.brandCode, []);
+      profitMap.get(p.brandCode).push(p);
+    });
+
+    const subFeesMap = new Map();
+    (subFeesData || []).forEach(sf => {
+      if (!sf?.brandCode) return;
+      if (!subFeesMap.has(sf.brandCode)) subFeesMap.set(sf.brandCode, []);
+      subFeesMap.get(sf.brandCode).push(sf);
+    });
+
+    const mdStatusMap = new Map();
+    (mdStatusData || []).forEach(md => {
+      if (md?.unit) mdStatusMap.set(md.unit, md);
+    });
+
+    const projectStatusMap = new Map();
+    (projectStatusData || []).forEach(ps => {
+      if (ps?.unit) projectStatusMap.set(ps.unit, ps);
+    });
+
+    const projectLinkMap = new Map();
+    (projectLinkData || []).forEach(pl => {
+      if (pl?.unit) projectLinkMap.set(pl.unit, pl);
+    });
+
+    const classInfoMap = new Map();
+    (classInfo || []).forEach(c => {
+      const classCode = normalize(c.classCode || c['class code'] || c['classcode']);
+      if (classCode) classInfoMap.set(classCode, c);
+    });
+
+    const actualClassInfoMap = new Map();
+    (actualClassInfo || []).forEach(c => {
+      const classCode = normalize(c.classCode || c['class code'] || c['classcode']);
+      if (classCode) actualClassInfoMap.set(classCode, c);
+    });
+
+    const basePlanMap = new Map();
+    (basePlan || []).forEach(bp => {
+      const floor = normalize(bp.floor);
+      if (floor) basePlanMap.set(floor, bp);
+    });
+
+    const unitsMap = new Map();
+    (unitsData || []).forEach(u => {
+      const unit = normalize(u.unit);
+      if (unit) unitsMap.set(unit, u);
+    });
+
     return (unitInfo || []).map((unit) => {
       let salesAmount = 0;
       let salesByCpAmount = 0;
 
       const matches = (salesData || []).filter((s) => {
-        // Must have at least one identifier in the sales record to match
         if (!s?.vendorCode && !s?.brandCode && !s?.brandName && !s?.classCode)
           return false;
-
         let isMatch = true;
-
         if (s?.vendorCode) {
           if (unit.vendorCode !== s.vendorCode) isMatch = false;
         }
-
         if (s?.brandCode) {
           if (unit.brandCode !== s.brandCode) isMatch = false;
         }
-
         if (s?.brandName) {
           if (unit.brandName !== s.brandName) isMatch = false;
         }
-
         if (s?.classCode && unit.classCode) {
           if (unit.classCode !== s.classCode) isMatch = false;
         }
-
         return isMatch;
       });
 
       if (matches.length > 0) {
-        salesAmount = matches.reduce(
-          (sum, s) => sum + (Number(s?.sales) || 0),
-          0,
-        );
-        salesByCpAmount = matches.reduce(
-          (sum, s) => sum + (Number(s?.salesByCp) || 0),
-          0,
-        );
+        salesAmount = matches.reduce((sum, s) => sum + (Number(s?.sales) || 0), 0);
+        salesByCpAmount = matches.reduce((sum, s) => sum + (Number(s?.salesByCp) || 0), 0);
       }
 
       let profitAmount = 0;
       let profitByCpAmount = 0;
-
-      const profitMatches = (profitData || []).filter((p) => {
-        return p.brandCode && unit.brandCode && p.brandCode === unit.brandCode;
-      });
-
+      const profitMatches = profitMap.get(unit.brandCode) || [];
       if (profitMatches.length > 0) {
-        profitAmount = profitMatches.reduce(
-          (sum, p) => sum + (Number(p?.profit) || 0),
-          0,
-        );
-        profitByCpAmount = profitMatches.reduce(
-          (sum, p) => sum + (Number(p?.profitByCp) || 0),
-          0,
-        );
+        profitAmount = profitMatches.reduce((sum: number, p: any) => sum + (Number(p?.profit) || 0), 0);
+        profitByCpAmount = profitMatches.reduce((sum: number, p: any) => sum + (Number(p?.profitByCp) || 0), 0);
       }
 
       const margin = salesAmount > 0 ? profitAmount / salesAmount : 0;
-      const marginByCp =
-        salesByCpAmount > 0 ? profitByCpAmount / salesByCpAmount : 0;
+      const marginByCp = salesByCpAmount > 0 ? profitByCpAmount / salesByCpAmount : 0;
 
-      const subFeesMatches = (subFeesData || []).filter((sf) => {
-        return sf.brandCode && unit.brandCode && sf.brandCode === unit.brandCode;
-      });
-
+      const subFeesMatches = subFeesMap.get(unit.brandCode) || [];
       let mgmtFeeAmount = 0;
       if (subFeesMatches.length > 0) {
-        mgmtFeeAmount = subFeesMatches.reduce(
-          (sum, sf) => sum + (Number(sf?.managementFee) || 0),
-          0,
-        );
+        mgmtFeeAmount = subFeesMatches.reduce((sum: number, sf: any) => sum + (Number(sf?.managementFee) || 0), 0);
       }
 
-      const mdStatusMatch = (mdStatusData || []).find((md) => {
-        return md.unit === unit.unit;
-      });
-
-      const projectStatusMatch = (projectStatusData || []).find((ps) => {
-        return ps.unit === unit.unit;
-      });
-
-      const projectLinkMatch = (projectLinkData || []).find((ps) => {
-        return ps.unit === unit.unit;
-      });
+      const mdStatusMatch = mdStatusMap.get(unit.unit);
+      const projectStatusMatch = projectStatusMap.get(unit.unit);
+      const projectLinkMatch = projectLinkMap.get(unit.unit);
 
       let statusVal = unit.status || "Active";
       if (statusVal === "act") statusVal = "Active";
       if (statusVal === "unact" || statusVal === "Inactive") statusVal = "Unactive";
 
-      const normalize = (s: any) => String(s || "").toLowerCase().trim();
-      
-      const matchedClass = (classInfo || []).find((c) => {
-          const cCode = normalize(c.classCode || c['class code'] || c['classcode']);
-          const uCode = normalize(unit.classCode || unit['class code'] || unit['classcode']);
-          return cCode === uCode && cCode !== "";
-      });
-      
-      const matchedActualClass = (actualClassInfo || []).find((c) => {
-          const cCode = normalize(c.classCode || c['class code'] || c['classcode']);
-          const uCode = normalize(unit.classCode || unit['class code'] || unit['classcode']);
-          return cCode === uCode && cCode !== "";
-      });
-      
-      console.log('Unit Class Code:', unit.classCode, 'Matched Class:', matchedClass?.classCode, 'Matched Actual Class:', matchedActualClass?.classCode);
+      const matchedClass = classInfoMap.get(normalize(unit.classCode || unit['class code'] || unit['classcode']));
+      const matchedActualClass = actualClassInfoMap.get(normalize(unit.classCode || unit['class code'] || unit['classcode']));
 
       const salesEffiStr = String(matchedClass?.salesEffi || matchedClass?.['sales effi'] || matchedClass?.['sales efficiency'] || matchedClass?.['hcm sales effi'] || 0);
       const profitEffiStr = String(matchedClass?.profitEffi || matchedClass?.['profit effi'] || matchedClass?.['profit efficiency'] || matchedClass?.['hcm profit effi'] || 0);
@@ -155,7 +160,6 @@ export function useSummaryData() {
       const actualSalesEffiStr = String(matchedActualClass?.hcmSalesEffi || matchedActualClass?.['hcm sales effi'] || matchedActualClass?.['sales effi'] || 0);
       const actualProfitEffiStr = String(matchedActualClass?.hcmProfitEffi || matchedActualClass?.['hcm profit effi'] || matchedActualClass?.['profit effi'] || 0);
       
-      // Try resolving explicit margin (might be stored in matchedClass from Google sheet)
       const explicitMarginStr = String(matchedClass?.margin || matchedClass?.['hcm margin'] || matchedClass?.['margin (%)'] || matchedActualClass?.hcmMargin || matchedActualClass?.['hcm margin'] || 0);
       
       const salesEffi = Number(salesEffiStr.replace(/,/g, '').replace(/%/g, '')) || 0;
@@ -165,8 +169,6 @@ export function useSummaryData() {
       const actualProfitEffi = Number(actualProfitEffiStr.replace(/,/g, '').replace(/%/g, '')) || 0;
       
       let explicitMargin = Number(explicitMarginStr.replace(/,/g, '').replace(/%/g, '')) || 0;
-      
-      // If explicitMargin is something like 25 (meaning 25%), we convert it to 0.25 for calculation if necessary, but assume it's just the value. Usually if they enter 25%, it is parsed as 25.
       if (explicitMargin > 1) {
         explicitMargin = explicitMargin / 100;
       }
@@ -177,22 +179,19 @@ export function useSummaryData() {
       let hcmMargin = Math.max(explicitMargin, finalSalesEffi > 0 ? finalProfitEffi / finalSalesEffi : 0);
       
       let unitSize = Number(String(unit.size).replace(/,/g, '')) || 0;
-      if (unitSize === 0 && unitsData) {
-        const uCode = normalize(unit.unit);
-        const matchedUnit = unitsData.find(u => normalize(u.unit) === uCode && uCode !== "");
+      if (unitSize === 0) {
+        const matchedUnit = unitsMap.get(normalize(unit.unit));
         if (matchedUnit) {
           unitSize = Number(String(matchedUnit.size).replace(/,/g, '')) || 0;
         }
       }
 
-      const matchedBasePlan = (basePlan || []).find((b) => normalize(b.floor) === normalize(unit.floor) && normalize(b.floor) !== "");
+      const matchedBasePlan = basePlanMap.get(normalize(unit.floor));
       const vsHCMStr = String(matchedBasePlan?.vshcm || matchedBasePlan?.Vshcm || 0);
       const vsHCM = Number(vsHCMStr.replace(/,/g, '').replace(/%/g, '')) || 0;
 
       const salesByHcmcate = finalSalesEffi * 12 * unitSize * (vsHCM / 100);
       const profitByHcmcate = finalProfitEffi * 12 * unitSize * (vsHCM / 100);
-
-      // console.log(`Unit: ${unit.unit}, size: ${unitSize}, floor: ${unit.floor}, baseFloor: ${matchedBasePlan?.floor}, classCode: ${unit.classCode}, mappedClassCode: ${matchedClass?.classCode}, vsHcm: ${vsHCM}, salesEffi: ${salesEffi}, salesByHcmcate: ${salesByHcmcate}`);
 
       return {
         ...unit,
@@ -220,12 +219,10 @@ export function useSummaryData() {
           return ps || pl || "N/A";
         })(),
         actStatus: 
-          projectLinkMatch && projectLinkMatch.actStatus
-            ? projectLinkMatch.actStatus
-            : (projectStatusMatch && projectStatusMatch.actStatus ? projectStatusMatch.actStatus : "-"),
-        taskDelegation: projectStatusMatch ? projectStatusMatch.delegationStatus || "-" : "-",
-        flowStatus: projectStatusMatch ? projectStatusMatch.flowStatus || "-" : "-",
-        party: projectStatusMatch ? projectStatusMatch.party || "-" : "-",
+          projectLinkMatch?.actStatus || projectStatusMatch?.actStatus || "-",
+        taskDelegation: projectStatusMatch?.delegationStatus || "-",
+        flowStatus: projectStatusMatch?.flowStatus || "-",
+        party: projectStatusMatch?.party || "-",
         startDate: (() => {
           const psDate = projectStatusMatch?.startDate;
           const plDate = projectLinkMatch?.startDate;
@@ -245,6 +242,7 @@ export function useSummaryData() {
       };
     });
   }, [unitInfo, classInfo, actualClassInfo, salesData, profitData, subFeesData, mdStatusData, projectStatusData, projectLinkData, basePlan, unitsData]);
+
 
   return summaryData;
 }

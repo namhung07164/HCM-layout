@@ -102,8 +102,16 @@ export function useDynamicRules(
               case ">=": return isNum ? Number(val) >= numVal : false;
               case "<=": return isNum ? Number(val) <= numVal : false;
               case "=": return String(val || "").toLowerCase().trim() === String(rule.value || "").toLowerCase().trim();
-              case "contains": return String(val || "").toLowerCase().includes(String(rule.value || "").toLowerCase().trim());
-              case "exclude": return !String(val || "").toLowerCase().includes(String(rule.value || "").toLowerCase().trim());
+              case "contains": {
+                const searchTerms = String(rule.value || "").toLowerCase().trim().split(/\s+/);
+                const targetStr = String(val || "").toLowerCase();
+                return searchTerms.every(term => targetStr.includes(term));
+              }
+              case "exclude": {
+                const searchTerms = String(rule.value || "").toLowerCase().trim().split(/\s+/);
+                const targetStr = String(val || "").toLowerCase();
+                return !searchTerms.some(term => targetStr.includes(term));
+              }
               default: return false;
             }
           });

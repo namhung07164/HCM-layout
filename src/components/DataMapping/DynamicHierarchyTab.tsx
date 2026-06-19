@@ -131,25 +131,37 @@ export default function DynamicHierarchyTab({
 
       const numVal = Number(rule.value);
       const isNum = !isNaN(numVal) && rule.value.trim() !== "";
+      
+      let res = false;
 
       switch (rule.operator) {
         case ">":
-          return isNum ? Number(val) > numVal : false;
+          res = isNum ? Number(val) > numVal : false; break;
         case "<":
-          return isNum ? Number(val) < numVal : false;
+          res = isNum ? Number(val) < numVal : false; break;
         case ">=":
-          return isNum ? Number(val) >= numVal : false;
+          res = isNum ? Number(val) >= numVal : false; break;
         case "<=":
-          return isNum ? Number(val) <= numVal : false;
+          res = isNum ? Number(val) <= numVal : false; break;
         case "=":
-          return String(val || "").toLowerCase().trim() === String(rule.value || "").toLowerCase().trim();
-        case "contains":
-          return String(val || "").toLowerCase().includes(String(rule.value || "").toLowerCase().trim());
-        case "exclude":
-          return !String(val || "").toLowerCase().includes(String(rule.value || "").toLowerCase().trim());
+          res = String(val || "").toLowerCase().trim() === String(rule.value || "").toLowerCase().trim(); break;
+        case "contains": {
+          const searchTerms = String(rule.value || "").toLowerCase().trim().split(/\s+/);
+          const targetStr = String(val || "").toLowerCase();
+          res = searchTerms.every(term => targetStr.includes(term));
+          break;
+        }
+        case "exclude": {
+          const searchTerms = String(rule.value || "").toLowerCase().trim().split(/\s+/);
+          const targetStr = String(val || "").toLowerCase();
+          res = !searchTerms.some(term => targetStr.includes(term));
+          break;
+        }
         default:
-          return false;
+          res = false; break;
       }
+      
+      return res;
     });
   };
 

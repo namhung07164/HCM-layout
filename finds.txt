@@ -1,0 +1,49 @@
+src/DataContext.tsx:150:          const matchedUnit = units.find(u => u.unit?.toLowerCase() === item.unit?.toLowerCase());
+src/DataContext.tsx:174:          const matchedClass = classInfo.find(c => c.brandCode?.toLowerCase() === item.brandCode?.toLowerCase());
+src/DataContext.tsx:180:          const matchedClass = classInfo.find(c => c.brandName?.toLowerCase() === item.brandName?.toLowerCase());
+src/components/MDStatusTab.tsx:35:    const parentUnitRow = mdStatus.find(p => p.unit === unitLinkValue);
+src/components/DataMapping/ReviewOnlyView.tsx:193:  const activeVersion = mapVersions.find(v => v.id === reviewVersionId);
+src/components/DataMapping/HierarchyTab.tsx:23:  const activeVersion = versions.find(v => v.id === viewVersionId);
+src/components/DataMapping/HierarchyTab.tsx:47:    const group = activeVersion?.groups.find(g => g.id === id);
+src/components/DataMapping/HierarchyTab.tsx:169:      const groupColor = activeVersion.groups?.find(g => g.id === selectedGroupToAssign)?.color || '#3b82f6';
+src/components/DataMapping/HierarchyTab.tsx:182:                  assignedGroup = activeVersion.groups.find(g => g.id === gId)?.name || '';
+src/components/DataMapping/HierarchyTab.tsx:227:                          const mappedGroup = Object.entries(activeVersion.groupMappings).find(([gId, uIds]) => uIds.includes(unit.id));
+src/components/DataMapping/HierarchyTab.tsx:229:                              const existingGroup = activeVersion.groups.find(g => g.id === mappedGroup[0]);
+src/components/DataMapping/HierarchyTab.tsx:421:                                              const u = units.find(x => x.id === uid);
+src/components/DataMapping/ReviewTab.tsx:37:  const activeVersion = versions.find(v => v.id === activeVersionId);
+src/components/DataMapping/ReviewTab.tsx:435:      const v = nextVersions.find(ver => ver.id === activeVersion.id);
+src/components/DataMapping/ReviewTab.tsx:717:                       const u = units.find(x => x.id === uid);
+src/components/DataMapping/DynamicHierarchyTab.tsx:40:  const activeVersion = versions.find((v) => v.id === viewVersionId);
+src/components/DataMapping/DynamicHierarchyTab.tsx:333:    const group = activeVersion?.groups.find(g => g.id === id);
+src/components/DataMapping/DynamicHierarchyTab.tsx:456:    const sourceVersion = versions.find((v) => v.id === sourceVersionId);
+src/components/DataMapping/DynamicHierarchyTab.tsx:779:                                  const u = units.find((x) => x.id === uid);
+src/components/DataMapping/EditTab.tsx:40:        const found = options.find(o => o.value === value);
+src/components/DataMapping/EditTab.tsx:53:                const found = options.find(o => o.value === value);
+src/components/DataMapping/EditTab.tsx:156:  const activeVersion = versions.find(v => v.id === activeVersionId);
+src/components/DataMapping/EditTab.tsx:862:        <ToolButton icon={RotateCw} active={false} onClick={handleRotate} title="Rotate 90°" disabled={!selectedId || units.find(u => u.id === selectedId)?.locked} />
+src/components/DataMapping/EditTab.tsx:864:        <ToolButton icon={Trash2} active={false} onClick={handleDelete} title="Delete Selected" disabled={!selectedId || units.find(u => u.id === selectedId)?.locked} />
+src/components/DataMapping/EditTab.tsx:921:                            const v = versions.find(v => v.id === activeVersionId);
+src/components/DataMapping/EditTab.tsx:1392:                            enabledAnchors={units.find(u => u.id === selectedId)?.locked ? [] : undefined}
+src/components/DataMapping/EditTab.tsx:1393:                            rotateEnabled={!units.find(u => u.id === selectedId)?.locked}
+src/components/DataMapping/EditTab.tsx:1426:                        value={units.find(u => u.id === selectedId)?.name || ''}
+src/components/DataMapping/EditTab.tsx:1438:                            units.find(u => u.id === selectedId)?.locked ? "bg-amber-500/10 text-amber-500" : "bg-slate-800 text-slate-400"
+src/components/DataMapping/EditTab.tsx:1440:                            {units.find(u => u.id === selectedId)?.locked ? <Lock size={16} /> : <Unlock size={16} />}
+src/components/DataMapping/EditTab.tsx:1450:                            units.find(u => u.id === selectedId)?.locked ? "bg-amber-500" : "bg-slate-700"
+src/components/DataMapping/EditTab.tsx:1456:                                units.find(u => u.id === selectedId)?.locked ? "translate-x-6" : "translate-x-1"
+src/components/DataTable.tsx:204:    const updateCol = merged.find(c => c.key === 'update');
+src/components/DataTable.tsx:327:    if (allColumns.find(c => c.key === colKey)) {
+src/components/DataTable.tsx:365:    const colDef = dynamicColumns.find(c => c.key === colKey);
+src/components/DataTable.tsx:419:        const column = allColumns.find(c => c.key.toString() === key);
+src/components/DashboardTab.tsx:261:              const filterConfig = AVAILABLE_FILTERS.find(f => f.key === key);
+src/components/UnitInfoTab.tsx:33:        const newlyUpdated = activeRows.find((r) => !unitInfo.includes(r)) || activeRows[activeRows.length - 1];
+src/components/UnitInfoTab.tsx:244:              const matchedUnit = units.find(u => u.unit.toLowerCase().trim() === lowerName && u.active !== 'Unactive' && u.active !== 'unact' && u.active !== 'Inactive');
+src/components/UnitInfoTab.tsx:453:              const found = classInfo.find((c) => c.brandCode === newVal);
+src/components/UnitInfoTab.tsx:502:              const found = classInfo.find((c) => c.brandName === newVal);
+src/components/ProjectStatusTab.tsx:64:    const parentUnitRow = projectStatus.find(p => p.unit === unitLinkValue);
+src/components/ProjectLinkTab.tsx:64:    const parentUnitRow = projectStatus.find(p => p.unit === unitLinkValue);
+src/components/UnitsTab.tsx:25:           const newlyUpdated = activeRows.find(r => !units.includes(r));
+src/components/DriveAutoExporter.tsx:57:        const v = nextVersions.find(ver => ver.id === activeMapVersionId);
+src/components/CsvExportTab.tsx:176:            const match = headers.find(h => h && h.toLowerCase().includes(targetCol.toLowerCase()));
+src/hooks/useProjectStatusSync.ts:150:             if (!combined.find(d => d.id === rootDoc.id)) {
+src/hooks/useProjectStatusSync.ts:230:        const dg = rawDelegationGroups.find(d => d.parentTaskId === t.id || d.id === t.id);
+src/hooks/useProjectStatusSync.ts:240:          const dg = rawDelegationGroups.find(d => d.parentTaskId === t.id || d.id === t.id);
