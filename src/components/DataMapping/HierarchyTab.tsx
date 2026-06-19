@@ -235,18 +235,18 @@ export default function HierarchyTab({ units, setUnits, versions, setVersions, a
                       }
 
                       return (
-                          <div key={unit.id} className="group/item flex items-center justify-between p-2 rounded-lg bg-slate-950 border border-slate-800 text-sm hover:border-brand-500/50 transition-colors cursor-pointer shrink-0" onClick={() => toggleUnitInGroup(unit.id)}>
+                          <div key={unit.id} className="group/item flex items-center justify-between p-2 rounded-lg bg-slate-950 border border-slate-800 text-sm hover:border-blue-500/50 transition-colors cursor-pointer shrink-0" onClick={() => toggleUnitInGroup(unit.id)}>
                               <div className="flex items-center gap-2 overflow-hidden flex-1">
                                   {selectedGroupToAssign && (
                                       <button 
                                           onClick={(e) => { e.stopPropagation(); toggleUnitInGroup(unit.id); }}
-                                          className="p-1 bg-brand-600/20 text-brand-400 rounded opacity-0 group-hover/item:opacity-100 transition-opacity flex-shrink-0 hover:bg-brand-600/40"
+                                          className="p-1 bg-blue-600/20 text-blue-400 rounded opacity-0 group-hover/item:opacity-100 transition-opacity flex-shrink-0 hover:bg-blue-600/40"
                                           title="Add to selected group"
                                       >
                                           <Plus size={12} />
                                       </button>
                                   )}
-                                  <span className={cn("truncate", selectedGroupToAssign && "text-brand-400 font-bold")}>{unit.name}</span>
+                                  <span className={cn("truncate", selectedGroupToAssign && "text-blue-400 font-bold")}>{unit.name}</span>
                               </div>
                               <div className="flex items-center gap-4 flex-shrink-0" onClick={e => e.stopPropagation()}>
                                   <input 
@@ -262,7 +262,7 @@ export default function HierarchyTab({ units, setUnits, versions, setVersions, a
                                     value={opacity}
                                     title={`Opacity: ${opacity}`}
                                     onChange={(e) => updateUnitOpacity(unit.id, parseFloat(e.target.value))}
-                                    className="w-12 h-1 accent-brand-500 shrink-0 cursor-pointer"
+                                    className="w-12 h-1 accent-blue-500 shrink-0 cursor-pointer"
                                   />
                               </div>
                           </div>
@@ -275,9 +275,9 @@ export default function HierarchyTab({ units, setUnits, versions, setVersions, a
               <div className="flex items-center justify-between border-b border-slate-800 pb-2 mb-4 shrink-0">
                   <div className="flex items-center gap-2">
                       <h4 className="text-xs font-bold text-slate-300 uppercase tracking-widest">
-                          Groups <span className="text-brand-400">({activeVersion?.name || 'None'})</span>
+                          Groups <span className="text-blue-400">({activeVersion?.name || 'None'})</span>
                       </h4>
-                      <button onClick={addGroup} className="p-1 hover:bg-brand-600/20 text-brand-400 rounded transition-colors" title="Create new group for this version">
+                      <button onClick={addGroup} className="p-1 hover:bg-blue-600/20 text-blue-400 rounded transition-colors" title="Create new group for this version">
                           <Plus size={12} />
                       </button>
                   </div>
@@ -296,7 +296,7 @@ export default function HierarchyTab({ units, setUnits, versions, setVersions, a
                         onClick={() => setSelectedGroupToAssign(group.id)}
                       >
                           <span 
-                            className="text-slate-300 truncate flex-1 pr-2 cursor-pointer hover:text-brand-400 transition-colors flex items-center gap-2 group/title"
+                            className="text-slate-300 truncate flex-1 pr-2 cursor-pointer hover:text-blue-400 transition-colors flex items-center gap-2 group/title"
                             onClick={(e) => renameGroup(group.id, e)}
                           >
                             {group.name}
@@ -316,7 +316,7 @@ export default function HierarchyTab({ units, setUnits, versions, setVersions, a
                                 value={group.opacity ?? 0.4}
                                 title={`Opacity: ${group.opacity ?? 0.4}`}
                                 onChange={(e) => updateGroupOpacity(group.id, parseFloat(e.target.value))}
-                                className="w-12 h-1 accent-brand-500 cursor-pointer"
+                                className="w-12 h-1 accent-blue-500 cursor-pointer"
                               />
                               <button onClick={(e) => deleteGroup(group.id, e)} className="text-slate-600 hover:text-red-400"><Trash2 size={14}/></button>
                           </div>
@@ -331,7 +331,7 @@ export default function HierarchyTab({ units, setUnits, versions, setVersions, a
           <div className="flex items-center justify-between mb-8 shrink-0">
               <div className="flex items-center gap-4">
                   <h3 className="text-lg font-bold text-white uppercase tracking-widest flex items-center gap-3">
-                      <FolderPlus className="text-brand-500"/> Versions 
+                      <FolderPlus className="text-blue-500"/> Versions 
                   </h3>
                   <select 
                         className="bg-slate-950 text-white text-sm px-4 py-2 rounded-lg border border-slate-700 outline-none"
@@ -351,7 +351,7 @@ export default function HierarchyTab({ units, setUnits, versions, setVersions, a
                           <button 
                               onClick={() => setIsVersionActive(!isVersionActive)} 
                               className={cn("px-4 py-2 rounded-lg text-xs font-bold uppercase transition-colors shrink-0", 
-                                isVersionActive ? "bg-brand-600/20 text-brand-400 border border-brand-500/50" : "bg-slate-800 text-slate-400 border border-slate-700 hover:bg-slate-700")}
+                                isVersionActive ? "bg-blue-600/20 text-blue-400 border border-blue-500/50" : "bg-slate-800 text-slate-400 border border-slate-700 hover:bg-slate-700")}
                               title="Toggle Active status of this version"
                           >
                               {isVersionActive ? 'Active ON' : 'Active OFF'}
@@ -367,10 +367,10 @@ export default function HierarchyTab({ units, setUnits, versions, setVersions, a
                   )}
               </div>
               <div className="flex gap-3">
-                  <button onClick={handleExportCSV} disabled={!activeVersion} className={cn("flex items-center gap-2 px-4 py-2 rounded-lg border text-xs font-bold uppercase transition-colors", activeVersion ? "bg-brand-600/20 text-brand-400 border-brand-500/30 hover:bg-brand-600/30" : "bg-slate-800/50 text-slate-500 border-slate-700 opacity-50 cursor-not-allowed")}>
+                  <button onClick={handleExportCSV} disabled={!activeVersion} className={cn("flex items-center gap-2 px-4 py-2 rounded-lg border text-xs font-bold uppercase transition-colors", activeVersion ? "bg-emerald-600/20 text-emerald-400 border-emerald-500/30 hover:bg-emerald-600/30" : "bg-slate-800/50 text-slate-500 border-slate-700 opacity-50 cursor-not-allowed")}>
                       <Download size={14} /> Export CSV
                   </button>
-                  <button onClick={addVersion} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-brand-600 text-white text-xs font-bold uppercase shadow-lg hover:bg-brand-500 transition-colors">
+                  <button onClick={addVersion} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white text-xs font-bold uppercase shadow-lg hover:bg-blue-500 transition-colors">
                       <Plus size={14} /> New Version
                   </button>
               </div>
@@ -385,7 +385,7 @@ export default function HierarchyTab({ units, setUnits, versions, setVersions, a
                      {activeGroups.length === 0 && (
                          <div className="text-center py-12 border-2 border-dashed border-slate-800 rounded-2xl text-slate-500">
                              <p className="mb-2">This version has no groups.</p>
-                             <button onClick={addGroup} className="text-brand-400 hover:underline">Create the first group</button>
+                             <button onClick={addGroup} className="text-blue-400 hover:underline">Create the first group</button>
                          </div>
                      )}
                      
@@ -398,7 +398,7 @@ export default function HierarchyTab({ units, setUnits, versions, setVersions, a
                                           <div className="flex items-center gap-2">
                                             <div className="w-3 h-3 rounded-full mr-2 shadow-sm" style={{ backgroundColor: group.color }} />
                                             <span 
-                                                className="text-sm font-bold text-white max-w-[200px] truncate cursor-pointer hover:text-brand-400 transition-colors flex items-center gap-2 group/title"
+                                                className="text-sm font-bold text-white max-w-[200px] truncate cursor-pointer hover:text-blue-400 transition-colors flex items-center gap-2 group/title"
                                                 onClick={(e) => renameGroup(group.id, e)}
                                             >
                                                 {group.name}
@@ -406,7 +406,7 @@ export default function HierarchyTab({ units, setUnits, versions, setVersions, a
                                             </span>
                                           </div>
                                           <div className="flex items-center gap-3">
-                                            <button onClick={(e) => { e.stopPropagation(); setSelectedGroupToAssign(group.id); }} className="p-1 hover:bg-slate-800 text-slate-400 hover:text-brand-400 rounded transition-colors" title="Select group to assign units">
+                                            <button onClick={(e) => { e.stopPropagation(); setSelectedGroupToAssign(group.id); }} className="p-1 hover:bg-slate-800 text-slate-400 hover:text-blue-400 rounded transition-colors" title="Select group to assign units">
                                                 <Plus size={14} />
                                             </button>
                                             <button onClick={(e) => deleteGroup(group.id, e)} className="p-1 hover:bg-slate-800 text-slate-400 hover:text-red-400 rounded transition-colors" title="Delete group">
@@ -437,7 +437,7 @@ export default function HierarchyTab({ units, setUnits, versions, setVersions, a
                                       </div>
                                       
                                       {selectedGroupToAssign === group.id && (
-                                          <div className="px-4 py-2 bg-brand-900/20 border-t border-brand-500/30 text-[10px] text-brand-300 flex items-center justify-between">
+                                          <div className="px-4 py-2 bg-blue-900/20 border-t border-blue-500/30 text-[10px] text-blue-300 flex items-center justify-between">
                                               <span className="flex items-center gap-2"><Filter size={12}/> Click units on the left to assign here</span>
                                               <button onClick={() => setSelectedGroupToAssign(null)} className="text-red-400 hover:underline">Cancel</button>
                                           </div>

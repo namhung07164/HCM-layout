@@ -201,11 +201,11 @@ export default function GoogleSyncWidget() {
     <div className="glass rounded-2xl p-4 border border-slate-800/50 bg-slate-900/20 mt-4">
       <div className="flex items-center justify-between mb-3">
         <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold flex items-center gap-2">
-          <Globe size={12} className="text-brand-400" />
+          <Globe size={12} className="text-blue-400" />
           Google Drive Sync
         </p>
         {isDriveLoading && (
-          <Loader2 size={10} className="animate-spin text-brand-400" />
+          <Loader2 size={10} className="animate-spin text-blue-400" />
         )}
       </div>
 
@@ -214,10 +214,10 @@ export default function GoogleSyncWidget() {
           onClick={handleSaveToDrive}
           disabled={isDriveLoading}
           className={cn(
-            "w-full flex items-center justify-center gap-2 px-3 py-1.5 rounded border border-brand-500/30 text-[10px] font-medium transition-colors mb-2",
+            "w-full flex items-center justify-center gap-2 px-3 py-1.5 rounded border border-blue-500/30 text-[10px] font-medium transition-colors mb-2",
             isDriveLoading
-              ? "bg-brand-900/50 text-brand-400 cursor-not-allowed"
-              : "bg-brand-600/20 text-brand-400 hover:bg-brand-600/30 hover:border-brand-500/50",
+              ? "bg-blue-900/50 text-blue-400 cursor-not-allowed"
+              : "bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 hover:border-blue-500/50",
           )}
         >
           <CloudUpload size={12} className={isDriveLoading ? "animate-pulse" : ""} />

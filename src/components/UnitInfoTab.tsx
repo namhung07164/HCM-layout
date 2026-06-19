@@ -381,7 +381,7 @@ export default function UnitInfoTab() {
               "w-full bg-slate-900/80 border border-slate-700/50 rounded px-2 py-1.5 text-slate-300 outline-none text-sm",
               isLocked || !!row.locked
                 ? "opacity-50 cursor-not-allowed"
-                : "hover:border-slate-500 focus:border-brand-500/50",
+                : "hover:border-slate-500 focus:border-blue-500/50",
             )}
           >
             <option value="">--Select--</option>
@@ -415,7 +415,7 @@ export default function UnitInfoTab() {
               "w-full bg-slate-900/80 border border-slate-700/50 rounded px-2 py-1.5 text-slate-300 outline-none text-sm",
               isLocked || !!row.locked
                 ? "opacity-50 cursor-not-allowed"
-                : "hover:border-slate-500 focus:border-brand-500/50",
+                : "hover:border-slate-500 focus:border-blue-500/50",
             )}
           >
             <option value="">--Select--</option>
@@ -550,7 +550,7 @@ export default function UnitInfoTab() {
                 : "text-green-400",
               isLocked || !!row.locked
                 ? "opacity-50 cursor-not-allowed text-xs"
-                : "cursor-pointer hover:border-brand-500/50 focus:border-brand-500 focus:bg-brand-600/20",
+                : "cursor-pointer hover:border-blue-500/50 focus:border-blue-500 focus:bg-blue-600/20",
             )}
           >
             <option value="">--Select--</option>

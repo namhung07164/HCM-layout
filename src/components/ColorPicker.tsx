@@ -43,7 +43,7 @@ export function ColorPicker({
     <div className={cn("relative", className)} ref={containerRef}>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="w-5 h-5 rounded-full flex items-center justify-center border border-slate-600 hover:ring-2 hover:ring-brand-500 transition-all focus:outline-none focus:ring-2 focus:ring-brand-500"
+        className="w-5 h-5 rounded-full flex items-center justify-center border border-slate-600 hover:ring-2 hover:ring-blue-500 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500"
         style={{ backgroundColor: color }}
         aria-label="Select color"
         title="Select color"
@@ -71,7 +71,7 @@ export function ColorPicker({
                     onChange(c);
                     setIsOpen(false);
                   }}
-                  className="w-7 h-7 rounded flex items-center justify-center hover:scale-110 transition-transform focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-800 focus:ring-brand-500 shadow-sm"
+                  className="w-7 h-7 rounded flex items-center justify-center hover:scale-110 transition-transform focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-800 focus:ring-blue-500 shadow-sm"
                   style={{ backgroundColor: c }}
                   aria-label={`Select color ${c}`}
                 >

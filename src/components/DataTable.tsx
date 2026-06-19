@@ -87,7 +87,7 @@ const Row = React.memo(({ index, style, data }: { index: number, style: React.CS
   return (
     <div 
       style={style} 
-      className="flex border-b border-slate-800/30 hover:bg-brand-600/5 transition-colors group text-sm items-center pr-4"
+      className="flex border-b border-slate-800/30 hover:bg-blue-600/5 transition-colors group text-sm items-center pr-4"
     >
       {visibleColumns.map((col: any) => {
         const isCode = col.key.toString().toLowerCase().includes('code');
@@ -99,7 +99,7 @@ const Row = React.memo(({ index, style, data }: { index: number, style: React.CS
             key={col.key.toString()} 
             className={cn(
               "px-8 py-4 font-light flex-1 min-w-[200px]",
-              isCode ? "font-mono text-brand-400/80 text-xs" : 
+              isCode ? "font-mono text-blue-400/80 text-xs" : 
               isName ? "serif italic text-slate-200" :
               isUpdateField ? "font-mono text-[10px] text-slate-500 truncate" :
               "text-slate-400 font-sans"
@@ -123,7 +123,7 @@ const Row = React.memo(({ index, style, data }: { index: number, style: React.CS
             "p-2 rounded-full transition-all opacity-0 group-hover:opacity-100",
             (isLocked || !!row.locked)
               ? "text-slate-700 cursor-not-allowed" 
-              : "text-slate-500 hover:text-brand-400 hover:bg-brand-900/20 active:scale-90"
+              : "text-slate-500 hover:text-blue-400 hover:bg-blue-900/20 active:scale-90"
           )}
           title="Nhân bản dòng này"
         >
@@ -340,7 +340,7 @@ export default function DataTable<T extends Record<string, any>>({
           disabled={locked}
           className={cn(
             "bg-transparent border-0 text-slate-300 w-full outline-none",
-            locked ? "bg-transparent opacity-50 cursor-not-allowed" : "cursor-text bg-slate-900/50 hover:bg-slate-800/80 focus:bg-brand-900/40 focus:text-brand-100 rounded px-2 py-1.5 transition-all shadow-inner shadow-black/20 border border-slate-700/50 hover:border-slate-600 focus:border-brand-500/50"
+            locked ? "bg-transparent opacity-50 cursor-not-allowed" : "cursor-text bg-slate-900/50 hover:bg-slate-800/80 focus:bg-blue-900/40 focus:text-blue-100 rounded px-2 py-1.5 transition-all shadow-inner shadow-black/20 border border-slate-700/50 hover:border-slate-600 focus:border-blue-500/50"
           )}
           placeholder="..."
         />
@@ -469,7 +469,7 @@ export default function DataTable<T extends Record<string, any>>({
             className={cn(
               "flex items-center gap-2 px-4 py-2.5 border text-xs font-bold uppercase tracking-widest rounded transition-all active:scale-95",
               showFilters || activeFilterCount > 0 
-                ? "bg-brand-600/20 text-brand-400 border-brand-500/30" 
+                ? "bg-blue-600/20 text-blue-400 border-blue-500/30" 
                 : "bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700"
             )}
           >
@@ -538,7 +538,7 @@ export default function DataTable<T extends Record<string, any>>({
                   type="checkbox" 
                   checked={enableAutoFormat} 
                   onChange={(e) => setEnableAutoFormat(e.target.checked)}
-                  className="rounded border-slate-700 bg-slate-800 text-brand-500 focus:ring-brand-500/50 w-3.5 h-3.5 cursor-pointer"
+                  className="rounded border-slate-700 bg-slate-800 text-blue-500 focus:ring-blue-500/50 w-3.5 h-3.5 cursor-pointer"
                   disabled={isLocked}
                 />
                 Auto-Format
@@ -567,7 +567,7 @@ export default function DataTable<T extends Record<string, any>>({
                     "flex items-center gap-2 px-5 py-2.5 border text-xs font-bold uppercase tracking-widest rounded transition-all active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed whitespace-nowrap",
                     isLocked 
                       ? "bg-slate-900 border-slate-800 text-slate-600" 
-                      : "bg-brand-900/10 border-brand-800/50 text-brand-400 hover:bg-brand-900/20"
+                      : "bg-blue-900/10 border-blue-800/50 text-blue-400 hover:bg-blue-900/20"
                   )}
                 >
                   <RefreshCw size={14} className={isLocked ? "" : "animate-spin-slow"} />
@@ -661,7 +661,7 @@ export default function DataTable<T extends Record<string, any>>({
                 <X size={18} />
               </button>
               <div className="flex flex-col items-center text-center space-y-4">
-                <div className="w-12 h-12 bg-brand-600/20 rounded-full flex items-center justify-center text-brand-400 mb-2">
+                <div className="w-12 h-12 bg-blue-600/20 rounded-full flex items-center justify-center text-blue-400 mb-2">
                   <Lock size={24} />
                 </div>
                 <h4 className="text-lg font-light serif italic text-white">Xác thực quyền</h4>
@@ -673,12 +673,12 @@ export default function DataTable<T extends Record<string, any>>({
                     type="password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-800 px-4 py-3 rounded-xl text-center text-lg tracking-widest text-white outline-none focus:border-brand-500 transition-all font-mono"
+                    className="w-full bg-slate-900 border border-slate-800 px-4 py-3 rounded-xl text-center text-lg tracking-widest text-white outline-none focus:border-blue-500 transition-all font-mono"
                     placeholder="••••••••"
                   />
                   <button
                     type="submit"
-                    className="w-full bg-brand-600 hover:bg-brand-500 text-white py-3 rounded-xl font-bold text-[10px] uppercase tracking-[0.2em] transition-all shadow-lg shadow-brand-900/20"
+                    className="w-full bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-xl font-bold text-[10px] uppercase tracking-[0.2em] transition-all shadow-lg shadow-blue-900/20"
                   >
                     Unlock
                   </button>
@@ -714,7 +714,7 @@ export default function DataTable<T extends Record<string, any>>({
                       )}
                     </div>
                     {col.summary && (
-                      <div className="text-xs font-mono text-brand-400 mb-2 mt-auto">
+                      <div className="text-xs font-mono text-blue-400 mb-2 mt-auto">
                         {typeof col.summary === 'function' ? col.summary(filteredData as any) : col.summary}
                       </div>
                     )}
@@ -731,7 +731,7 @@ export default function DataTable<T extends Record<string, any>>({
                           <select 
                             value={filters[col.key.toString()] || ''}
                             onChange={(e) => setFilters(prev => ({ ...prev, [col.key.toString()]: e.target.value }))}
-                            className="w-full bg-slate-700 border border-slate-600 text-slate-100 px-2 py-1.5 rounded text-[10px] font-bold uppercase tracking-wider outline-none focus:border-brand-500 transition-colors cursor-pointer"
+                            className="w-full bg-slate-700 border border-slate-600 text-slate-100 px-2 py-1.5 rounded text-[10px] font-bold uppercase tracking-wider outline-none focus:border-blue-500 transition-colors cursor-pointer"
                           >
                             <option className="bg-slate-700 text-white" value="">ALL</option>
                             {col.filterOptions?.map(opt => (
@@ -744,7 +744,7 @@ export default function DataTable<T extends Record<string, any>>({
                             placeholder="..."
                             value={filters[col.key.toString()] || ''}
                             onChange={(e) => setFilters(prev => ({ ...prev, [col.key.toString()]: e.target.value }))}
-                            className="w-full bg-slate-900/50 border border-slate-700 text-slate-300 px-2 py-1.5 rounded text-xs font-normal outline-none focus:border-brand-500 transition-colors placeholder:text-slate-600 font-mono"
+                            className="w-full bg-slate-900/50 border border-slate-700 text-slate-300 px-2 py-1.5 rounded text-xs font-normal outline-none focus:border-blue-500 transition-colors placeholder:text-slate-600 font-mono"
                           />
                         )}
                       </motion.div>
@@ -789,7 +789,7 @@ export default function DataTable<T extends Record<string, any>>({
         <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest flex gap-4">
           <span>Total: <span className="text-slate-300">{data.length}</span></span>
           {activeFilterCount > 0 && (
-            <span>Filtered: <span className="text-brand-400">{filteredData.length}</span></span>
+            <span>Filtered: <span className="text-blue-400">{filteredData.length}</span></span>
           )}
         </div>
         <div className="text-[10px] text-slate-600 italic serif">

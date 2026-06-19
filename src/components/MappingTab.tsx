@@ -42,14 +42,14 @@ export default React.memo(function MappingTab() {
                 {isActive && (
                   <motion.div
                     layoutId="mapping-subtab-pill"
-                    className="absolute inset-0 bg-brand-600/20 border border-brand-500/30 rounded-lg"
+                    className="absolute inset-0 bg-blue-600/20 border border-blue-500/30 rounded-lg"
                     transition={{ type: "spring", bounce: 0, duration: 0.4 }}
                   />
                 )}
                 <span className="relative z-10 flex items-center gap-2">
                   <Icon
                     size={12}
-                    className={isActive ? "text-brand-400" : "text-slate-600"}
+                    className={isActive ? "text-blue-400" : "text-slate-600"}
                   />
                   {tab.label}
                 </span>

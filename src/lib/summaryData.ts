@@ -121,19 +121,19 @@ export function useSummaryData() {
         return md.unit === unit.unit;
       });
 
+      const normalize = (s: any) => String(s || "").toLowerCase().trim();
+
       const projectStatusMatch = (projectStatusData || []).find((ps) => {
-        return ps.unit === unit.unit;
+        return normalize(ps.unit) === normalize(unit.unit);
       });
 
       const projectLinkMatch = (projectLinkData || []).find((ps) => {
-        return ps.unit === unit.unit;
+        return normalize(ps.unit) === normalize(unit.unit);
       });
 
       let statusVal = unit.status || "Active";
       if (statusVal === "act") statusVal = "Active";
       if (statusVal === "unact" || statusVal === "Inactive") statusVal = "Unactive";
-
-      const normalize = (s: any) => String(s || "").toLowerCase().trim();
       
       const matchedClass = (classInfo || []).find((c) => {
           const cCode = normalize(c.classCode || c['class code'] || c['classcode']);

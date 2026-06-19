@@ -149,7 +149,7 @@ export default function R2UploadModal({ isOpen, onClose, onStartExport, uploadin
               </div>
               
               <div className="pt-2 mt-4 border-t border-slate-800">
-                <h3 className="text-xs font-semibold text-slate-300 uppercase mb-3 flex items-center gap-1.5"><Settings size={14} className="text-brand-400"/> Tùy chọn xóa Cache</h3>
+                <h3 className="text-xs font-semibold text-slate-300 uppercase mb-3 flex items-center gap-1.5"><Settings size={14} className="text-blue-400"/> Tùy chọn xóa Cache</h3>
                 <div className="space-y-4">
                   <div>
                     <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Cloudflare Zone ID (Tùy chọn)</label>
@@ -157,7 +157,7 @@ export default function R2UploadModal({ isOpen, onClose, onStartExport, uploadin
                       type="text"
                       value={cfZoneId}
                       onChange={(e) => setCfZoneId(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-brand-500 text-sm font-mono transition-colors"
+                      className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500 text-sm font-mono transition-colors"
                       placeholder="e.g. 023e105f4ecef8ad9ca31a8372d0c353"
                       disabled={uploading}
                     />
@@ -168,7 +168,7 @@ export default function R2UploadModal({ isOpen, onClose, onStartExport, uploadin
                       type="password"
                       value={cfApiToken}
                       onChange={(e) => setCfApiToken(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-brand-500 text-sm font-mono transition-colors"
+                      className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500 text-sm font-mono transition-colors"
                       placeholder="e.g. xyZabc123"
                       disabled={uploading}
                     />
