@@ -126,23 +126,23 @@ export function useProjectStatusSync(validUnits: string[], activeStore: string) 
       checkLoading();
     });
 
-    const unsubDelegation = onSnapshot(collection(defaultDb, 'artifacts/taka-projects-app-v1/public/data/delegationGroups'), (snapshot) => {
+    const unsubDelegation = onSnapshot(collection(defaultDb, 'artifacts/taka-projects-app-v1/public/data/taka_delegation_groups'), (snapshot) => {
       let dg = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      console.log("Raw delegationGroups loaded from Firebase:", dg.length);
+      console.log("Raw taka_delegation_groups loaded from Firebase:", dg.length);
       setRawDelegationGroups(dg);
       delegationLoaded = true;
       checkLoading();
     }, (err) => {
       // If artifacts path fails or is empty, try root as fallback
-      handleFirestoreError(err, OperationType.LIST, 'artifacts/taka-projects-app-v1/public/data/delegationGroups');
+      handleFirestoreError(err, OperationType.LIST, 'artifacts/taka-projects-app-v1/public/data/taka_delegation_groups');
       delegationLoaded = true;
       checkLoading();
     });
 
-    const unsubDelegationRoot = onSnapshot(collection(defaultDb, 'delegationGroups'), (snapshot) => {
+    const unsubDelegationRoot = onSnapshot(collection(defaultDb, 'taka_delegation_groups'), (snapshot) => {
       const dgRoot = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       if (dgRoot.length > 0) {
-        console.log("Raw root delegationGroups loaded from Firebase:", dgRoot.length);
+        console.log("Raw root taka_delegation_groups loaded from Firebase:", dgRoot.length);
         // We accumulate both in case they use either
         setRawDelegationGroups(prev => {
           const combined = [...prev];
@@ -227,27 +227,20 @@ export function useProjectStatusSync(validUnits: string[], activeStore: string) 
       
       // Look through active tasks first
       for (const t of activeTasks) {
-        const dg = rawDelegationGroups.find(d => d.id === t.id);
-        if (dg && dg.subTasks && Array.isArray(dg.subTasks)) {
-          // Find any subTask that has a delegationStatus
-          const subWithStatus = dg.subTasks.find((st: any) => st.delegationStatus);
-          if (subWithStatus) {
-            foundDelegationStatus = subWithStatus.delegationStatus;
-            break;
-          }
+        const dg = rawDelegationGroups.find(d => d.parentTaskId === t.id || d.id === t.id);
+        if (dg && dg.actStatus) {
+          foundDelegationStatus = dg.actStatus;
+          break;
         }
       }
 
       // If no active task has a delegationStatus, optionally check ALL project tasks
       if (!foundDelegationStatus) {
         for (const t of projectTasks) {
-          const dg = rawDelegationGroups.find(d => d.id === t.id);
-          if (dg && dg.subTasks && Array.isArray(dg.subTasks)) {
-            const subWithStatus = dg.subTasks.find((st: any) => st.delegationStatus && String(st.delegationStatus).toLowerCase() !== 'done');
-            if (subWithStatus) {
-              foundDelegationStatus = subWithStatus.delegationStatus;
-              break;
-            }
+          const dg = rawDelegationGroups.find(d => d.parentTaskId === t.id || d.id === t.id);
+          if (dg && dg.actStatus && String(dg.actStatus).toLowerCase() !== 'done' && String(dg.actStatus).toLowerCase() !== 'completed on-time') {
+            foundDelegationStatus = dg.actStatus;
+            break;
           }
         }
       }
