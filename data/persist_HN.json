@@ -1,0 +1,30 @@
+{
+  "classInfo": [],
+  "actualClassInfo": [],
+  "sales": [],
+  "unitInfo": [],
+  "profits": [],
+  "mdStatus": [],
+  "subFees": [],
+  "projectStatus": [],
+  "projectLink": [],
+  "basePlan": [],
+  "units": [],
+  "mapUnits": [],
+  "mapVersions": [],
+  "activeMapVersionId": null,
+  "reviewSelectedLabels": [
+    "Unit ID",
+    "Size SQM"
+  ],
+  "migrated_scaled_1000": true,
+  "r2Config": {
+    "accountId": "",
+    "accessKey": "",
+    "secretKey": "",
+    "bucketName": "",
+    "cfZoneId": "",
+    "cfApiToken": ""
+  },
+  "lastUpdated": "2026-06-19T14:45:22.187Z"
+}

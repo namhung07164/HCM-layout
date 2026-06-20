@@ -1,0 +1,14 @@
+131:    <div className={`flex h-screen bg-bg-dark text-[#E2E8F0] font-sans overflow-hidden selection:bg-brand-500/30 ${store === 'HN' ? 'store-hn' : ''}`}>
+143:              <div className="w-24 h-24 border-4 border-brand-500/20 rounded-full animate-pulse" />
+145:                className="absolute inset-0 m-auto animate-bounce text-brand-500"
+158:                className="px-6 py-2 bg-brand-600 hover:bg-brand-500 text-white rounded-lg shadow-lg shadow-brand-500/20 transition-all font-medium flex items-center gap-2 mx-auto"
+178:              <div className="w-24 h-24 border-4 border-brand-500/20 rounded-full animate-pulse" />
+180:                className="absolute inset-0 m-auto animate-spin text-brand-500"
+248:                          ? "bg-brand-600/10 text-brand-400 border-brand-500/20 shadow-[0_0_15px_rgba(59,130,246,0.1)]"
+281:                        "border-brand-500/30 bg-brand-900/10 hover:bg-brand-900/20"
+324:                          hasLocalFolder && "border-brand-500/30 bg-brand-950/10",
+391:                          className="bg-brand-500 h-full rounded-full shadow-[0_0_10px_rgba(59,130,246,0.5)] transition-all duration-1000"
+446:                "border-brand-500/30 hover:bg-brand-900/20"
+527:                                notif.read ? "bg-slate-700" : "bg-brand-500"
+608:              className="w-full flex items-center justify-between p-4 rounded-xl border border-brand-500/30 bg-brand-900/20 hover:bg-brand-600/20 transition-all group"
+614:              <ChevronRight className="text-brand-500 group-hover:translate-x-1 transition-transform" />

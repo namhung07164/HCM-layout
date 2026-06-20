@@ -5,52 +5,37 @@
   --font-sans: "Inter", "Helvetica Neue", Arial, sans-serif;
   --font-serif: "Georgia", serif;
   
-  --color-bg-dark: var(--theme-bg-dark);
+  --color-bg-dark: #0F1115;
   --color-glass-dark: rgba(30, 41, 59, 0.5);
   --color-border-dark: rgba(255, 255, 255, 0.05);
 
-  --color-brand-50: var(--brand-50);
-  --color-brand-100: var(--brand-100);
-  --color-brand-200: var(--brand-200);
-  --color-brand-300: var(--brand-300);
-  --color-brand-400: var(--brand-400);
-  --color-brand-500: var(--brand-500);
-  --color-brand-600: var(--brand-600);
-  --color-brand-700: var(--brand-700);
-  --color-brand-800: var(--brand-800);
-  --color-brand-900: var(--brand-900);
-  --color-brand-950: var(--brand-950);
+  --color-brand-50: #eff6ff;
+  --color-brand-100: #dbeafe;
+  --color-brand-200: #bfdbfe;
+  --color-brand-300: #93c5fd;
+  --color-brand-400: #60a5fa;
+  --color-brand-500: #3b82f6;
+  --color-brand-600: #2563eb;
+  --color-brand-700: #1d4ed8;
+  --color-brand-800: #1e40af;
+  --color-brand-900: #1e3a8a;
+  --color-brand-950: #172554;
 }
 
 @layer base {
-  :root {
-    --theme-bg-dark: #0F1115;
-    --brand-50: #eff6ff;
-    --brand-100: #dbeafe;
-    --brand-200: #bfdbfe;
-    --brand-300: #93c5fd;
-    --brand-400: #60a5fa;
-    --brand-500: #3b82f6;
-    --brand-600: #2563eb;
-    --brand-700: #1d4ed8;
-    --brand-800: #1e40af;
-    --brand-900: #1e3a8a;
-    --brand-950: #172554;
-  }
-  
   .store-hn {
-    --theme-bg-dark: #0A1410;
-    --brand-50: #ecfdf5;
-    --brand-100: #d1fae5;
-    --brand-200: #a7f3d0;
-    --brand-300: #6ee7b7;
-    --brand-400: #34d399;
-    --brand-500: #10b981;
-    --brand-600: #059669;
-    --brand-700: #047857;
-    --brand-800: #065f46;
-    --brand-900: #064e3b;
-    --brand-950: #022c22;
+    --color-bg-dark: #0A1410;
+    --color-brand-50: #ecfdf5;
+    --color-brand-100: #d1fae5;
+    --color-brand-200: #a7f3d0;
+    --color-brand-300: #6ee7b7;
+    --color-brand-400: #34d399;
+    --color-brand-500: #10b981;
+    --color-brand-600: #059669;
+    --color-brand-700: #047857;
+    --color-brand-800: #065f46;
+    --color-brand-900: #064e3b;
+    --color-brand-950: #022c22;
   }
 
   body {
