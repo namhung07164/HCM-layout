@@ -31,21 +31,21 @@ export default function MDStatusTab() {
     return Array.from(new Set(mdStatus.map(p => p.unit).filter(Boolean))).sort();
   }, [mdStatus]);
 
-  const handleUnitLinkChange = React.useCallback((row: MDStatusInfo, updateRow: (newRow: MDStatusInfo) => void, unitLinkValue: string) => {
-    const parentUnitRow = mdStatus.find(p => p.unit === unitLinkValue);
+  const handleUnitLinkChange = React.useCallback((row: MDStatusInfo, updateRow: (newRow: MDStatusInfo) => void, unitLinkValue: any) => {
+    const val = typeof unitLinkValue === 'object' ? unitLinkValue.value : unitLinkValue;
+    const parentUnitRow = summaryData.find(p => p.unit === val);
     
     if (parentUnitRow) {
       updateRow({
         ...row,
-        unitLink: unitLinkValue,
+        unitLink: val,
         brandCode: parentUnitRow.brandCode || '',
         brandName: parentUnitRow.brandName || '',
-        status: parentUnitRow.status || '',
       });
     } else {
-      updateRow({ ...row, unitLink: unitLinkValue });
+      updateRow({ ...row, unitLink: val });
     }
-  }, [mdStatus]);
+  }, [summaryData]);
 
   const renderUnitCell = React.useCallback(() => (val: any, row: MDStatusInfo, updateRow: (newRow: MDStatusInfo) => void, isLocked: boolean) => {
     const activeUnits = summaryData.filter(u => u.status !== 'Unactive' && u.status !== 'unact' && u.status !== 'Inactive');
@@ -59,9 +59,38 @@ export default function MDStatusTab() {
       <div className="flex-1 min-w-0">
         <AutocompleteCell
           value={val}
-          onChange={(newVal) => updateRow({ ...row, unit: newVal })}
-          onSelect={(selectedUnit) => updateRow({ ...row, unit: selectedUnit.unit })}
-          onBlur={(newVal) => updateRow({ ...row, unit: newVal })}
+          onChange={(newVal) => {
+            const matchedUnit = summaryData.find(u => u.unit === newVal);
+            if (matchedUnit) {
+               updateRow({
+                 ...row,
+                 unit: newVal,
+                 brandCode: matchedUnit.brandCode || row.brandCode || '',
+                 brandName: matchedUnit.brandName || row.brandName || ''
+               });
+            } else {
+               updateRow({ ...row, unit: newVal });
+            }
+          }}
+          onSelect={(selectedUnit) => updateRow({ 
+            ...row, 
+            unit: selectedUnit.item.unit,
+            brandCode: selectedUnit.item.brandCode || '',
+            brandName: selectedUnit.item.brandName || ''
+          })}
+          onBlur={(newVal) => {
+            const matchedUnit = summaryData.find(u => u.unit === newVal);
+            if (matchedUnit) {
+               updateRow({
+                 ...row,
+                 unit: newVal,
+                 brandCode: matchedUnit.brandCode || row.brandCode || '',
+                 brandName: matchedUnit.brandName || row.brandName || ''
+               });
+            } else {
+               updateRow({ ...row, unit: newVal });
+            }
+          }}
           options={options}
           minChars={0} // Show all units on focus
           isLocked={isLocked}
@@ -79,6 +108,7 @@ export default function MDStatusTab() {
         value={val || ''}
         onChange={(newVal) => handleUnitLinkChange(row, updateRow, newVal)}
         onSelect={(item) => handleUnitLinkChange(row, updateRow, item)}
+        onBlur={(newVal) => handleUnitLinkChange(row, updateRow, newVal)}
         options={options}
         minChars={0}
         isLocked={isLocked}

@@ -363,6 +363,10 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
   const requestFolderPermission = async () => {
     if (!dirHandleRef.current) return;
     try {
+      if (window !== window.parent) {
+        alert("Tính năng này không hỗ trợ trong chế độ xem trước (iframe). Vui lòng mở ứng dụng trong một tab mới (nút mũi tên ở góc trên bên phải) để sử dụng.");
+        return;
+      }
       const opts = { mode: 'readwrite' };
       if ((await dirHandleRef.current.requestPermission(opts)) === 'granted') {
         const loaded = await loadFromHandle(dirHandleRef.current);
@@ -380,6 +384,11 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
 
   const selectLocalFolder = async () => {
     try {
+      if (window !== window.parent) {
+        alert("Tính năng này không hỗ trợ trong chế độ xem trước (iframe). Vui lòng mở ứng dụng trong một tab mới (nút mũi tên ở góc trên bên phải) để sử dụng.");
+        return;
+      }
+      
       // @ts-ignore
       const handle = await window.showDirectoryPicker({ mode: 'readwrite' });
       dirHandleRef.current = handle;
