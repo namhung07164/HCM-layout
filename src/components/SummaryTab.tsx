@@ -204,6 +204,12 @@ export default function SummaryTab() {
       summary: getUniqueCount("mdStatus"),
     },
     {
+      key: "mdNotes",
+      label: "MD Notes",
+      renderCell: (val: any) => val,
+      summary: getUniqueCount("mdNotes"),
+    },
+    {
       key: "task",
       label: "Task",
       renderCell: (val: any) => val,

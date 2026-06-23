@@ -12,6 +12,7 @@ export interface SummaryDataItem extends UnitInfo {
   marginByCp: number;
   mgmtFee: number;
   mdStatus: string;
+  mdNotes: string;
   task: string;
   projectStatus: string;
   actStatus: string;
@@ -206,6 +207,7 @@ export function useSummaryData() {
         marginByCp,
         mgmtFee: mgmtFeeAmount,
         mdStatus: mdStatusMatch ? mdStatusMatch.status : "-",
+        mdNotes: mdStatusMatch?.mdNotes || "-",
         task: (() => {
           const psTask = projectStatusMatch?.task;
           const plTask = projectLinkMatch?.task;
@@ -263,6 +265,7 @@ export const generateSizeLabel = (unit: Record<string, any>, uInfo: any, selecte
     if (selectedLabels.includes('Update') && uInfo?.update) parts.push(`Update: ${uInfo.update}`);
     if (selectedLabels.includes('Status') && uInfo?.status) parts.push(`Status: ${uInfo.status}`);
     if (selectedLabels.includes('MD Status') && uInfo?.mdStatus) parts.push(`MD Status: ${uInfo.mdStatus}`);
+    if (selectedLabels.includes('MD Notes') && uInfo?.mdNotes) parts.push(`MD Notes: ${uInfo.mdNotes}`);
     if (selectedLabels.includes('Task') && uInfo?.task) parts.push(`Task: ${uInfo.task}`);
     if (selectedLabels.includes('Project Status') && uInfo?.projectStatus) parts.push(`Project Status: ${uInfo.projectStatus}`);
     if (selectedLabels.includes('Act: Status') && uInfo?.actStatus) parts.push(`Act: Status: ${uInfo.actStatus}`);

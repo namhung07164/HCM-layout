@@ -64,6 +64,7 @@ export interface MDStatusInfo {
   brandCode: string;
   brandName: string;
   status: string;
+  mdNotes?: string;
   [key: string]: any;
 }
 

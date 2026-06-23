@@ -178,6 +178,19 @@ export default function MDStatusTab() {
     );
   }, []);
 
+  const renderMdNotesCell = React.useCallback(() => (val: any, row: MDStatusInfo, updateRow: (newRow: MDStatusInfo) => void, isLocked: boolean) => {
+    return (
+      <input
+        type="text"
+        className="w-full bg-transparent border-none outline-none focus:ring-0 px-2 py-1 text-slate-300"
+        value={val || ''}
+        placeholder="..."
+        disabled={isLocked}
+        onChange={(e) => updateRow({ ...row, mdNotes: e.target.value })}
+      />
+    );
+  }, []);
+
   const columns: { key: keyof MDStatusInfo; label: string; summary?: React.ReactNode; renderCell?: any }[] = React.useMemo(() => [
     { key: 'unit', label: 'Unit', summary: getUniqueCount('unit'), renderCell: renderUnitCell() },
     { key: 'unitLink', label: 'Unit Link', summary: getUniqueCount('unitLink'), renderCell: renderUnitLinkCell() },
@@ -188,10 +201,15 @@ export default function MDStatusTab() {
       label: 'Status', 
       renderCell: renderStatusCell()
     },
-  ], [mdStatus, renderUnitCell, renderUnitLinkCell, renderBrandCodeCell, renderBrandNameCell, renderStatusCell]);
+    {
+      key: 'mdNotes',
+      label: 'MD Notes',
+      renderCell: renderMdNotesCell()
+    }
+  ], [mdStatus, renderUnitCell, renderUnitLinkCell, renderBrandCodeCell, renderBrandNameCell, renderStatusCell, renderMdNotesCell]);
 
   const importConfig = React.useMemo(() => ({
-    expectedHeaders: ['update', 'unit', 'unit link', 'brand code', 'brand name', 'status'],
+    expectedHeaders: ['update', 'unit', 'unit link', 'brand code', 'brand name', 'status', 'md notes'],
     mapping: (row: any) => {
       return {
         update: standardizeDateToMMDDYYYY(row['update'] || row['Update'] || row['date'] || row['Date'] || ''),
@@ -199,7 +217,8 @@ export default function MDStatusTab() {
         unitLink: row['unit link'] || row['unitLink'] || row['Unit Link'] || row['Unit link'] || '',
         brandCode: row['brand code'] || row['brandCode'] || row['Brand Code'] || '',
         brandName: row['brand name'] || row['brandName'] || row['Brand Name'] || '',
-        status: row['status'] || row['Status'] || ''
+        status: row['status'] || row['Status'] || '',
+        mdNotes: row['md notes'] || row['MD Notes'] || row['mdNotes'] || row['MD notes'] || ''
       };
     }
   }), []);

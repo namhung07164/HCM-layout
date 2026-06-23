@@ -24,7 +24,7 @@ interface ReviewTabProps {
 
 const AVAILABLE_LABELS = [
     'Unit ID', 'Size SQM', 'Floor', 'Brand Code', 'Brand Name', 'Vendor Code',
-    'Name', 'Class Code', 'Update', 'Status', 'MD Status', 'Task', 'Project Status', 'Act: Status',
+    'Name', 'Class Code', 'Update', 'Status', 'MD Status', 'MD Notes', 'Task', 'Project Status', 'Act: Status',
     'Start Date', 'End Date',
     'Sales', 'Sales By CP', 'Sales By HCM Categ',
     'Profit', 'Profit By CP', 'Profit By HCM Categ',
@@ -323,6 +323,7 @@ export default function ReviewTab({ units, setUnits, versions, setVersions, acti
         hcmSalesEffi: 0,
         hcmMargin: 0,
         mdStatus: "",
+        mdNotes: "",
         task: "",
         projectStatus: "",
         actStatus: "",
@@ -352,6 +353,7 @@ export default function ReviewTab({ units, setUnits, versions, setVersions, acti
         dataMap[key].hcmSalesEffi = sumData.hcmSalesEffi || 0;
         dataMap[key].hcmMargin = sumData.hcmMargin || 0;
         dataMap[key].mdStatus = sumData.mdStatus || "";
+        dataMap[key].mdNotes = sumData.mdNotes || "";
         dataMap[key].task = sumData.task || "";
         dataMap[key].projectStatus = sumData.projectStatus || "";
         dataMap[key].actStatus = sumData.actStatus || "";

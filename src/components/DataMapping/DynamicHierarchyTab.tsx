@@ -713,6 +713,7 @@ export default function DynamicHierarchyTab({
                                   <option value="brandCode">Brand Code</option>
                                   <option value="brandName">Brand Name</option>
                                   <option value="mdStatus">MD Status</option>
+                                  <option value="mdNotes">MD Notes</option>
                                   <option value="task">Task</option>
                                   <option value="projectStatus">Project Status</option>
                                   <option value="actStatus">Act: Status</option>
