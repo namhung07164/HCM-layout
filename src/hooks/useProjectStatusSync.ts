@@ -1,7 +1,20 @@
 import { useEffect, useState, useMemo } from 'react';
-import { collection, onSnapshot } from 'firebase/firestore';
+import { collection, onSnapshot, doc, updateDoc } from 'firebase/firestore';
 import { db, defaultDb } from '../lib/firebase';
 import { ProjectStatusInfo } from '../types';
+
+export async function updateMdStatusInFirestore(projectId: string, mdStatus: string, mdNotes: string) {
+  if (!projectId) return;
+  try {
+    const projectRef = doc(defaultDb, 'artifacts/taka-projects-app-v1/public/data/taka_projects', projectId);
+    await updateDoc(projectRef, {
+      mdStatus: mdStatus || '',
+      detail: mdNotes || ''
+    });
+  } catch (error) {
+    console.error("Failed to update MD Status in Firestore:", error);
+  }
+}
 
 enum OperationType {
   CREATE = 'create',
@@ -164,7 +177,7 @@ export function useProjectStatusSync(validUnits: string[], activeStore: string) 
     };
   }, []);
 
-  const projectStatus = useMemo(() => {
+  const { projectStatus, fsMdStatus } = useMemo(() => {
     // Only map projects that have a code matching units from the Summary tab
     // Also restrict strictly to activeStore
     const filteredProjects = rawProjects.filter(p => {
@@ -173,7 +186,7 @@ export function useProjectStatusSync(validUnits: string[], activeStore: string) 
       return validUnits.includes(code) && store === activeStore;
     });
 
-    return filteredProjects.map(p => {
+    const pStatus = filteredProjects.map(p => {
       const code = String(p.code || p.CODE || '').trim();
       const pYear = String(p.year || p.YEAR || '').trim();
       const pStore = String(p.store || p.STORE || '').trim();
@@ -246,10 +259,6 @@ export function useProjectStatusSync(validUnits: string[], activeStore: string) 
       }
 
       if (foundDelegationStatus) {
-        // Taka PM has convention "act:pending approval" -> "Pending Approval" or similar.
-        // The user showed "Act: Pending Approval", so we'll prepend "Act: " to match the app mẹ's behavior if needed.
-        // Wait, the status is "pending approval", we'll just use it directly.
-        // If it already says "Act:" we can leave it.
         computedActStatus = foundDelegationStatus.replace(/^act:\s*/i, 'Act: ');
         if (!computedActStatus.toLowerCase().startsWith('act:')) {
             computedActStatus = 'Act: ' + computedActStatus.charAt(0).toUpperCase() + computedActStatus.slice(1);
@@ -274,7 +283,23 @@ export function useProjectStatusSync(validUnits: string[], activeStore: string) 
         flowStatus: p.location || p.LOCATION || ''
       };
     });
+
+    const mdStatusList = filteredProjects.map(p => {
+      const code = String(p.code || p.CODE || '').trim();
+      return {
+        update: String(p.year || p.YEAR || new Date().getFullYear()),
+        unit: code,
+        status: p.mdStatus || '',
+        mdNotes: p.detail || '',
+        brandCode: '',
+        brandName: '',
+        unitLink: '',
+        firestoreId: p.id
+      };
+    });
+
+    return { projectStatus: pStatus, fsMdStatus: mdStatusList };
   }, [rawProjects, rawTasks, rawDelegationGroups, validUnits, activeStore]);
 
-  return { projectStatus, loading, error };
+  return { projectStatus, fsMdStatus, loading, error };
 }

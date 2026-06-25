@@ -71,7 +71,7 @@ interface DataContextType {
 const DataContext = createContext<DataContextType | undefined>(undefined);
 
 import { syncFromGoogleSheets } from './services/googleSheets';
-import { useProjectStatusSync } from './hooks/useProjectStatusSync';
+import { useProjectStatusSync, updateMdStatusInFirestore } from './hooks/useProjectStatusSync';
 
 export function DataProvider({ children, store }: { children: React.ReactNode, store: StoreRegion }) {
   const [classInfo, setClassInfoState] = useState<ClassInfo[]>([]);
@@ -86,7 +86,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
   const [basePlan, setBasePlanState] = useState<BasePlanInfo[]>([]);
   const [units, setUnitsState] = useState<UnitDataInfo[]>([]);
   const validUnits = React.useMemo(() => units.map(u => u.unit), [units]);
-  const { projectStatus: fsProjectStatus, error: fsError } = useProjectStatusSync(validUnits, store);
+  const { projectStatus: fsProjectStatus, fsMdStatus, error: fsError } = useProjectStatusSync(validUnits, store);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
 
   const addNotification = (message: string) => {
@@ -103,6 +103,27 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
       setProjectStatusState(fsProjectStatus);
     }
   }, [fsProjectStatus]);
+
+  useEffect(() => {
+    if (fsMdStatus && fsMdStatus.length > 0) {
+      setMdStatusState(prev => {
+        // Merge fsMdStatus with existing mdStatus to preserve brandCode, brandName, unitLink
+        const merged = [...fsMdStatus];
+        return merged.map(fsItem => {
+          const existingItem = prev.find(p => p.unit === fsItem.unit);
+          if (existingItem) {
+            return {
+              ...fsItem,
+              brandCode: existingItem.brandCode || '',
+              brandName: existingItem.brandName || '',
+              unitLink: existingItem.unitLink || ''
+            };
+          }
+          return fsItem;
+        });
+      });
+    }
+  }, [fsMdStatus]);
   
   useEffect(() => {
     if (fsError) {
@@ -637,6 +658,14 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
   };
 
   const setMdStatus = (data: MDStatusInfo[]) => {
+    data.forEach((newItem) => {
+      const oldItem = mdStatus.find(m => m.unit === newItem.unit);
+      if (oldItem && newItem.firestoreId) {
+        if (oldItem.status !== newItem.status || oldItem.mdNotes !== newItem.mdNotes) {
+          updateMdStatusInFirestore(newItem.firestoreId, newItem.status, newItem.mdNotes || '');
+        }
+      }
+    });
     setMdStatusState(data);
   };
 

@@ -65,6 +65,7 @@ export interface MDStatusInfo {
   brandName: string;
   status: string;
   mdNotes?: string;
+  firestoreId?: string;
   [key: string]: any;
 }
 
