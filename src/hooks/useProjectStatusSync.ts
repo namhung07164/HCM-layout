@@ -6,7 +6,7 @@ import { ProjectStatusInfo } from '../types';
 export async function updateMdStatusInFirestore(projectId: string, mdStatus: string, mdNotes: string) {
   if (!projectId) return;
   try {
-    const projectRef = doc(defaultDb, 'artifacts/taka-projects-app-v1/public/data/taka_projects', projectId);
+    const projectRef = doc(defaultDb, 'artifacts/8ac7ca5b-d96d-466b-843f-f29a02c4a843/public/data/taka_projects', projectId);
     await updateDoc(projectRef, {
       mdStatus: mdStatus || '',
       detail: mdNotes || ''
@@ -112,7 +112,7 @@ export function useProjectStatusSync(validUnits: string[], activeStore: string) 
       }
     };
 
-    const unsubProjects = onSnapshot(collection(defaultDb, 'artifacts/taka-projects-app-v1/public/data/taka_projects'), (snapshot) => {
+    const unsubProjects = onSnapshot(collection(defaultDb, 'artifacts/8ac7ca5b-d96d-466b-843f-f29a02c4a843/public/data/taka_projects'), (snapshot) => {
       const projects = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       console.log("Raw taka_projects loaded from Firebase:", projects);
       setRawProjects(projects);
@@ -120,26 +120,26 @@ export function useProjectStatusSync(validUnits: string[], activeStore: string) 
       setError(null);
       checkLoading();
     }, (err) => {
-      handleFirestoreError(err, OperationType.LIST, 'artifacts/taka-projects-app-v1/public/data/taka_projects');
+      handleFirestoreError(err, OperationType.LIST, 'artifacts/8ac7ca5b-d96d-466b-843f-f29a02c4a843/public/data/taka_projects');
       setError('Cannot read taka_projects from Firebase. Please check firebaseConfig.');
       projectsLoaded = true;
       checkLoading();
     });
 
-    const unsubTasks = onSnapshot(collection(defaultDb, 'artifacts/taka-projects-app-v1/public/data/taka_tasks'), (snapshot) => {
+    const unsubTasks = onSnapshot(collection(defaultDb, 'artifacts/8ac7ca5b-d96d-466b-843f-f29a02c4a843/public/data/taka_tasks'), (snapshot) => {
       const tasks = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       console.log("Raw taka_tasks loaded from Firebase:", tasks.length);
       setRawTasks(tasks);
       tasksLoaded = true;
       checkLoading();
     }, (err) => {
-      handleFirestoreError(err, OperationType.LIST, 'artifacts/taka-projects-app-v1/public/data/taka_tasks');
+      handleFirestoreError(err, OperationType.LIST, 'artifacts/8ac7ca5b-d96d-466b-843f-f29a02c4a843/public/data/taka_tasks');
       setError('Cannot read taka_tasks from Firebase. Please check firebaseConfig.');
       tasksLoaded = true;
       checkLoading();
     });
 
-    const unsubDelegation = onSnapshot(collection(defaultDb, 'artifacts/taka-projects-app-v1/public/data/taka_delegation_groups'), (snapshot) => {
+    const unsubDelegation = onSnapshot(collection(defaultDb, 'artifacts/8ac7ca5b-d96d-466b-843f-f29a02c4a843/public/data/taka_delegation_groups'), (snapshot) => {
       let dg = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       console.log("Raw taka_delegation_groups loaded from Firebase:", dg.length);
       setRawDelegationGroups(dg);
@@ -147,7 +147,7 @@ export function useProjectStatusSync(validUnits: string[], activeStore: string) 
       checkLoading();
     }, (err) => {
       // If artifacts path fails or is empty, try root as fallback
-      handleFirestoreError(err, OperationType.LIST, 'artifacts/taka-projects-app-v1/public/data/taka_delegation_groups');
+      handleFirestoreError(err, OperationType.LIST, 'artifacts/8ac7ca5b-d96d-466b-843f-f29a02c4a843/public/data/taka_delegation_groups');
       delegationLoaded = true;
       checkLoading();
     });

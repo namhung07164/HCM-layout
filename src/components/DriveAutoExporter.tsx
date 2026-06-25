@@ -21,7 +21,7 @@ export default function DriveAutoExporter() {
 
   useEffect(() => {
     console.log("DriveAutoExporter: Setting up layout_trigger snapshot listener");
-    const unsub = onSnapshot(doc(defaultDb, 'artifacts/taka-projects-app-v1/public/data/taka_settings', 'layout_trigger'), (docSnap) => {
+    const unsub = onSnapshot(doc(defaultDb, 'artifacts/8ac7ca5b-d96d-466b-843f-f29a02c4a843/public/data/taka_settings', 'layout_trigger'), (docSnap) => {
       setLastCheck(new Date().toLocaleTimeString());
       if (docSnap.exists()) {
         const data = docSnap.data();
@@ -171,7 +171,7 @@ export default function DriveAutoExporter() {
     if (!success) {
       console.error('Auto-export failed. Releasing lock on layout_trigger.');
       try {
-        await updateDoc(doc(defaultDb, 'artifacts/taka-projects-app-v1/public/data/taka_settings', 'layout_trigger'), {
+        await updateDoc(doc(defaultDb, 'artifacts/8ac7ca5b-d96d-466b-843f-f29a02c4a843/public/data/taka_settings', 'layout_trigger'), {
           is_ready_to_export: false
         });
       } catch (e) {
@@ -182,7 +182,7 @@ export default function DriveAutoExporter() {
     
     try {
       console.log("R2AutoExporter: Updating layout_trigger with completion status...");
-      await updateDoc(doc(defaultDb, 'artifacts/taka-projects-app-v1/public/data/taka_settings', 'layout_trigger'), {
+      await updateDoc(doc(defaultDb, 'artifacts/8ac7ca5b-d96d-466b-843f-f29a02c4a843/public/data/taka_settings', 'layout_trigger'), {
         is_ready_to_export: false,
         export_completed_at: Date.now()
       });
