@@ -115,7 +115,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
             return {
               ...fsItem,
               brandCode: existingItem.brandCode || '',
-              brandName: existingItem.brandName || '',
+              brandName: fsItem.brandName || existingItem.brandName || '',
               unitLink: existingItem.unitLink || ''
             };
           }

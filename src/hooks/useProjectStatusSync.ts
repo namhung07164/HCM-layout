@@ -292,7 +292,7 @@ export function useProjectStatusSync(validUnits: string[], activeStore: string) 
         status: p.mdStatus || '',
         mdNotes: p.detail || '',
         brandCode: '',
-        brandName: '',
+        brandName: String(p.project || p.PROJECT || p.name || ''),
         unitLink: '',
         firestoreId: p.id
       };
