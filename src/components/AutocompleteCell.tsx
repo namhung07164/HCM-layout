@@ -61,10 +61,22 @@ export default function AutocompleteCell({
           }
         }}
         onKeyDown={(e) => {
-          if (e.key === 'Enter' && show && filtered.length > 0) {
+          if (e.key === 'Enter') {
             e.preventDefault();
             isSelectingRef.current = true;
-            const success = onSelect(filtered[0].item);
+            // First check if the exact typed value matches an option.
+            const exactMatch = filtered.find(o => (o.value || '').toLowerCase() === localVal.toLowerCase());
+            
+            let success;
+            if (exactMatch) {
+                success = onSelect(exactMatch.item);
+            } else if (onBlur) {
+                // Not picking from dropdown, just commit the text
+                success = onBlur(localVal);
+            } else {
+                success = onSelect(localVal);
+            }
+
             if (success === false) {
               setLocalVal(value || "");
               onChange(value || "");

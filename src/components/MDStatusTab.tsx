@@ -74,9 +74,9 @@ export default function MDStatusTab() {
           }}
           onSelect={(selectedUnit) => updateRow({ 
             ...row, 
-            unit: selectedUnit.item.unit,
-            brandCode: selectedUnit.item.brandCode || '',
-            brandName: selectedUnit.item.brandName || ''
+            unit: selectedUnit.unit,
+            brandCode: selectedUnit.brandCode || '',
+            brandName: selectedUnit.brandName || ''
           })}
           onBlur={(newVal) => {
             const matchedUnit = summaryData.find(u => u.unit === newVal);

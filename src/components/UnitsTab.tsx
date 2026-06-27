@@ -82,8 +82,11 @@ export default function UnitsTab() {
     return (
       <AutocompleteCell 
         value={val || ''} 
-        onChange={(newVal) => updateRow({ ...row, [key]: newVal })}
-        onSelect={(item) => updateRow({ ...row, [key]: item })}
+        onChange={(newVal) => {
+          // Do not update data on every keystroke to prevent premature duplicate detection
+        }}
+        onBlur={(newVal) => updateRow({ ...row, [key]: newVal })}
+        onSelect={(item) => updateRow({ ...row, [key]: typeof item === 'object' ? item.value : item })}
         options={options}
         minChars={0}
         isLocked={isLocked}
