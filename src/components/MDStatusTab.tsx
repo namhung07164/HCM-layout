@@ -118,50 +118,32 @@ export default function MDStatusTab() {
   }, [handleUnitLinkChange, projectStatus]);
 
   const renderBrandCodeCell = React.useCallback(() => (val: any, row: MDStatusInfo, updateRow: (newRow: MDStatusInfo) => void, isLocked: boolean) => {
-    const options = classInfo.map(c => ({
-      value: c.brandCode,
-      label: c.brandName,
-      item: c
-    }));
-
     return (
       <div className="flex-1 min-w-0">
-        <AutocompleteCell
-          value={val}
-          onChange={(newVal) => updateRow({ ...row, brandCode: newVal })}
-          onSelect={(selectedItem) => updateRow({ ...row, brandCode: selectedItem.brandCode, brandName: selectedItem.brandName })}
-          onBlur={(newVal) => updateRow({ ...row, brandCode: newVal })}
-          options={options}
-          minChars={0}
-          isLocked={isLocked}
-          placeholder="..."
+        <input
+          type="text"
+          className="w-full bg-transparent border-none outline-none focus:ring-0 px-2 py-1 text-slate-300 opacity-50 cursor-not-allowed"
+          value={val || ''}
+          readOnly
+          disabled
         />
       </div>
     );
-  }, [classInfo]);
+  }, []);
 
   const renderBrandNameCell = React.useCallback(() => (val: any, row: MDStatusInfo, updateRow: (newRow: MDStatusInfo) => void, isLocked: boolean) => {
-    const options = classInfo.map(c => ({
-      value: c.brandName,
-      label: c.brandCode,
-      item: c
-    }));
-
     return (
       <div className="flex-1 min-w-0">
-        <AutocompleteCell
-          value={val}
-          onChange={(newVal) => updateRow({ ...row, brandName: newVal })}
-          onSelect={(selectedItem) => updateRow({ ...row, brandName: selectedItem.brandName, brandCode: selectedItem.brandCode })}
-          onBlur={(newVal) => updateRow({ ...row, brandName: newVal })}
-          options={options}
-          minChars={0}
-          isLocked={isLocked}
-          placeholder="..."
+        <input
+          type="text"
+          className="w-full bg-transparent border-none outline-none focus:ring-0 px-2 py-1 text-slate-300 opacity-50 cursor-not-allowed"
+          value={val || ''}
+          readOnly
+          disabled
         />
       </div>
     );
-  }, [classInfo]);
+  }, []);
 
   const renderStatusCell = React.useCallback(() => (val: any, row: MDStatusInfo, updateRow: (newRow: MDStatusInfo) => void, isLocked: boolean) => {
     const options = statusOptions.map(opt => ({ value: opt, label: '', item: opt }));

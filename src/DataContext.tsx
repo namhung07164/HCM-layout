@@ -107,23 +107,32 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
   useEffect(() => {
     if (fsMdStatus && fsMdStatus.length > 0) {
       setMdStatusState(prev => {
-        // Merge fsMdStatus with existing mdStatus to preserve brandCode, brandName, unitLink
+        // Merge fsMdStatus with existing mdStatus to preserve unitLink, and fetch brand info from unitInfo
         const merged = [...fsMdStatus];
         return merged.map(fsItem => {
           const existingItem = prev.find(p => p.unit === fsItem.unit);
+          const uInfo = unitInfo.find(u => u.unit === fsItem.unit);
+          
+          const finalBrandCode = uInfo?.brandCode || existingItem?.brandCode || '';
+          const finalBrandName = uInfo?.brandName || existingItem?.brandName || '';
+
           if (existingItem) {
             return {
               ...fsItem,
-              brandCode: existingItem.brandCode || '',
-              brandName: fsItem.brandName || existingItem.brandName || '',
+              brandCode: finalBrandCode,
+              brandName: finalBrandName,
               unitLink: existingItem.unitLink || ''
             };
           }
-          return fsItem;
+          return {
+            ...fsItem,
+            brandCode: finalBrandCode,
+            brandName: finalBrandName
+          };
         });
       });
     }
-  }, [fsMdStatus]);
+  }, [fsMdStatus, unitInfo]);
   
   useEffect(() => {
     if (fsError) {
