@@ -70,6 +70,8 @@ export default function AutocompleteCell({
             let success;
             if (exactMatch) {
                 success = onSelect(exactMatch.item);
+            } else if (filtered.length > 0) {
+                success = onSelect(filtered[0].item);
             } else if (onBlur) {
                 // Not picking from dropdown, just commit the text
                 success = onBlur(localVal);

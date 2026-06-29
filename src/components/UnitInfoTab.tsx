@@ -30,13 +30,30 @@ export default function UnitInfoTab() {
 
     for (const [unitName, activeRows] of unitsMap.entries()) {
       if (activeRows.length > 1) {
-        const newlyUpdated = activeRows.find((r) => !unitInfo.includes(r)) || activeRows[activeRows.length - 1];
+        const newlyUpdated =
+          activeRows.find((r) => !unitInfo.includes(r)) ||
+          activeRows[activeRows.length - 1];
         if (newlyUpdated) {
-          finalData = finalData.map((r) =>
-            r.unit === unitName && r !== newlyUpdated && r.status === "Active"
-              ? { ...r, status: "Unactive" }
-              : r,
+          const confirmed = window.confirm(
+            `Unit ${unitName} hiện đang có bản ghi Active khác. Bạn có muốn đặt các bản ghi khác của Unit này thành Unactive không?`,
           );
+          if (confirmed) {
+            finalData = finalData.map((r) => {
+              if (
+                r.unit === unitName &&
+                r !== newlyUpdated &&
+                r.status === "Active"
+              ) {
+                return { ...r, status: "Unactive" };
+              }
+              return r;
+            });
+          } else {
+            const idx = finalData.findIndex((r) => r === newlyUpdated);
+            if (idx > -1 && unitInfo[idx]) {
+              finalData[idx] = { ...unitInfo[idx] }; // Revert back to old row
+            }
+          }
         }
       }
     }
@@ -48,20 +65,38 @@ export default function UnitInfoTab() {
       const key = `${item.floor || ""}|${item.unit || ""}|${item.brandCode || ""}`;
       uniqueMap.set(key, item);
     });
-    
+
     let deduplicated = Array.from(uniqueMap.values());
-    
+
     // Auto-update parent brand names based on children
-    const activeData = deduplicated.filter(r => r.status === "Active" || r.status === "act" || !r.status);
-    
-    deduplicated = deduplicated.map(row => {
+    const activeData = deduplicated.filter(
+      (r) => r.status === "Active" || r.status === "act" || !r.status,
+    );
+
+    deduplicated = deduplicated.map((row) => {
       if (row.unit && !row.unit.match(/\(\d+\)$/)) {
-        const children = activeData.filter(c => c.unit && c.unit.startsWith(`${row.unit}(`) && c.unit.match(/\(\d+\)$/));
+        const children = activeData.filter(
+          (c) =>
+            c.unit &&
+            c.unit.startsWith(`${row.unit}(`) &&
+            c.unit.match(/\(\d+\)$/),
+        );
         if (children.length > 0) {
-          const combinedBrandName = Array.from(new Set(children.map(c => c.brandName).filter(Boolean))).join(" + ");
-          const combinedBrandCode = Array.from(new Set(children.map(c => c.brandCode).filter(Boolean))).join(" + ");
-          if (row.brandName !== combinedBrandName || row.brandCode !== combinedBrandCode) {
-             return { ...row, brandName: combinedBrandName, brandCode: combinedBrandCode };
+          const combinedBrandName = Array.from(
+            new Set(children.map((c) => c.brandName).filter(Boolean)),
+          ).join(" + ");
+          const combinedBrandCode = Array.from(
+            new Set(children.map((c) => c.brandCode).filter(Boolean)),
+          ).join(" + ");
+          if (
+            row.brandName !== combinedBrandName ||
+            row.brandCode !== combinedBrandCode
+          ) {
+            return {
+              ...row,
+              brandName: combinedBrandName,
+              brandCode: combinedBrandCode,
+            };
           }
         }
       }
@@ -131,51 +166,55 @@ export default function UnitInfoTab() {
     }
   };
 
-  const getUniqueCount = (key: keyof UnitInfo) => (filteredData: UnitInfo[]) => {
-    const uniqueVals = new Set(filteredData.map((item) => item[key]).filter(Boolean));
-    return uniqueVals.size > 0 ? uniqueVals.size : null;
-  };
+  const getUniqueCount =
+    (key: keyof UnitInfo) => (filteredData: UnitInfo[]) => {
+      const uniqueVals = new Set(
+        filteredData.map((item) => item[key]).filter(Boolean),
+      );
+      return uniqueVals.size > 0 ? uniqueVals.size : null;
+    };
 
   const getSum = (key: keyof UnitInfo) => (filteredData: UnitInfo[]) => {
     let sum = 0;
     let count = 0;
-    filteredData.forEach(item => {
-        const val = item[key];
-        if (typeof val === 'number') {
-            sum += val;
-            count++;
-        } else if (typeof val === 'string') {
-            const num = parseFloat(val.replace(/[^\d.-]/g, ''));
-            if (!isNaN(num)) {
-                sum += num;
-                count++;
-            }
+    filteredData.forEach((item) => {
+      const val = item[key];
+      if (typeof val === "number") {
+        sum += val;
+        count++;
+      } else if (typeof val === "string") {
+        const num = parseFloat(val.replace(/[^\d.-]/g, ""));
+        if (!isNaN(num)) {
+          sum += num;
+          count++;
         }
+      }
     });
     if (sum === 0 && count === 0) return null;
-    
-    if (key === 'size') {
-        return (
-          <span className="flex items-center gap-1">
-            {sum.toLocaleString("en-US", {
-              maximumFractionDigits: 2,
-            })} SQM
-          </span>
-        );
+
+    if (key === "size") {
+      return (
+        <span className="flex items-center gap-1">
+          {sum.toLocaleString("en-US", {
+            maximumFractionDigits: 2,
+          })}{" "}
+          SQM
+        </span>
+      );
     }
     return sum.toLocaleString("en-US", { maximumFractionDigits: 2 });
   };
 
   const unitInfoRef = React.useRef(unitInfo);
   const handleDataChangeRef = React.useRef(handleDataChange);
-  
+
   React.useEffect(() => {
     unitInfoRef.current = unitInfo;
     handleDataChangeRef.current = handleDataChange;
   }, [unitInfo, handleDataChange]);
 
   const formatDate = (date: Date) => {
-    return `${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')}/${date.getFullYear()}`;
+    return `${String(date.getMonth() + 1).padStart(2, "0")}/${String(date.getDate()).padStart(2, "0")}/${date.getFullYear()}`;
   };
 
   const renderTextCell = React.useCallback(
@@ -186,7 +225,11 @@ export default function UnitInfoTab() {
         updateRow: (newRow: UnitInfo) => void,
         isLocked: boolean,
       ) => {
-        const options = Array.from(new Set(unitInfo.map(item => String(item[key] || '')).filter(Boolean))).map(opt => ({ value: opt, label: '', item: opt }));
+        const options = Array.from(
+          new Set(
+            unitInfo.map((item) => String(item[key] || "")).filter(Boolean),
+          ),
+        ).map((opt) => ({ value: opt, label: "", item: opt }));
         if (isReadOnly) {
           return (
             <input
@@ -196,7 +239,7 @@ export default function UnitInfoTab() {
               disabled={true}
               className={cn(
                 "bg-transparent border-0 text-slate-300 w-full outline-none",
-                "bg-transparent opacity-50 cursor-not-allowed"
+                "bg-transparent opacity-50 cursor-not-allowed",
               )}
               placeholder=""
             />
@@ -209,7 +252,12 @@ export default function UnitInfoTab() {
               // Do not update data on every keystroke
             }}
             onBlur={(newVal) => updateRow({ ...row, [key]: newVal })}
-            onSelect={(item) => updateRow({ ...row, [key]: typeof item === 'object' ? item.value || item : item })}
+            onSelect={(item) =>
+              updateRow({
+                ...row,
+                [key]: typeof item === "object" ? item.value || item : item,
+              })
+            }
             options={options}
             minChars={0}
             isLocked={isLocked || !!row.locked}
@@ -228,62 +276,79 @@ export default function UnitInfoTab() {
         updateRow: (newRow: UnitInfo) => void,
         isLocked: boolean,
       ) => {
-        const activeUnits = units.filter(u => u.active !== 'Unactive' && u.active !== 'unact' && u.active !== 'Inactive');
+        const activeUnits = units.filter(
+          (u) =>
+            u.active !== "Unactive" &&
+            u.active !== "unact" &&
+            u.active !== "Inactive",
+        );
         const options = activeUnits.map((u) => ({
           value: u.unit,
           label: `Floor ${u.floor} - ${u.size} SQM`,
           item: u,
         }));
 
-        const commitUnit = (newUnitName: string, selectedInfo?: any): boolean | void => {
+        const commitUnit = (
+          newUnitName: string,
+          selectedInfo?: any,
+        ): boolean | void => {
           if (!newUnitName) return true;
           const currentUnits = unitInfoRef.current;
-          const dataIndex = currentUnits.findIndex(u => u === row);
-          
+          const dataIndex = currentUnits.findIndex((u) => u === row);
+
           let infoToApply = selectedInfo;
           let finalUnitName = newUnitName;
           if (!infoToApply) {
-              const lowerName = newUnitName.toLowerCase().trim();
-              const matchedUnit = units.find(u => u.unit.toLowerCase().trim() === lowerName && u.active !== 'Unactive' && u.active !== 'unact' && u.active !== 'Inactive');
-              if (matchedUnit) {
-                  infoToApply = matchedUnit;
-                  finalUnitName = matchedUnit.unit; // Override with exact capitalization from source
-              }
+            const lowerName = newUnitName.toLowerCase().trim();
+            const matchedUnit = units.find(
+              (u) =>
+                u.unit.toLowerCase().trim() === lowerName &&
+                u.active !== "Unactive" &&
+                u.active !== "unact" &&
+                u.active !== "Inactive",
+            );
+            if (matchedUnit) {
+              infoToApply = matchedUnit;
+              finalUnitName = matchedUnit.unit; // Override with exact capitalization from source
+            }
           }
-          
-          if (finalUnitName.toLowerCase().trim() === (row.unit || '').toLowerCase().trim() && !infoToApply) {
-              return true; // Nothing changed, skip
+
+          if (
+            finalUnitName.toLowerCase().trim() ===
+              (row.unit || "").toLowerCase().trim() &&
+            !infoToApply
+          ) {
+            return true; // Nothing changed, skip
           }
-          
-          const activeDuplicates = currentUnits.filter(u => u.unit.toLowerCase().trim() === finalUnitName.toLowerCase().trim() && u !== row && u.status === 'Active');
+
+          const activeDuplicates = currentUnits.filter(
+            (u) =>
+              u.unit.toLowerCase().trim() ===
+                finalUnitName.toLowerCase().trim() &&
+              u !== row &&
+              u.status === "Active",
+          );
           let newUnitInfo = [...currentUnits];
 
-          
-          if (activeDuplicates.length > 0) {
-              if (confirm(`Unit "${finalUnitName}" đã tồn tại và đang bị chiếm dụng (Active). Bạn có muốn tiếp tục và chuyển unit cũ sang Unactive không?`)) {
-                  newUnitInfo = newUnitInfo.map(u => {
-                      if (activeDuplicates.includes(u)) return { ...u, status: 'Unactive' };
-                      return u;
-                  });
-              } else {
-                  return false; // Cancel update
-              }
-          }
-          
           if (dataIndex > -1) {
-              const newRow = { ...row, unit: finalUnitName };
-              if (infoToApply) {
-                  newRow.floor = infoToApply.floor;
-                  newRow.size = String(infoToApply.size);
-              }
-              newUnitInfo[dataIndex] = newRow;
-              handleDataChangeRef.current(newUnitInfo);
+            const newRow = { ...row, unit: finalUnitName };
+            if (infoToApply) {
+              newRow.floor = infoToApply.floor;
+              newRow.size = String(infoToApply.size);
+            }
+            newUnitInfo[dataIndex] = newRow;
+            handleDataChangeRef.current(newUnitInfo);
           } else {
-              if (infoToApply) {
-                  updateRow({ ...row, unit: finalUnitName, floor: infoToApply.floor, size: String(infoToApply.size) });
-              } else {
-                  updateRow({ ...row, unit: finalUnitName });
-              }
+            if (infoToApply) {
+              updateRow({
+                ...row,
+                unit: finalUnitName,
+                floor: infoToApply.floor,
+                size: String(infoToApply.size),
+              });
+            } else {
+              updateRow({ ...row, unit: finalUnitName });
+            }
           }
           return true;
         };
@@ -315,27 +380,39 @@ export default function UnitInfoTab() {
                     <button
                       onClick={() => {
                         const currentUnits = unitInfoRef.current;
-                        const baseUnit = String(val).replace(/\(\d+\)$/, '');
-                        const children = currentUnits.filter(u => u.unit && u.unit.startsWith(`${baseUnit}(`) && u.unit.endsWith(')'));
-                        
+                        const baseUnit = String(val).replace(/\(\d+\)$/, "");
+                        const children = currentUnits.filter(
+                          (u) =>
+                            u.unit &&
+                            u.unit.startsWith(`${baseUnit}(`) &&
+                            u.unit.endsWith(")"),
+                        );
+
                         let nextIndex = 1;
                         if (children.length > 0) {
-                          const indices = children.map(c => {
+                          const indices = children.map((c) => {
                             const m = c.unit.match(/\((\d+)\)$/);
                             return m ? parseInt(m[1], 10) : 0;
                           });
                           nextIndex = Math.max(...indices) + 1;
                         }
-                        
+
                         const childUnitName = `${baseUnit}(${nextIndex})`;
-                        const newRow = { ...row, unit: childUnitName, size: "", update: formatDate(new Date()) };
-                        
-                        const parentIndex = currentUnits.findIndex(r => r.unit === row.unit);
+                        const newRow = {
+                          ...row,
+                          unit: childUnitName,
+                          size: "",
+                          update: formatDate(new Date()),
+                        };
+
+                        const parentIndex = currentUnits.findIndex(
+                          (r) => r.unit === row.unit,
+                        );
                         const newUnitInfo = [...currentUnits];
                         if (parentIndex > -1) {
-                            newUnitInfo.splice(parentIndex + 1, 0, newRow);
+                          newUnitInfo.splice(parentIndex + 1, 0, newRow);
                         } else {
-                            newUnitInfo.push(newRow);
+                          newUnitInfo.push(newRow);
                         }
                         handleDataChangeRef.current(newUnitInfo);
                       }}
@@ -348,7 +425,9 @@ export default function UnitInfoTab() {
                       <button
                         onClick={() => {
                           const currentUnits = unitInfoRef.current;
-                          const newUnitInfo = currentUnits.filter(r => r.unit !== row.unit);
+                          const newUnitInfo = currentUnits.filter(
+                            (r) => r.unit !== row.unit,
+                          );
                           handleDataChangeRef.current(newUnitInfo);
                         }}
                         title="Xoá unit con"
