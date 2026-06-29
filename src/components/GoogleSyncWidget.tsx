@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { useData } from "../DataContext";
+import { useDataStore } from '../DataContext';
 import { Globe, Loader2, CloudUpload, CloudDownload, LogOut } from "lucide-react";
 import { cn } from "../lib/utils";
 import { googleSignIn, getAccessToken, logout } from "../lib/auth";
@@ -7,7 +7,7 @@ import { uploadFileToDrive } from "../lib/drive";
 import { getAuth, onAuthStateChanged, User } from "firebase/auth";
 
 export default function GoogleSyncWidget() {
-  const dataContext = useData();
+  const dataContext = useDataStore();
   const [isDriveLoading, setIsDriveLoading] = useState(false);
   const [user, setUser] = useState<User | null>(null);
 

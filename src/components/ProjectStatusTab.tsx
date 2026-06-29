@@ -1,12 +1,17 @@
+import { useShallow } from 'zustand/react/shallow';
 import React from 'react';
 import DataTable from './DataTable';
 import { ProjectStatusInfo } from '../types';
-import { useData } from '../DataContext';
+import { useDataStore } from '../DataContext';
 import { cn, standardizeDateToMMDDYYYY } from '../lib/utils';
 import AutocompleteCell from './AutocompleteCell';
 
 export default function ProjectStatusTab() {
-  const { projectStatus, setProjectStatus, units } = useData();
+  const {  projectStatus, setProjectStatus, units  } = useDataStore(useShallow(state => ({
+    projectStatus: state.projectStatus,
+    setProjectStatus: state.setProjectStatus,
+    units: state.units,
+  })));
 
   const handleDataChange = (newData: ProjectStatusInfo[]) => {
     setProjectStatus(newData);

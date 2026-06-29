@@ -1,7 +1,8 @@
+import { useShallow } from 'zustand/react/shallow';
 import React, { useState, useEffect, useRef } from 'react';
 import { Stage, Layer, Image as KonvaImage, Rect, Circle, Line, Text } from 'react-konva';
 import useImage from 'use-image';
-import { useData } from '../../DataContext';
+import { useDataStore } from '../../DataContext';
 import { useSummaryData, generateSizeLabel } from '../../lib/summaryData';
 
 // Component for a single version stage
@@ -89,7 +90,7 @@ const VersionStage = ({ version, mapUnits, summaryData, selectedLabels, windowSi
             rotation={version?.backgroundRotation || 0}
           />}
           {styledUnits.map((unit: any) => {
-            const { displayColor, displayOpacity } = unit;
+            const {  displayColor, displayOpacity } = unit;
 
             const shapeProps = {
                 key: unit.id,
@@ -157,7 +158,11 @@ const VersionStage = ({ version, mapUnits, summaryData, selectedLabels, windowSi
 };
 
 export default function ReviewOnlyView() {
-  const { mapUnits, mapVersions, isLoading } = useData();
+  const { mapUnits, mapVersions, isLoading } = useDataStore(useShallow(state => ({
+    mapUnits: state.mapUnits,
+    mapVersions: state.mapVersions,
+    isLoading: state.isLoading
+  })));
   const summaryData = useSummaryData();
   const [windowSize, setWindowSize] = useState({ width: window.innerWidth, height: window.innerHeight });
 

@@ -1,13 +1,19 @@
+import { useShallow } from 'zustand/react/shallow';
 import React from 'react';
 import DataTable from './DataTable';
 import { MDStatusInfo } from '../types';
-import { useData } from '../DataContext';
+import { useDataStore } from '../DataContext';
 import { standardizeDateToMMDDYYYY, cn } from '../lib/utils';
 import AutocompleteCell from './AutocompleteCell';
 import { useSummaryData } from '../lib/summaryData';
 
 export default function MDStatusTab() {
-  const { mdStatus, setMdStatus, classInfo, projectStatus } = useData();
+  const {  mdStatus, setMdStatus, classInfo, projectStatus  } = useDataStore(useShallow(state => ({
+    mdStatus: state.mdStatus,
+    setMdStatus: state.setMdStatus,
+    classInfo: state.classInfo,
+    projectStatus: state.projectStatus,
+  })));
   const summaryData = useSummaryData();
 
   const handleDataChange = (newData: MDStatusInfo[]) => {

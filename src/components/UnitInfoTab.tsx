@@ -1,13 +1,19 @@
+import { useShallow } from 'zustand/react/shallow';
 import React, { useState, useEffect } from "react";
 import DataTable from "./DataTable";
 import { Plus, Lock, Unlock, Trash2 } from "lucide-react";
 import { UnitInfo } from "../types";
-import { useData } from "../DataContext";
+import { useDataStore } from '../DataContext';
 import { cn } from "../lib/utils";
 import AutocompleteCell from "./AutocompleteCell";
 
 export default function UnitInfoTab() {
-  const { unitInfo, setUnitInfo, units, classInfo } = useData();
+  const {  unitInfo, setUnitInfo, units, classInfo  } = useDataStore(useShallow(state => ({
+    unitInfo: state.unitInfo,
+    setUnitInfo: state.setUnitInfo,
+    units: state.units,
+    classInfo: state.classInfo,
+  })));
 
   const handleDataChange = (newData: UnitInfo[]) => {
     let finalData = [...newData];
@@ -218,18 +224,20 @@ export default function UnitInfoTab() {
   };
 
   const renderTextCell = React.useCallback(
-    (key: keyof UnitInfo, isReadOnly: boolean = false) =>
-      (
+    (key: keyof UnitInfo, isReadOnly: boolean = false) => {
+      // Calculate options outside of row render to prevent re-calculating on every cell render
+      const options = Array.from(
+        new Set(
+          unitInfo.map((item) => String(item[key] || "")).filter(Boolean),
+        ),
+      ).map((opt) => ({ value: opt, label: "", item: opt }));
+
+      return (
         val: any,
         row: UnitInfo,
         updateRow: (newRow: UnitInfo) => void,
         isLocked: boolean,
       ) => {
-        const options = Array.from(
-          new Set(
-            unitInfo.map((item) => String(item[key] || "")).filter(Boolean),
-          ),
-        ).map((opt) => ({ value: opt, label: "", item: opt }));
         if (isReadOnly) {
           return (
             <input
@@ -264,7 +272,8 @@ export default function UnitInfoTab() {
             placeholder="..."
           />
         );
-      },
+      };
+    },
     [unitInfo],
   );
 
@@ -514,103 +523,99 @@ export default function UnitInfoTab() {
     [classInfo],
   );
 
-  const renderBrandCodeCell = React.useCallback(
-    () =>
-      (
-        val: any,
-        row: UnitInfo,
-        updateRow: (newRow: UnitInfo) => void,
-        isLocked: boolean,
-      ) => {
-        const options = classInfo.map((c) => ({
-          value: c.brandCode,
-          label: c.brandName,
-          item: c,
-        }));
+  const renderBrandCodeCell = React.useCallback(() => {
+    const options = classInfo.map((c) => ({
+      value: c.brandCode,
+      label: c.brandName,
+      item: c,
+    }));
 
-        return (
-          <AutocompleteCell
-            value={val}
-            onChange={(newVal) => {
-              const found = classInfo.find((c) => c.brandCode === newVal);
-              if (found) {
-                updateRow({
-                  ...row,
-                  brandCode: found.brandCode,
-                  brandName: found.brandName,
-                  vendorCode: found.vendorCode || row.vendorCode,
-                  classCode: found.classCode || row.classCode,
-                });
-              } else {
-                updateRow({ ...row, brandCode: newVal });
-              }
-            }}
-            onSelect={(selectedClass) => {
+    return (
+      val: any,
+      row: UnitInfo,
+      updateRow: (newRow: UnitInfo) => void,
+      isLocked: boolean,
+    ) => {
+      return (
+        <AutocompleteCell
+          value={val}
+          onChange={(newVal) => {
+            const found = classInfo.find((c) => c.brandCode === newVal);
+            if (found) {
               updateRow({
                 ...row,
-                brandCode: selectedClass.brandCode,
-                brandName: selectedClass.brandName,
-                vendorCode: selectedClass.vendorCode || row.vendorCode,
-                classCode: selectedClass.classCode || row.classCode,
+                brandCode: found.brandCode,
+                brandName: found.brandName,
+                vendorCode: found.vendorCode || row.vendorCode,
+                classCode: found.classCode || row.classCode,
               });
-            }}
-            options={options}
-            minChars={4}
-            isLocked={isLocked || !!row.locked}
-          />
-        );
-      },
-    [classInfo],
-  );
+            } else {
+              updateRow({ ...row, brandCode: newVal });
+            }
+          }}
+          onSelect={(selectedClass) => {
+            updateRow({
+              ...row,
+              brandCode: selectedClass.brandCode,
+              brandName: selectedClass.brandName,
+              vendorCode: selectedClass.vendorCode || row.vendorCode,
+              classCode: selectedClass.classCode || row.classCode,
+            });
+          }}
+          options={options}
+          minChars={4}
+          isLocked={isLocked || !!row.locked}
+        />
+      );
+    };
+  }, [classInfo]);
 
-  const renderBrandNameCell = React.useCallback(
-    () =>
-      (
-        val: any,
-        row: UnitInfo,
-        updateRow: (newRow: UnitInfo) => void,
-        isLocked: boolean,
-      ) => {
-        const options = classInfo.map((c) => ({
-          value: c.brandName,
-          label: c.brandCode,
-          item: c,
-        }));
+  const renderBrandNameCell = React.useCallback(() => {
+    const options = classInfo.map((c) => ({
+      value: c.brandName,
+      label: c.brandCode,
+      item: c,
+    }));
 
-        return (
-          <AutocompleteCell
-            value={val}
-            onChange={(newVal) => {
-              const found = classInfo.find((c) => c.brandName === newVal);
-              if (found) {
-                updateRow({
-                  ...row,
-                  brandName: found.brandName,
-                  brandCode: found.brandCode,
-                  vendorCode: found.vendorCode || row.vendorCode,
-                  classCode: found.classCode || row.classCode,
-                });
-              } else {
-                updateRow({ ...row, brandName: newVal });
-              }
-            }}
-            onSelect={(selectedClass) => {
+    return (
+      val: any,
+      row: UnitInfo,
+      updateRow: (newRow: UnitInfo) => void,
+      isLocked: boolean,
+    ) => {
+      return (
+        <AutocompleteCell
+          value={val}
+          onChange={(newVal) => {
+            const found = classInfo.find((c) => c.brandName === newVal);
+            if (found) {
               updateRow({
                 ...row,
-                brandName: selectedClass.brandName,
-                brandCode: selectedClass.brandCode,
-                vendorCode: selectedClass.vendorCode || row.vendorCode,
-                classCode: selectedClass.classCode || row.classCode,
+                brandName: found.brandName,
+                brandCode: found.brandCode,
+                vendorCode: found.vendorCode || row.vendorCode,
+                classCode: found.classCode || row.classCode,
               });
-            }}
-            options={options}
-            minChars={3}
-            isLocked={isLocked || !!row.locked}
-          />
-        );
-      },
-    [classInfo],
-  );
+            } else {
+              updateRow({ ...row, brandName: newVal });
+            }
+          }}
+          onSelect={(selectedClass) => {
+            updateRow({
+              ...row,
+              brandName: selectedClass.brandName,
+              brandCode: selectedClass.brandCode,
+              vendorCode: selectedClass.vendorCode || row.vendorCode,
+              classCode: selectedClass.classCode || row.classCode,
+            });
+          }}
+          options={options}
+          minChars={2}
+          isLocked={isLocked || !!row.locked}
+        />
+      );
+    };
+  }, [classInfo]);
 
   const renderStatusCell = React.useCallback(
     () =>

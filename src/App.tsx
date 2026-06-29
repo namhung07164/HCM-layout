@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -36,7 +37,7 @@ import DataMappingTab from "./components/DataMappingTab";
 import MappingTab from "./components/MappingTab";
 import CsvExportTab from "./components/CsvExportTab";
 import ReviewOnlyView from "./components/DataMapping/ReviewOnlyView";
-import { useData } from "./DataContext";
+import { useDataStore } from './DataContext';
 import DriveAutoExporter from "./components/DriveAutoExporter";
 
 type TabId = "input" | "dashboard" | "dataMapping" | "mapping" | "picture" | "csv";
@@ -66,7 +67,7 @@ function MainApp({ store, onSwitchStore }: { store: StoreRegion, onSwitchStore: 
     { id: "csv", label: "CSV", icon: Table2, shortcut: "⌥+C" },
   ];
 
-  const {
+  const { 
     isLoading,
     isSaving,
     lastBackup,
@@ -78,7 +79,19 @@ function MainApp({ store, onSwitchStore }: { store: StoreRegion, onSwitchStore: 
     markAllNotificationsRead,
     triggerManualBackup,
     triggerManualLoad,
-  } = useData();
+   } = useDataStore(useShallow(state => ({
+    isLoading: state.isLoading,
+    isSaving: state.isSaving,
+    lastBackup: state.lastBackup,
+    selectLocalFolder: state.selectLocalFolder,
+    hasLocalFolder: state.hasLocalFolder,
+    needsPermission: state.needsPermission,
+    requestFolderPermission: state.requestFolderPermission,
+    notifications: state.notifications,
+    markAllNotificationsRead: state.markAllNotificationsRead,
+    triggerManualBackup: state.triggerManualBackup,
+    triggerManualLoad: state.triggerManualLoad,
+  })));
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

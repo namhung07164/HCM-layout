@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Split, Edit3, GitMerge, Eye, Maximize2, X } from 'lucide-react';
@@ -7,7 +8,7 @@ import HierarchyTab from './DataMapping/HierarchyTab';
 import DynamicHierarchyTab from './DataMapping/DynamicHierarchyTab';
 import ReviewTab from './DataMapping/ReviewTab';
 import { UnitShape, Group, MapVersion } from './DataMapping/types';
-import { useData } from '../DataContext';
+import { useDataStore } from '../DataContext';
 
 type SubTab = 'edit' | 'hierarchy' | 'dynamic-hierarchy' | 'review';
 
@@ -18,7 +19,14 @@ export default React.memo(function DataMappingTab() {
   const [isHeaderVisible, setIsHeaderVisible] = useState(false);
   
   // Shared State
-  const { mapUnits, setMapUnits, mapVersions, setMapVersions, activeMapVersionId, setActiveMapVersionId } = useData();
+  const {  mapUnits, setMapUnits, mapVersions, setMapVersions, activeMapVersionId, setActiveMapVersionId  } = useDataStore(useShallow(state => ({
+    mapUnits: state.mapUnits,
+    setMapUnits: state.setMapUnits,
+    mapVersions: state.mapVersions,
+    setMapVersions: state.setMapVersions,
+    activeMapVersionId: state.activeMapVersionId,
+    setActiveMapVersionId: state.setActiveMapVersionId,
+  })));
 
   React.useEffect(() => {
     try {

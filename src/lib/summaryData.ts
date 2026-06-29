@@ -1,5 +1,6 @@
+import { useShallow } from 'zustand/react/shallow';
 import { useMemo } from "react";
-import { useData } from "../DataContext";
+import { useDataStore } from '../DataContext';
 import { UnitInfo, SalesInfo } from "../types";
 
 export interface SummaryDataItem extends UnitInfo {
@@ -28,7 +29,7 @@ export interface SummaryDataItem extends UnitInfo {
 }
 
 export function useSummaryData() {
-  const {
+  const { 
     unitInfo,
     classInfo,
     actualClassInfo,
@@ -40,7 +41,19 @@ export function useSummaryData() {
     projectLink: projectLinkData,
     basePlan,
     units: unitsData,
-  } = useData();
+   } = useDataStore(useShallow(state => ({
+    unitInfo: state.unitInfo,
+    classInfo: state.classInfo,
+    actualClassInfo: state.actualClassInfo,
+    sales: state.sales,
+    profits: state.profits,
+    subFees: state.subFees,
+    mdStatus: state.mdStatus,
+    projectStatus: state.projectStatus,
+    projectLink: state.projectLink,
+    basePlan: state.basePlan,
+    units: state.units,
+  })));
 
   const summaryData = useMemo(() => {
     // 1. Build Index Maps for fast lookup

@@ -1,12 +1,16 @@
+import { useShallow } from 'zustand/react/shallow';
 import React from "react";
 import DataTable from "./DataTable";
 import { SalesInfo } from "../types";
-import { useData } from "../DataContext";
+import { useDataStore } from '../DataContext';
 import { standardizeDateToMMDDYYYY, cn } from "../lib/utils";
 import AutocompleteCell from "./AutocompleteCell";
 
 export default function SalesTab() {
-  const { sales, setSales } = useData();
+  const {  sales, setSales  } = useDataStore(useShallow(state => ({
+    sales: state.sales,
+    setSales: state.setSales,
+  })));
 
   const handleDataChange = (newData: SalesInfo[]) => {
     // Nhập tất cả dữ liệu, không bỏ bớt (không deduplicate)

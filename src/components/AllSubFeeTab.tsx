@@ -1,12 +1,16 @@
+import { useShallow } from 'zustand/react/shallow';
 import React from 'react';
 import DataTable from './DataTable';
 import { SubFeeInfo } from '../types';
-import { useData } from '../DataContext';
+import { useDataStore } from '../DataContext';
 import { standardizeDateToMMDDYYYY, cn } from '../lib/utils';
 import AutocompleteCell from './AutocompleteCell';
 
 export default function AllSubFeeTab() {
-  const { subFees, setSubFees } = useData();
+  const {  subFees, setSubFees  } = useDataStore(useShallow(state => ({
+    subFees: state.subFees,
+    setSubFees: state.setSubFees,
+  })));
 
   const handleDataChange = (newData: SubFeeInfo[]) => {
     setSubFees(newData);

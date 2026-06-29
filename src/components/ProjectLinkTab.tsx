@@ -1,12 +1,18 @@
+import { useShallow } from 'zustand/react/shallow';
 import React from 'react';
 import DataTable from './DataTable';
 import { ProjectLinkInfo } from '../types';
-import { useData } from '../DataContext';
+import { useDataStore } from '../DataContext';
 import { cn, standardizeDateToMMDDYYYY } from '../lib/utils';
 import AutocompleteCell from './AutocompleteCell';
 
 export default function ProjectLinkTab() {
-  const { projectLink, setProjectLink, projectStatus, units } = useData();
+  const {  projectLink, setProjectLink, projectStatus, units  } = useDataStore(useShallow(state => ({
+    projectLink: state.projectLink,
+    setProjectLink: state.setProjectLink,
+    projectStatus: state.projectStatus,
+    units: state.units,
+  })));
 
   const handleDataChange = (newData: ProjectLinkInfo[]) => {
     setProjectLink(newData);

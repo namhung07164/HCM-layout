@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useRef } from 'r
 import { ClassInfo, ActualClassInfo, SalesInfo, ProfitInfo, UnitInfo, MDStatusInfo, SubFeeInfo, ProjectStatusInfo, ProjectLinkInfo, BasePlanInfo, UnitDataInfo, StoreRegion } from './types';
 import { UnitShape, MapVersion } from './components/DataMapping/types';
 import { loadPersistentData, savePersistentData } from './lib/sheets';
-import { get, set } from 'idb-keyval';
+import { get as idbGet, set as idbSet } from 'idb-keyval';
 
 export interface AppNotification {
   id: string;
@@ -68,95 +68,152 @@ interface DataContextType {
   setReviewSelectedLabels: (labels: string[]) => void;
 }
 
-const DataContext = createContext<DataContextType | undefined>(undefined);
-
+import { create } from 'zustand';
 import { syncFromGoogleSheets } from './services/googleSheets';
 import { useProjectStatusSync, updateMdStatusInFirestore } from './hooks/useProjectStatusSync';
 
+export const useDataStore = create<DataContextType>((set, get) => ({
+  actualClassInfo: [],
+  classInfo: [],
+  sales: [],
+  profits: [],
+  unitInfo: [],
+  mdStatus: [],
+  subFees: [],
+  projectStatus: [],
+  projectLink: [],
+  basePlan: [],
+  units: [],
+  notifications: [],
+  mapUnits: [],
+  mapVersions: [],
+  activeMapVersionId: null,
+  reviewSelectedLabels: ['Unit ID', 'Size SQM'],
+  
+  setActualClassInfo: (data) => set({ actualClassInfo: data }),
+  setClassInfo: (data) => set({ classInfo: data }),
+  setSales: (data) => set({ sales: data }),
+  setProfits: (data) => set({ profits: data }),
+  setUnitInfo: (data) => set({ unitInfo: data }),
+  setMdStatus: (data) => set({ mdStatus: data }),
+  setSubFees: (data) => set({ subFees: data }),
+  setProjectStatus: (data) => set({ projectStatus: data }),
+  setProjectLink: (data) => set({ projectLink: data }),
+  setBasePlan: (data) => set({ basePlan: data }),
+  setUnits: (data) => set({ units: data }),
+  setNotifications: (data) => set({ notifications: data }),
+  addNotification: (message) => set(state => ({
+      notifications: [{
+          id: Math.random().toString(36).substr(2, 9),
+          message,
+          read: false,
+          timestamp: new Date().toISOString()
+      }, ...state.notifications]
+  })),
+  markAllNotificationsRead: () => set(state => ({
+      notifications: state.notifications.map(n => ({ ...n, read: true }))
+  })),
+  setMapUnits: (data) => set({ mapUnits: data }),
+  setMapVersions: (data) => set({ mapVersions: data }),
+  setActiveMapVersionId: (id) => set({ activeMapVersionId: id }),
+  
+  isLoading: true,
+  isSaving: false,
+  lastBackup: null,
+  
+  triggerManualBackup: async () => {}, // injected
+  triggerManualLoad: async () => {}, // injected
+  selectLocalFolder: async () => {}, // injected
+  hasLocalFolder: false,
+  needsPermission: false,
+  setNeedsPermission: (v) => set({ needsPermission: v }),
+  requestFolderPermission: async () => {}, // injected
+  syncWithGoogleSheets: async () => {}, // injected
+  
+  spreadsheetId: null,
+  setSpreadsheetId: (id) => set({ spreadsheetId: id }),
+  store: 'HCM' as StoreRegion, 
+  isAppLocked: true,
+  setIsAppLocked: (v) => set({ isAppLocked: v }),
+  setReviewSelectedLabels: (labels) => set({ reviewSelectedLabels: labels })
+}));
+
 export function DataProvider({ children, store }: { children: React.ReactNode, store: StoreRegion }) {
-  const [classInfo, setClassInfoState] = useState<ClassInfo[]>([]);
-  const [actualClassInfo, setActualClassInfoState] = useState<ActualClassInfo[]>([]);
-  const [sales, setSalesState] = useState<SalesInfo[]>([]);
-  const [profits, setProfitsState] = useState<ProfitInfo[]>([]);
-  const [unitInfo, setUnitInfoState] = useState<UnitInfo[]>([]);
-  const [mdStatus, setMdStatusState] = useState<MDStatusInfo[]>([]);
-  const [subFees, setSubFeesState] = useState<SubFeeInfo[]>([]);
-  const [projectStatus, setProjectStatusState] = useState<ProjectStatusInfo[]>([]);
-  const [projectLink, setProjectLinkState] = useState<ProjectLinkInfo[]>([]);
-  const [basePlan, setBasePlanState] = useState<BasePlanInfo[]>([]);
-  const [units, setUnitsState] = useState<UnitDataInfo[]>([]);
+  const set = useDataStore.setState;
+  const state = useDataStore();
+  const { 
+      units, 
+      unitInfo, 
+      classInfo,
+      actualClassInfo,
+      sales,
+      profits,
+      mdStatus,
+      subFees,
+      projectStatus,
+      projectLink,
+      basePlan,
+      mapUnits,
+      mapVersions,
+      activeMapVersionId,
+      isLoading,
+      isSaving,
+      lastBackup,
+      hasLocalFolder,
+      needsPermission,
+      spreadsheetId,
+      isAppLocked,
+      reviewSelectedLabels
+  } = state;
+
   const validUnits = React.useMemo(() => units.map(u => u.unit), [units]);
   const { projectStatus: fsProjectStatus, fsMdStatus, error: fsError } = useProjectStatusSync(validUnits, store);
-  const [notifications, setNotifications] = useState<AppNotification[]>([]);
 
-  const addNotification = (message: string) => {
-    setNotifications(prev => [{
-      id: Math.random().toString(36).substr(2, 9),
-      message,
-      read: false,
-      timestamp: new Date().toISOString()
-    }, ...prev]);
-  };
+  useEffect(() => {
+    set({ store });
+  }, [store]);
 
   useEffect(() => {
     if (fsProjectStatus && fsProjectStatus.length > 0) {
-      setProjectStatusState(fsProjectStatus);
+      set({ projectStatus: fsProjectStatus });
     }
   }, [fsProjectStatus]);
 
   useEffect(() => {
     if (fsMdStatus && fsMdStatus.length > 0) {
-      setMdStatusState(prev => {
-        // Merge fsMdStatus with existing mdStatus to preserve unitLink, and fetch brand info from unitInfo
-        const merged = [...fsMdStatus];
-        return merged.map(fsItem => {
-          const existingItem = prev.find(p => p.unit === fsItem.unit);
-          const uInfo = unitInfo.find(u => u.unit === fsItem.unit);
-          
-          const finalBrandCode = uInfo?.brandCode || existingItem?.brandCode || '';
-          const finalBrandName = uInfo?.brandName || existingItem?.brandName || '';
+      const prev = useDataStore.getState().mdStatus;
+      const unitInfo = useDataStore.getState().unitInfo;
+      const merged = [...fsMdStatus];
+      const nextMdStatus = merged.map(fsItem => {
+        const existingItem = prev.find(p => p.unit === fsItem.unit);
+        const uInfo = unitInfo.find(u => u.unit === fsItem.unit);
+        
+        const finalBrandCode = uInfo?.brandCode || existingItem?.brandCode || '';
+        const finalBrandName = uInfo?.brandName || existingItem?.brandName || '';
 
-          if (existingItem) {
-            return {
-              ...fsItem,
-              brandCode: finalBrandCode,
-              brandName: finalBrandName,
-              unitLink: existingItem.unitLink || ''
-            };
-          }
+        if (existingItem) {
           return {
             ...fsItem,
             brandCode: finalBrandCode,
-            brandName: finalBrandName
+            brandName: finalBrandName,
+            unitLink: existingItem.unitLink || ''
           };
-        });
+        }
+        return {
+          ...fsItem,
+          brandCode: finalBrandCode,
+          brandName: finalBrandName
+        };
       });
+      set({ mdStatus: nextMdStatus });
     }
   }, [fsMdStatus, unitInfo]);
   
   useEffect(() => {
     if (fsError) {
-       addNotification(fsError);
+       state.addNotification(fsError);
     }
   }, [fsError]);
-
-  const markAllNotificationsRead = () => {
-    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
-  };
-
-  const [mapUnits, setMapUnitsState] = useState<UnitShape[]>([]);
-  const [mapVersions, setMapVersionsState] = useState<MapVersion[]>([]);
-  const [activeMapVersionId, setActiveMapVersionIdState] = useState<string | null>(null);
-  const [reviewSelectedLabels, setReviewSelectedLabelsState] = useState<string[]>(['Unit ID', 'Size SQM']);
-  const [spreadsheetId, setSpreadsheetIdState] = useState<string | null>(null);
-
-  const [isLoading, setIsLoading] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
-  const [lastBackup, setLastBackup] = useState<string | null>(null);
-  const [hasLocalFolder, setHasLocalFolder] = useState(false);
-  const [needsPermission, setNeedsPermission] = useState(false);
-  
-  const [isAppLocked, setIsAppLocked] = useState(true);
 
   const dirHandleRef = useRef<any>(null);
   const isInitialMount = useRef(true);
@@ -169,15 +226,31 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
       return;
     }
 
-    setUnitInfoState(prev => {
+    set(state => {
       let isChanged = false;
-      const next = prev.map(item => {
+      
+      // Build maps for O(1) lookups
+      const unitsByLower = new Map<string, UnitDataInfo>();
+      for (const u of state.units) {
+        if (u.unit) {
+          unitsByLower.set(u.unit.toLowerCase(), u);
+        }
+      }
+      
+      const classByCodeLower = new Map<string, ClassInfo>();
+      const classByNameLower = new Map<string, ClassInfo>();
+      for (const c of state.classInfo) {
+        if (c.brandCode) classByCodeLower.set(c.brandCode.toLowerCase(), c);
+        if (c.brandName) classByNameLower.set(c.brandName.toLowerCase(), c);
+      }
+
+      const next = state.unitInfo.map(item => {
         let updated = { ...item };
         let localChanged = false;
 
         // Sync floor and size from units
         if (item.unit) {
-          const matchedUnit = units.find(u => u.unit?.toLowerCase() === item.unit?.toLowerCase());
+          const matchedUnit = unitsByLower.get(item.unit.toLowerCase());
           if (matchedUnit) {
             if (updated.floor !== matchedUnit.floor || updated.size !== String(matchedUnit.size)) {
               updated.floor = matchedUnit.floor;
@@ -190,9 +263,6 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
                 updated.status = 'Unactive';
                 localChanged = true;
             } else if (!isUnactive && updated.status === 'Unactive') {
-                // Should we change it back to active if it's active in units?
-                // The requirement says: "Ngoài ra ,các unit đang bị unactive ở tab unit cũng sẽ bị unactive ở tab unit info".
-                // I will also sync Active status.
                 updated.status = 'Active';
                 localChanged = true;
             }
@@ -201,13 +271,13 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
 
         // Sync brandName/brandCode from classInfo
         if (item.brandCode) {
-          const matchedClass = classInfo.find(c => c.brandCode?.toLowerCase() === item.brandCode?.toLowerCase());
+          const matchedClass = classByCodeLower.get(item.brandCode.toLowerCase());
           if (matchedClass && updated.brandName !== matchedClass.brandName) {
             updated.brandName = matchedClass.brandName;
             localChanged = true;
           }
         } else if (item.brandName) {
-          const matchedClass = classInfo.find(c => c.brandName?.toLowerCase() === item.brandName?.toLowerCase());
+          const matchedClass = classByNameLower.get(item.brandName.toLowerCase());
           if (matchedClass && updated.brandCode !== matchedClass.brandCode) {
             updated.brandCode = matchedClass.brandCode;
             localChanged = true;
@@ -215,10 +285,10 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
         }
 
         if (localChanged) isChanged = true;
-        return updated;
+        return localChanged ? updated : item; // optimization: return original item if no changes
       });
 
-      return isChanged ? next : prev;
+      return isChanged ? { unitInfo: next } : {};
     });
   }, [units, classInfo, isLoading]);
 
@@ -258,27 +328,27 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
       const file = await fileHandle.getFile();
       const text = await file.text();
       const parsed = JSON.parse(text);
-      if (parsed.classInfo) setClassInfoState(parsed.classInfo);
-      if (parsed.actualClassInfo) setActualClassInfoState(parsed.actualClassInfo);
-      if (parsed.unitInfo) setUnitInfoState(parsed.unitInfo);
-      if (parsed.mdStatus) setMdStatusState(parsed.mdStatus);
-      if (parsed.subFees) setSubFeesState(parsed.subFees);
-      if (parsed.projectStatus) setProjectStatusState(parsed.projectStatus);
-      if (parsed.projectLink) setProjectLinkState(parsed.projectLink);
-      if (parsed.basePlan) setBasePlanState(parsed.basePlan);
-      if (parsed.units) setUnitsState(parsed.units);
-      if (parsed.mapUnits) setMapUnitsState(parsed.mapUnits);
-      if (parsed.mapVersions) setMapVersionsState(parsed.mapVersions);
-      if (parsed.activeMapVersionId) setActiveMapVersionIdState(parsed.activeMapVersionId);
-      if (parsed.reviewSelectedLabels) setReviewSelectedLabelsState(parsed.reviewSelectedLabels);
+      if (parsed.classInfo) set({ classInfo: parsed.classInfo });
+      if (parsed.actualClassInfo) set({ actualClassInfo: parsed.actualClassInfo });
+      if (parsed.unitInfo) set({ unitInfo: parsed.unitInfo });
+      if (parsed.mdStatus) set({ mdStatus: parsed.mdStatus });
+      if (parsed.subFees) set({ subFees: parsed.subFees });
+      if (parsed.projectStatus) set({ projectStatus: parsed.projectStatus });
+      if (parsed.projectLink) set({ projectLink: parsed.projectLink });
+      if (parsed.basePlan) set({ basePlan: parsed.basePlan });
+      if (parsed.units) set({ units: parsed.units });
+      if (parsed.mapUnits) set({ mapUnits: parsed.mapUnits });
+      if (parsed.mapVersions) set({ mapVersions: parsed.mapVersions });
+      if (parsed.activeMapVersionId) set({ activeMapVersionId: parsed.activeMapVersionId });
+      if (parsed.reviewSelectedLabels) set({ reviewSelectedLabels: parsed.reviewSelectedLabels });
       
       try {
         const sharedHandle = await handle.getFileHandle('SheetSyncData_Shared.json');
         const sharedFile = await sharedHandle.getFile();
         const sharedText = await sharedFile.text();
         const sharedParsed = JSON.parse(sharedText);
-        if (sharedParsed.classInfo) setClassInfoState(sharedParsed.classInfo);
-        if (sharedParsed.actualClassInfo) setActualClassInfoState(sharedParsed.actualClassInfo);
+        if (sharedParsed.classInfo) set({ classInfo: sharedParsed.classInfo });
+        if (sharedParsed.actualClassInfo) set({ actualClassInfo: sharedParsed.actualClassInfo });
       } catch (e) {
         console.log('No shared class/brand info found, using store-specific data.');
       }
@@ -295,8 +365,8 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
         }
         console.log('Migrated existing data: divided by 1000');
       }
-      setSalesState(salesData);
-      setProfitsState(profitsData);
+      set({ sales: salesData });
+      set({ profits: profitsData });
       
       if (parsed.r2Config) {
         if (parsed.r2Config.accountId) localStorage.setItem('r2_account_id', parsed.r2Config.accountId);
@@ -307,7 +377,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
         if (parsed.r2Config.cfApiToken) localStorage.setItem('cf_api_token', parsed.r2Config.cfApiToken);
       }
 
-      if (parsed.lastUpdated) setLastBackup(parsed.lastUpdated);
+      if (parsed.lastUpdated) set({ lastBackup: parsed.lastUpdated });
       return true;
     } catch (e) {
       console.log('No existing backup in directory, it might be a new folder.');
@@ -319,43 +389,43 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
   useEffect(() => {
     async function init() {
       try {
-        setIsLoading(true);
+        set({ isLoading: true });
         
         // 1. Try to restore local folder from IndexedDB
-        const savedHandle = await get('dirHandle');
+        const savedHandle = await idbGet('dirHandle');
         if (savedHandle) {
           const isPermitted = await verifyPermission(savedHandle, true);
           if (isPermitted) {
             dirHandleRef.current = savedHandle;
-            setHasLocalFolder(true);
+            set({ hasLocalFolder: true });
             const loaded = await loadFromHandle(savedHandle);
             if (loaded) {
-              setIsLoading(false);
+              set({ isLoading: false });
               return;
             }
           } else {
             console.log('Stored folder handle requires re-permission');
-            setHasLocalFolder(true); // We have a handle, but need permission
-            setNeedsPermission(true);
+            set({ hasLocalFolder: true }); // We have a handle, but need permission
+            set({ needsPermission: true });
             dirHandleRef.current = savedHandle;
           }
         }
 
         // 2. Fallback: Load from Server
         const data = await loadPersistentData(store);
-        setClassInfoState(data.classInfo || []);
-        setActualClassInfoState(data.actualClassInfo || []);
-        setUnitInfoState(data.unitInfo || []);
-        setMdStatusState(data.mdStatus || []);
-        setSubFeesState(data.subFees || []);
-        setProjectStatusState(data.projectStatus || []);
-        setProjectLinkState(data.projectLink || []);
-        setBasePlanState(data.basePlan || []);
-        setUnitsState(data.units || []);
-        setMapUnitsState(data.mapUnits || []);
-        setMapVersionsState(data.mapVersions || []);
-        setActiveMapVersionIdState(data.activeMapVersionId || null);
-        if (data.reviewSelectedLabels) setReviewSelectedLabelsState(data.reviewSelectedLabels);
+        set({ classInfo: data.classInfo || [] });
+        set({ actualClassInfo: data.actualClassInfo || [] });
+        set({ unitInfo: data.unitInfo || [] });
+        set({ mdStatus: data.mdStatus || [] });
+        set({ subFees: data.subFees || [] });
+        set({ projectStatus: data.projectStatus || [] });
+        set({ projectLink: data.projectLink || [] });
+        set({ basePlan: data.basePlan || [] });
+        set({ units: data.units || [] });
+        set({ mapUnits: data.mapUnits || [] });
+        set({ mapVersions: data.mapVersions || [] });
+        set({ activeMapVersionId: data.activeMapVersionId || null });
+        if (data.reviewSelectedLabels) set({ reviewSelectedLabels: data.reviewSelectedLabels });
         
         let salesData = data.sales || [];
         let profitsData = data.profits || [];
@@ -368,8 +438,8 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
             profitsData = profitsData.map((p: ProfitInfo) => ({ ...p, profit: (Number(p.profit) || 0) / 1000 }));
           }
         }
-        setSalesState(salesData);
-        setProfitsState(profitsData);
+        set({ sales: salesData });
+        set({ profits: profitsData });
         
         if (data.r2Config) {
           if (data.r2Config.accountId) localStorage.setItem('r2_account_id', data.r2Config.accountId);
@@ -380,11 +450,11 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
           if (data.r2Config.cfApiToken) localStorage.setItem('cf_api_token', data.r2Config.cfApiToken);
         }
 
-        if (data.lastUpdated) setLastBackup(data.lastUpdated);
+        if (data.lastUpdated) set({ lastBackup: data.lastUpdated });
       } catch (error) {
         console.error('Initial load failed:', error);
       } finally {
-        setIsLoading(false);
+        set({ isLoading: false });
       }
     }
     init();
@@ -400,7 +470,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
       const opts = { mode: 'readwrite' };
       if ((await dirHandleRef.current.requestPermission(opts)) === 'granted') {
         const loaded = await loadFromHandle(dirHandleRef.current);
-        setNeedsPermission(false);
+        set({ needsPermission: false });
         if (loaded) {
           alert('Đã khôi phục kết nối và tải dữ liệu từ thư mục cục bộ!');
         } else {
@@ -422,8 +492,8 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
       // @ts-ignore
       const handle = await window.showDirectoryPicker({ mode: 'readwrite' });
       dirHandleRef.current = handle;
-      await set('dirHandle', handle); // Save handle to IndexedDB
-      setHasLocalFolder(true);
+      await idbSet('dirHandle', handle); // Save handle to IndexedDB
+      set({ hasLocalFolder: true });
       
       alert('Đã kết nối thư mục thành công!');
     } catch(err: any) {
@@ -434,6 +504,16 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
     }
   };
 
+  
+  useEffect(() => {
+    set({
+      triggerManualLoad,
+      triggerManualBackup,
+      selectLocalFolder,
+      requestFolderPermission,
+      syncWithGoogleSheets
+    });
+  }, []);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const saveToHandlers = async (
@@ -443,7 +523,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
     customHandle?: any,
     isManualClick: boolean = false
   ) => {
-    setIsSaving(true);
+    set({ isSaving: true });
     let errorToReport = null;
     try {
       // 1. Server persistence (Backup) - Catch errors so we don't break local persistence
@@ -474,7 +554,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
             cfApiToken: localStorage.getItem('cf_api_token') || ''
           }
         }, store);
-        if (res.success && !lastBackup) setLastBackup(res.timestamp);
+        if (res.success && !lastBackup) set({ lastBackup: res.timestamp });
       } catch (bkpErr) {
         console.warn('Server backup failed, skipped:', bkpErr);
       }
@@ -585,7 +665,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
           } catch(e) {
             console.warn('Failed to save shared data locally', e);
           }
-          setLastBackup(timestamp);
+          set({ lastBackup: timestamp });
           if (isManualClick) {
               alert(`Lưu thành công file SheetSyncData_${store}.json vào thư mục được chọn!`);
           }
@@ -603,20 +683,20 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
       // invalidate it so the user can re-select it instead of failing silently or loudly forever.
       if (dirHandleRef.current && (errMsg.includes('cached in an interface object') || error?.name === 'ValidStateError' || error?.name === 'InvalidStateError' || error?.name === 'NotAllowedError')) {
         errorToReport = `Lỗi hệ thống tệp đĩa: Kết nối thư mục bị gián đoạn. Vui lòng bấm vào "Sync to Local Folder" để CHỌN LẠI THƯ MỤC. (${errMsg})`;
-        setHasLocalFolder(false);
+        set({ hasLocalFolder: false });
         dirHandleRef.current = null;
       } else {
         errorToReport = `Lỗi hệ thống lưu: ${errMsg}`;
         // Still clear the dirHandle just in case the exception was something else but related to file system
         if (dirHandleRef.current) {
-           setHasLocalFolder(false);
+           set({ hasLocalFolder: false });
            dirHandleRef.current = null;
         }
       }
     } finally {
-      setIsSaving(false);
+      set({ isSaving: false });
       // Wait, if it auto-saves and fails, it might spam alerts if we aren't careful.
-      // But since we setHasLocalFolder(false), it will NOT try to save to local folder next time
+      // But since we set({ hasLocalFolder: false }), it will NOT try to save to local folder next time
       // so it will only alert once if we let it.
       // But we ONLY alert on manual click to avoid interrupting the user.
       if (errorToReport && isManualClick) {
@@ -647,23 +727,23 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
   }, [classInfo, actualClassInfo, sales, unitInfo, profits, mdStatus, subFees, projectStatus, projectLink, basePlan, units, mapUnits, mapVersions, activeMapVersionId, reviewSelectedLabels]);
 
   const setActualClassInfo = (data: ActualClassInfo[]) => {
-    setActualClassInfoState(data);
+    set({ actualClassInfo: data });
   };
 
   const setClassInfo = (data: ClassInfo[]) => {
-    setClassInfoState(data);
+    set({ classInfo: data });
   };
 
   const setSales = (data: SalesInfo[]) => {
-    setSalesState(data);
+    set({ sales: data });
   };
 
   const setProfits = (data: ProfitInfo[]) => {
-    setProfitsState(data);
+    set({ profits: data });
   };
 
   const setUnitInfo = (data: UnitInfo[]) => {
-    setUnitInfoState(data);
+    set({ unitInfo: data });
   };
 
   const setMdStatus = (data: MDStatusInfo[]) => {
@@ -675,36 +755,36 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
         }
       }
     });
-    setMdStatusState(data);
+    set({ mdStatus: data });
   };
 
   const setSubFees = (data: SubFeeInfo[]) => {
-    setSubFeesState(data);
+    set({ subFees: data });
   };
 
   const setProjectStatus = (data: ProjectStatusInfo[]) => {
-    setProjectStatusState(data);
+    set({ projectStatus: data });
   };
   const setProjectLink = (data: ProjectLinkInfo[]) => {
-    setProjectLinkState(data);
+    set({ projectLink: data });
   };
 
   const setBasePlan = (data: BasePlanInfo[]) => {
-    setBasePlanState(data);
+    set({ basePlan: data });
   };
 
   const setUnits = (data: UnitDataInfo[]) => {
-    setUnitsState(data);
+    set({ units: data });
   };
 
   const setSpreadsheetId = (id: string | null) => {
-    setSpreadsheetIdState(id);
+    set({ spreadsheetId: id });
     localStorage.setItem('spreadsheetId', id || '');
   };
 
   useEffect(() => {
     const savedId = localStorage.getItem('spreadsheetId');
-    if (savedId) setSpreadsheetIdState(savedId);
+    if (savedId) set({ spreadsheetId: savedId });
   }, []);
 
   const parseSheetData = (rows: any[]) => {
@@ -720,7 +800,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
   };
 
   const syncWithGoogleSheets = async (sid: string) => {
-    setIsLoading(true);
+    set({ isLoading: true });
     try {
       const results = await syncFromGoogleSheets(sid);
       
@@ -749,8 +829,8 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
         };
       });
 
-      if (results['Brand Info']) setClassInfoState(mapClassInfo(parseSheetData(results['Brand Info'])));
-      else if (results['Class Info'] && !results['Brand Info']) setClassInfoState(mapClassInfo(parseSheetData(results['Class Info'])));
+      if (results['Brand Info']) set({ classInfo: mapClassInfo(parseSheetData(results['Brand Info']))});
+      else if (results['Class Info'] && !results['Brand Info']) set({ classInfo: mapClassInfo(parseSheetData(results['Class Info']))});
       
       if (results['Class Info'] && results['Brand Info']) {
         const mappedActualClassInfo = parseSheetData(results['Class Info']).map((c: any) => ({
@@ -761,7 +841,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
           hcmSalesEffi: c.hcmSalesEffi || c['hcm sales effi'] || c['hcmsaleseffi'] || '',
           hcmProfitEffi: c.hcmProfitEffi || c['hcm profit effi'] || c['hcmprofiteffi'] || '',
         }));
-        setActualClassInfoState(mappedActualClassInfo);
+        set({ actualClassInfo: mappedActualClassInfo });
       } else if (results['Actual Class Info']) {
         const mappedActualClassInfo = parseSheetData(results['Actual Class Info']).map((c: any) => ({
           ...c,
@@ -771,7 +851,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
           hcmSalesEffi: c.hcmSalesEffi || c['hcm sales effi'] || c['hcmsaleseffi'] || '',
           hcmProfitEffi: c.hcmProfitEffi || c['hcm profit effi'] || c['hcmprofiteffi'] || '',
         }));
-        setActualClassInfoState(mappedActualClassInfo);
+        set({ actualClassInfo: mappedActualClassInfo });
       }
 
       if (results['Unit Info']) {
@@ -783,53 +863,53 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
           brandName: u.brandName || u['brand name'] || u['brandname'] || '',
           startMonth: u.startMonth || u['start month'] || '',
         }));
-        setUnitInfoState(parsedUnitInfo);
+        set({ unitInfo: parsedUnitInfo });
       }
       if (results['Sales']) {
         const salesData = parseSheetData(results['Sales']);
         // Auto-scale if needed or just use as is
-        setSalesState(salesData.map((s: any) => ({
+        set({ sales: salesData.map((s: any) => ({
           ...s,
           sales: Number(s.sales) || 0,
           salesByCp: Number(s.salesByCp) || 0
-        })));
+        })) });
       }
       if (results['Profits']) {
         const profitsData = parseSheetData(results['Profits']);
-        setProfitsState(profitsData.map((p: any) => ({
+        set({ profits: profitsData.map((p: any) => ({
           ...p,
           profit: Number(p.profit) || 0,
           profitByCp: Number(p.profitByCp) || 0
-        })));
+        })) });
       }
-      if (results['MD Status']) setMdStatusState(parseSheetData(results['MD Status']));
-      if (results['Sub Fees']) setSubFeesState(parseSheetData(results['Sub Fees']));
-      if (results['Project Status']) setProjectStatusState(parseSheetData(results['Project Status']));
-      if (results['Project Link']) setProjectLinkState(parseSheetData(results['Project Link']));
+      if (results['MD Status']) set({ mdStatus: parseSheetData(results['MD Status']) });
+      if (results['Sub Fees']) set({ subFees: parseSheetData(results['Sub Fees']) });
+      if (results['Project Status']) set({ projectStatus: parseSheetData(results['Project Status']) });
+      if (results['Project Link']) set({ projectLink: parseSheetData(results['Project Link']) });
       if (results['Base Plan']) {
         const basePlanData = parseSheetData(results['Base Plan']);
-        setBasePlanState(basePlanData.map((b: any) => ({
+        set({ basePlan: basePlanData.map((b: any) => ({
           ...b,
           marginLow: Number(b.marginLow) || 0,
           marginHigh: Number(b.marginHigh) || 0,
           vshcm: parseFloat(String(b.vshcm || b['vshcm (%)'] || b['vs hcm'] || b['vshcm'] || '').replace(/,/g, '').replace(/%/g, '')) || 0
-        })));
+        })) });
       }
       if (results['Units']) {
         const unitsData = parseSheetData(results['Units']);
-        setUnitsState(unitsData.map((u: any) => ({
+        set({ units: unitsData.map((u: any) => ({
           ...u,
           size: Number(String(u.size).replace(/,/g, '')) || 0
-        })));
+        })) });
       }
       
-      setSpreadsheetId(sid);
+      set({ spreadsheetId: sid });
       alert('Đồng bộ dữ liệu từ Google Sheets thành công!');
     } catch (error: any) {
       console.error('Google Sheets sync failed:', error);
       alert('Đồng bộ thất bại: ' + error.message);
     } finally {
-      setIsLoading(false);
+      set({ isLoading: false });
     }
   };
 
@@ -848,7 +928,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
          return;
     }
     
-    setIsLoading(true);
+    set({ isLoading: true });
     try {
       const loaded = await loadFromHandle(dirHandleRef.current);
       if (loaded) {
@@ -860,70 +940,13 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
         console.error(err);
         alert('Lỗi khi đọc dữ liệu: ' + err.message);
     } finally {
-        setIsLoading(false);
+        set({ isLoading: false });
     }
   };
 
-  return (
-    <DataContext.Provider value={{
-      actualClassInfo,
-      setActualClassInfo, 
-      classInfo, 
-      sales, 
-      unitInfo,
-      profits,
-      mdStatus,
-      subFees,
-      projectStatus,
-      projectLink,
-      basePlan,
-      units,
-      notifications,
-      mapUnits,
-      mapVersions,
-      activeMapVersionId,
-      reviewSelectedLabels,
-      setClassInfo, 
-      setSales, 
-      setUnitInfo,
-      setProfits,
-      setMdStatus,
-      setSubFees,
-      setProjectStatus,
-      setProjectLink,
-      setBasePlan,
-      setUnits,
-      setNotifications,
-      addNotification,
-      markAllNotificationsRead,
-      setMapUnits: setMapUnitsState,
-      setMapVersions: setMapVersionsState,
-      setActiveMapVersionId: setActiveMapVersionIdState,
-      setReviewSelectedLabels: setReviewSelectedLabelsState,
-      syncWithGoogleSheets,
-      spreadsheetId,
-      setSpreadsheetId,
-      isLoading,
-      isSaving,
-      lastBackup,
-      triggerManualBackup,
-      triggerManualLoad,
-      selectLocalFolder,
-      hasLocalFolder,
-      needsPermission,
-      setNeedsPermission,
-      requestFolderPermission,
-      store,
-      isAppLocked,
-      setIsAppLocked
-    }}>
-      {children}
-    </DataContext.Provider>
-  );
+  return <>{children}</>;
 }
 
 export function useData() {
-  const context = useContext(DataContext);
-  if (!context) throw new Error('useData must be used within a DataProvider');
-  return context;
+  return useDataStore();
 }

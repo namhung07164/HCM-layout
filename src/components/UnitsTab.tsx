@@ -1,12 +1,16 @@
+import { useShallow } from 'zustand/react/shallow';
 import React from "react";
 import DataTable from "./DataTable";
 import { UnitDataInfo } from "../types";
-import { useData } from "../DataContext";
+import { useDataStore } from '../DataContext';
 import { cn } from "../lib/utils";
 import AutocompleteCell from "./AutocompleteCell";
 
 export default function UnitsTab() {
-  const { units, setUnits } = useData();
+  const {  units, setUnits  } = useDataStore(useShallow(state => ({
+    units: state.units,
+    setUnits: state.setUnits,
+  })));
 
   const handleDataChange = (newData: UnitDataInfo[]) => {
     let finalData = [...newData];
@@ -93,16 +97,17 @@ export default function UnitsTab() {
     };
 
   const renderTextCell = React.useCallback(
-    (key: keyof UnitDataInfo) =>
-      (
+    (key: keyof UnitDataInfo) => {
+      const options = Array.from(
+        new Set(units.map((item) => String(item[key] || "")).filter(Boolean)),
+      ).map((opt) => ({ value: opt, label: "", item: opt }));
+      
+      return (
         val: any,
         row: UnitDataInfo,
         updateRow: (newRow: UnitDataInfo) => void,
         isLocked: boolean,
       ) => {
-        const options = Array.from(
-          new Set(units.map((item) => String(item[key] || "")).filter(Boolean)),
-        ).map((opt) => ({ value: opt, label: "", item: opt }));
         return (
           <AutocompleteCell
             value={val || ""}
@@ -122,7 +127,8 @@ export default function UnitsTab() {
             placeholder="..."
           />
         );
-      },
+      };
+    },
     [units],
   );
 

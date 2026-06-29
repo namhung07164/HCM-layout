@@ -1,12 +1,16 @@
+import { useShallow } from 'zustand/react/shallow';
 import React from 'react';
 import DataTable from './DataTable';
 import { ActualClassInfo } from '../types';
-import { useData } from '../DataContext';
+import { useDataStore } from '../DataContext';
 import { cn } from '../lib/utils';
 import AutocompleteCell from './AutocompleteCell';
 
 export default function ActualClassInfoTab() {
-  const { actualClassInfo, setActualClassInfo } = useData();
+  const {  actualClassInfo, setActualClassInfo  } = useDataStore(useShallow(state => ({
+    actualClassInfo: state.actualClassInfo,
+    setActualClassInfo: state.setActualClassInfo,
+  })));
 
   const handleDataChange = (newData: ActualClassInfo[]) => {
     // Determine HCM variables on the fly if needed, but since they are calculated properties we can keep them in state

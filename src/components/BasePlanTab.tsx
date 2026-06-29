@@ -1,12 +1,16 @@
+import { useShallow } from 'zustand/react/shallow';
 import React from 'react';
 import DataTable from './DataTable';
 import { BasePlanInfo } from '../types';
-import { useData } from '../DataContext';
+import { useDataStore } from '../DataContext';
 import { standardizeDateToMMDDYYYY, cn } from '../lib/utils';
 import AutocompleteCell from './AutocompleteCell';
 
 export default function BasePlanTab() {
-  const { basePlan, setBasePlan } = useData();
+  const {  basePlan, setBasePlan  } = useDataStore(useShallow(state => ({
+    basePlan: state.basePlan,
+    setBasePlan: state.setBasePlan,
+  })));
 
   const handleDataChange = (newData: BasePlanInfo[]) => {
     setBasePlan(newData);

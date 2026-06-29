@@ -1,7 +1,8 @@
+import { useShallow } from 'zustand/react/shallow';
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { ComposedChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Line } from 'recharts';
 import { Search, Filter, Calendar, Building2, Tag, Layers, Map as MapIcon, X, Plus } from 'lucide-react';
-import { useData } from '../DataContext';
+import { useDataStore } from '../DataContext';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -19,7 +20,14 @@ const AVAILABLE_FILTERS = [
 type FilterKey = typeof AVAILABLE_FILTERS[number]['key'];
 
 export default React.memo(function DashboardTab() {
-  const { sales, profits, classInfo, unitInfo, mdStatus, projectStatus } = useData();
+  const {  sales, profits, classInfo, unitInfo, mdStatus, projectStatus  } = useDataStore(useShallow(state => ({
+    sales: state.sales,
+    profits: state.profits,
+    classInfo: state.classInfo,
+    unitInfo: state.unitInfo,
+    mdStatus: state.mdStatus,
+    projectStatus: state.projectStatus,
+  })));
   
   // Filters state
   const [filters, setFilters] = useState<Record<FilterKey, string>>({

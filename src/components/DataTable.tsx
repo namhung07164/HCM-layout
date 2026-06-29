@@ -1,8 +1,9 @@
+import { useShallow } from 'zustand/react/shallow';
 import React, { useRef, useState, useMemo, useEffect } from 'react';
 import Papa from 'papaparse';
 import { Upload, Trash2, Database, Search, Lock, Unlock, Download, X, RefreshCw, Eye, EyeOff, Plus, Copy } from 'lucide-react';
 import { cn, autoFormatRow } from '../lib/utils';
-import { useData } from '../DataContext';
+import { useDataStore } from '../DataContext';
 import { motion, AnimatePresence } from 'motion/react';
 import { FixedSizeList } from 'react-window';
 
@@ -39,7 +40,7 @@ const formatDate = (date: Date) => {
 
 // Extracted Row component for react-window to prevent unmounting and focus loss
 const Row = React.memo(({ index, style, data }: { index: number, style: React.CSSProperties, data: any }) => {
-  const { filteredData, visibleColumns, isLocked, onDataChange, originalData } = data;
+  const {  filteredData, visibleColumns, isLocked, onDataChange, originalData } = data;
   const row = filteredData[index];
   
   const updateRow = (newRow: any) => {
@@ -169,7 +170,11 @@ export default function DataTable<T extends Record<string, any>>({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const updateFileInputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const { isSaving, isAppLocked, setIsAppLocked } = useData();
+  const { isSaving, isAppLocked, setIsAppLocked } = useDataStore(useShallow(state => ({
+    isSaving: state.isSaving,
+    isAppLocked: state.isAppLocked,
+    setIsAppLocked: state.setIsAppLocked
+  })));
   const [filters, setFilters] = useState<Record<string, string>>(defaultFilters || {});
   const [showFilters, setShowFilters] = useState(false);
   
@@ -412,18 +417,25 @@ export default function DataTable<T extends Record<string, any>>({
   };
 
   const filteredData = useMemo(() => {
-    return data.filter(row => {
-      return Object.entries(filters).every(([key, filterValue]) => {
-        if (!filterValue) return true;
-        
-        const column = allColumns.find(c => c.key.toString() === key);
-        const cellValue = String(row[key] || '').toLowerCase();
-        const searchVal = String(filterValue).toLowerCase();
+    // Pre-calculate active filters and their corresponding columns
+    const activeFilters = Object.entries(filters)
+      .filter(([_, filterValue]) => Boolean(filterValue))
+      .map(([key, filterValue]) => {
+        return {
+          key,
+          searchVal: String(filterValue).toLowerCase(),
+          column: allColumns.find(c => c.key.toString() === key)
+        };
+      });
 
+    if (activeFilters.length === 0) return data;
+
+    return data.filter(row => {
+      return activeFilters.every(({ key, searchVal, column }) => {
+        const cellValue = String(row[key] || '').toLowerCase();
         if (column?.filterType === 'select') {
           return cellValue === searchVal;
         }
-
         return cellValue.includes(searchVal);
       });
     });

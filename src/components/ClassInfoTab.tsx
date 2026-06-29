@@ -1,12 +1,16 @@
+import { useShallow } from 'zustand/react/shallow';
 import React from 'react';
 import DataTable from './DataTable';
 import { ClassInfo } from '../types';
-import { useData } from '../DataContext';
+import { useDataStore } from '../DataContext';
 import { cn } from '../lib/utils';
 import AutocompleteCell from './AutocompleteCell';
 
 export default function ClassInfoTab() {
-  const { classInfo, setClassInfo } = useData();
+  const {  classInfo, setClassInfo  } = useDataStore(useShallow(state => ({
+    classInfo: state.classInfo,
+    setClassInfo: state.setClassInfo,
+  })));
 
   const handleDataChange = (newData: ClassInfo[]) => {
     // Loại bỏ các dòng dữ liệu giống hệt nhau

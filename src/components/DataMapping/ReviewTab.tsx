@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import React, { useState, useRef, useEffect } from 'react';
 import { Stage, Layer, Rect, Circle, Line, Image as KonvaImage, Text } from 'react-konva';
 import useImage from 'use-image';
@@ -6,7 +7,7 @@ import { UnitShape, MapVersion } from './types';
 import { cn } from '../../lib/utils';
 import { jsPDF } from 'jspdf';
 import { useSummaryData, generateSizeLabel } from '../../lib/summaryData';
-import { useData } from '../../DataContext';
+import { useDataStore } from '../../DataContext';
 import { Calculator, CloudUpload } from 'lucide-react';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
@@ -37,7 +38,11 @@ export default function ReviewTab({ units, setUnits, versions, setVersions, acti
   const activeVersion = versions.find(v => v.id === activeVersionId);
   const summaryData = useSummaryData();
 
-  const { store, reviewSelectedLabels: selectedLabels, setReviewSelectedLabels: setSelectedLabels } = useData();
+  const {  store, reviewSelectedLabels: selectedLabels, setReviewSelectedLabels: setSelectedLabels  } = useDataStore(useShallow(state => ({
+    store: state.store,
+    reviewSelectedLabels: state.reviewSelectedLabels,
+    setReviewSelectedLabels: state.setReviewSelectedLabels,
+  })));
 
   const [showLabelSettings, setShowLabelSettings] = useState(false);
 

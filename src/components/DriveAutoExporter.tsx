@@ -1,7 +1,8 @@
+import { useShallow } from 'zustand/react/shallow';
 import React, { useEffect, useState } from 'react';
 import { db, defaultDb } from '../lib/firebase';
 import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
-import { useData } from '../DataContext';
+import { useDataStore } from '../DataContext';
 import { useSummaryData } from '../lib/summaryData';
 import { ExportAllManager } from './DataMapping/ReviewTab';
 import { useDynamicRules } from '../hooks/useDynamicRules';
@@ -10,7 +11,15 @@ import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 export default function DriveAutoExporter() {
-  const { mapVersions, mapUnits, setMapVersions, activeMapVersionId, setMapUnits, store, reviewSelectedLabels } = useData();
+  const {  mapVersions, mapUnits, setMapVersions, activeMapVersionId, setMapUnits, store, reviewSelectedLabels  } = useDataStore(useShallow(state => ({
+    mapVersions: state.mapVersions,
+    mapUnits: state.mapUnits,
+    setMapVersions: state.setMapVersions,
+    activeMapVersionId: state.activeMapVersionId,
+    setMapUnits: state.setMapUnits,
+    store: state.store,
+    reviewSelectedLabels: state.reviewSelectedLabels,
+  })));
   const summaryData = useSummaryData();
   const [triggerExport, setTriggerExport] = useState(false);
   const [exportingVersions, setExportingVersions] = useState<MapVersion[] | null>(null);

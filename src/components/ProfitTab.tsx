@@ -1,7 +1,8 @@
+import { useShallow } from 'zustand/react/shallow';
 import React, { useMemo } from 'react';
 import DataTable from './DataTable';
 import { ProfitInfo } from '../types';
-import { useData } from '../DataContext';
+import { useDataStore } from '../DataContext';
 import { standardizeDateToMMDDYYYY, cn } from '../lib/utils';
 import AutocompleteCell from './AutocompleteCell';
 
@@ -12,7 +13,11 @@ interface EnrichedProfitInfo extends ProfitInfo {
 }
 
 export default function ProfitTab() {
-  const { profits, setProfits, sales } = useData();
+  const {  profits, setProfits, sales  } = useDataStore(useShallow(state => ({
+    profits: state.profits,
+    setProfits: state.setProfits,
+    sales: state.sales,
+  })));
 
   const handleDataChange = (newData: any[]) => {
     // Extract only the fields from ProfitInfo to save
