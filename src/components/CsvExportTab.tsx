@@ -17,7 +17,7 @@ const TAB_CONFIG: Record<string, any> = {
   mass_task: { 
     id: 'mass_task', 
     label: 'Mass-import Task', 
-    columns: ['store', 'location', 'projectYear', 'projectCode', 'Task name', 'start', 'finish', 'duration', 'party', 'predecessor', 'delegation'], 
+    columns: ['store', 'location', 'projectYear', 'projectCode', 'Task code phá»¥', 'Task name', 'start', 'finish', 'duration', 'party', 'predecessor', 'delegation'], 
     fileNamePrefix: 'taka_mass_tasks_exported', 
     icon: 'ph-copy', 
     exportType: 'csv' 
@@ -423,6 +423,10 @@ export default function CsvExportTab() {
         templateData.forEach(taskDef => {
           if (finalJson.length >= 10) return;
           const taskName = taskDef['Task name'] || '';
+          let taskCodePhu = taskDef['Task code phá»¥'] || taskDef['Task code phụ'] || '';
+          if (taskCodePhu !== undefined && taskCodePhu !== null && String(taskCodePhu).trim() !== '') {
+             taskCodePhu = `${projCode}-${taskCodePhu}`;
+          }
           let start = taskDef['start'] || '';
           let finish = taskDef['finish'] || '';
           if (typeof start === 'number') start = XLSX.SSF.format('m/d/yyyy h:mm', start);
@@ -441,6 +445,7 @@ export default function CsvExportTab() {
             'location': projLocation,
             'projectYear': projYear,
             'projectCode': projCode,
+            'Task code phá»¥': taskCodePhu,
             'Task name': taskName,
             'start': start,
             'finish': finish,
@@ -515,6 +520,10 @@ export default function CsvExportTab() {
         
         templateData.forEach(taskDef => {
           const taskName = taskDef['Task name'] || '';
+          let taskCodePhu = taskDef['Task code phá»¥'] || taskDef['Task code phụ'] || '';
+          if (taskCodePhu !== undefined && taskCodePhu !== null && String(taskCodePhu).trim() !== '') {
+             taskCodePhu = `${projCode}-${taskCodePhu}`;
+          }
           let start = taskDef['start'] || '';
           let finish = taskDef['finish'] || '';
           if (typeof start === 'number') start = XLSX.SSF.format('m/d/yyyy h:mm', start);
@@ -533,6 +542,7 @@ export default function CsvExportTab() {
             'location': projLocation,
             'projectYear': projYear,
             'projectCode': projCode,
+            'Task code phá»¥': taskCodePhu,
             'Task name': taskName,
             'start': start,
             'finish': finish,
@@ -706,7 +716,7 @@ export default function CsvExportTab() {
                 {TAB_CONFIG[activeTab].columns
                   .filter((col: string) => {
                     if (activeTab === 'mass_task') {
-                      return ['store', 'location', 'projectCode', 'YEAR'].includes(col);
+                      return ['store', 'location', 'projectCode', 'projectYear'].includes(col);
                     }
                     return true;
                   })
