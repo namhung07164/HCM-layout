@@ -371,7 +371,7 @@ export default function CsvExportTab() {
     
     let val = constantMapping[colName] || row[mapping[colName]];
 
-    if (activeTab === 'task' && colName === 'Predecessor') {
+    if (activeTab === 'task' && colName.toLowerCase() === 'predecessor') {
       let projCode = constantMapping['projectCode'] || row[mapping['projectCode']] || '';
       if (val !== undefined && val !== null && String(val).trim() !== '') {
         val = `${projCode}-${val}`;
