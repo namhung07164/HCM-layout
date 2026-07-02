@@ -1,6 +1,6 @@
 import { useShallow } from 'zustand/react/shallow';
 import React, { useState, useRef, useEffect } from 'react';
-import { Stage, Layer, Rect, Circle, Line, Image as KonvaImage, Text } from 'react-konva';
+import { Stage, Layer, Rect, Circle, Line, Image as KonvaImage, Text, Group } from 'react-konva';
 import useImage from 'use-image';
 import { Layout, Eye, Camera, FileDown, Link as LinkIcon, Check, Copy, X, Tags } from 'lucide-react';
 import { UnitShape, MapVersion } from './types';
@@ -700,7 +700,7 @@ export default function ReviewTab({ units, setUnits, versions, setVersions, acti
                               y={startY + i * lineHeight}
                               width={boxWidth}
                               text={line.text}
-                              fill={reviewLabelColors[line.key] || '#ffffff'}
+                              fill={reviewLabelColors?.[line.key] || '#ffffff'}
                               align="center"
                               fontSize={fontSize}
                               fontStyle="bold"
