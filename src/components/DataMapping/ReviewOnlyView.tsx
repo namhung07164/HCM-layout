@@ -3,10 +3,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Stage, Layer, Image as KonvaImage, Rect, Circle, Line, Text } from 'react-konva';
 import useImage from 'use-image';
 import { useDataStore } from '../../DataContext';
-import { useSummaryData, generateSizeLabel } from '../../lib/summaryData';
+import { useSummaryData, generateSizeLabel, generateSizeLabelLines } from '../../lib/summaryData';
 
 // Component for a single version stage
-const VersionStage = ({ version, mapUnits, summaryData, selectedLabels, windowSize }: any) => {
+const VersionStage = ({ version, mapUnits, summaryData, selectedLabels, reviewLabelColors, windowSize }: any) => {
   const styledUnits = React.useMemo(() => {
     if (!version) return [];
 
@@ -29,11 +29,13 @@ const VersionStage = ({ version, mapUnits, summaryData, selectedLabels, windowSi
       .map((unit: any) => {
         const style = unitToGroupStyle.get(unit.id)!;
         const uInfo = summaryMap.get(unit.name);
+        const sizeLabelLines = generateSizeLabelLines(unit, uInfo, selectedLabels || ['Unit ID', 'Size SQM']);
         const sizeLabel = generateSizeLabel(unit, uInfo, selectedLabels || ['Unit ID', 'Size SQM']);
         return {
           ...unit,
           displayColor: style.color,
           displayOpacity: style.opacity,
+          sizeLabelLines,
           sizeLabel
         };
       });
@@ -111,7 +113,18 @@ const VersionStage = ({ version, mapUnits, summaryData, selectedLabels, windowSi
                     <React.Fragment key={unit.id}>
                         <Rect {...shapeProps} width={unit.width} height={unit.height} cornerRadius={4} />
                         {unit.name && scale > 0.4 && (
-                            <Text x={unit.x} y={unit.y} text={unit.sizeLabel} fontSize={14/scale} fill="white" fontStyle="bold" align="center" verticalAlign="middle" width={unit.width} height={unit.height} listening={false} shadowColor="black" shadowBlur={2} shadowOpacity={1} />
+                            <Group x={unit.x} y={unit.y} width={unit.width} height={unit.height} rotation={unit.rotation || 0}>
+                                {(() => {
+                                  const lines = unit.sizeLabelLines || [];
+                                  const fontSize = 14 / scale;
+                                  const lineHeight = fontSize * 1.2;
+                                  const totalHeight = lines.length * lineHeight;
+                                  const startY = (unit.height - totalHeight) / 2;
+                                  return lines.map((line: any, i: number) => (
+                                    <Text key={i} x={0} y={startY + i * lineHeight} width={unit.width} text={line.text} fill={reviewLabelColors?.[line.key] || '#ffffff'} align="center" fontSize={fontSize} fontStyle="bold" listening={false} shadowColor="black" shadowBlur={2} shadowOpacity={1} />
+                                  ));
+                                })()}
+                            </Group>
                         )}
                     </React.Fragment>
                 );
@@ -120,7 +133,18 @@ const VersionStage = ({ version, mapUnits, summaryData, selectedLabels, windowSi
                     <React.Fragment key={unit.id}>
                         <Circle {...shapeProps} radius={unit.radius} />
                         {unit.name && scale > 0.4 && (
-                            <Text x={unit.x - (unit.radius||0)} y={unit.y - (14/scale)} text={unit.sizeLabel} fontSize={14/scale} fill="white" fontStyle="bold" align="center" verticalAlign="middle" width={(unit.radius||0)*2} height={(unit.radius||0)*2} listening={false} shadowColor="black" shadowBlur={2} shadowOpacity={1} />
+                            <Group x={unit.x - (unit.radius||0)} y={unit.y - (unit.radius||0)} width={(unit.radius||0)*2} height={(unit.radius||0)*2}>
+                                {(() => {
+                                  const lines = unit.sizeLabelLines || [];
+                                  const fontSize = 14 / scale;
+                                  const lineHeight = fontSize * 1.2;
+                                  const totalHeight = lines.length * lineHeight;
+                                  const startY = ((unit.radius||0)*2 - totalHeight) / 2;
+                                  return lines.map((line: any, i: number) => (
+                                    <Text key={i} x={0} y={startY + i * lineHeight} width={(unit.radius||0)*2} text={line.text} fill={reviewLabelColors?.[line.key] || '#ffffff'} align="center" fontSize={fontSize} fontStyle="bold" listening={false} shadowColor="black" shadowBlur={2} shadowOpacity={1} />
+                                  ));
+                                })()}
+                            </Group>
                         )}
                     </React.Fragment>
                 );
@@ -128,24 +152,26 @@ const VersionStage = ({ version, mapUnits, summaryData, selectedLabels, windowSi
                 return (
                     <React.Fragment key={unit.id}>
                         <Line {...shapeProps} points={unit.points} closed={true} />
-                        {unit.name && scale > 0.4 && (
-                            <Text 
-                                x={unit.points ? Math.min(...unit.points.filter((_, i: number) => i % 2 === 0)) : unit.x} 
-                                y={unit.points ? Math.min(...unit.points.filter((_, i: number) => i % 2 === 1)) : unit.y} 
-                                width={unit.points ? Math.max(...unit.points.filter((_: any, i: number) => i % 2 === 0)) - Math.min(...unit.points.filter((_: any, i: number) => i % 2 === 0)) : 100}
-                                height={unit.points ? Math.max(...unit.points.filter((_: any, i: number) => i % 2 === 1)) - Math.min(...unit.points.filter((_: any, i: number) => i % 2 === 1)) : 30}
-                                align="center"
-                                verticalAlign="middle"
-                                text={unit.sizeLabel} 
-                                fontSize={14/scale} 
-                                fill="white" 
-                                fontStyle="bold" 
-                                listening={false} 
-                                shadowColor="black"
-                                shadowBlur={2}
-                                shadowOpacity={1}
-                            />
-                        )}
+                        {unit.name && scale > 0.4 && (() => {
+                                const bx = unit.points ? Math.min(...unit.points.filter((_: any, i: number) => i % 2 === 0)) : unit.x;
+                                const by = unit.points ? Math.min(...unit.points.filter((_: any, i: number) => i % 2 === 1)) : unit.y;
+                                const bw = unit.points ? Math.max(...unit.points.filter((_: any, i: number) => i % 2 === 0)) - bx : 100;
+                                const bh = unit.points ? Math.max(...unit.points.filter((_: any, i: number) => i % 2 === 1)) - by : 30;
+                                return (
+                                  <Group x={bx} y={by} width={bw} height={bh}>
+                                    {(() => {
+                                      const lines = unit.sizeLabelLines || [];
+                                      const fontSize = 14 / scale;
+                                      const lineHeight = fontSize * 1.2;
+                                      const totalHeight = lines.length * lineHeight;
+                                      const startY = (bh - totalHeight) / 2;
+                                      return lines.map((line: any, i: number) => (
+                                        <Text key={i} x={0} y={startY + i * lineHeight} width={bw} text={line.text} fill={reviewLabelColors?.[line.key] || '#ffffff'} align="center" fontSize={fontSize} fontStyle="bold" listening={false} shadowColor="black" shadowBlur={2} shadowOpacity={1} />
+                                      ));
+                                    })()}
+                                  </Group>
+                                );
+                            })()}
                     </React.Fragment>
                 );
             }
@@ -158,10 +184,11 @@ const VersionStage = ({ version, mapUnits, summaryData, selectedLabels, windowSi
 };
 
 export default function ReviewOnlyView() {
-  const { mapUnits, mapVersions, isLoading } = useDataStore(useShallow(state => ({
+  const { mapUnits, mapVersions, isLoading, reviewLabelColors } = useDataStore(useShallow(state => ({
     mapUnits: state.mapUnits,
     mapVersions: state.mapVersions,
-    isLoading: state.isLoading
+    isLoading: state.isLoading,
+    reviewLabelColors: state.reviewLabelColors
   })));
   const summaryData = useSummaryData();
   const [windowSize, setWindowSize] = useState({ width: window.innerWidth, height: window.innerHeight });
@@ -188,7 +215,7 @@ export default function ReviewOnlyView() {
       <div className="fixed inset-0 bg-bg-dark overflow-y-auto overflow-x-hidden p-8">
         <div className="max-w-[100vw] mx-auto flex flex-col items-center">
             {mapVersions.map(version => (
-              <VersionStage key={version.id} version={version} mapUnits={mapUnits} summaryData={summaryData} selectedLabels={selectedLabels} windowSize={windowSize} />
+              <VersionStage key={version.id} version={version} mapUnits={mapUnits} summaryData={summaryData} selectedLabels={selectedLabels} reviewLabelColors={reviewLabelColors} windowSize={windowSize} />
             ))}
         </div>
       </div>
@@ -203,7 +230,7 @@ export default function ReviewOnlyView() {
 
   return (
     <div className="fixed inset-0 bg-bg-dark overflow-hidden">
-        <VersionStage version={activeVersion} mapUnits={mapUnits} summaryData={summaryData} selectedLabels={selectedLabels} windowSize={{width: windowSize.width + 64, height: windowSize.height + 100}} />
+        <VersionStage version={activeVersion} mapUnits={mapUnits} summaryData={summaryData} selectedLabels={selectedLabels} reviewLabelColors={reviewLabelColors} windowSize={{width: windowSize.width + 64, height: windowSize.height + 100}} />
     </div>
   );
 }

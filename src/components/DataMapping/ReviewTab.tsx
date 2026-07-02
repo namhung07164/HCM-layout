@@ -6,7 +6,7 @@ import { Layout, Eye, Camera, FileDown, Link as LinkIcon, Check, Copy, X, Tags }
 import { UnitShape, MapVersion } from './types';
 import { cn } from '../../lib/utils';
 import { jsPDF } from 'jspdf';
-import { useSummaryData, generateSizeLabel } from '../../lib/summaryData';
+import { useSummaryData, generateSizeLabel, generateSizeLabelLines } from '../../lib/summaryData';
 import { useDataStore } from '../../DataContext';
 import { Calculator, CloudUpload } from 'lucide-react';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
@@ -38,9 +38,11 @@ export default function ReviewTab({ units, setUnits, versions, setVersions, acti
   const activeVersion = versions.find(v => v.id === activeVersionId);
   const summaryData = useSummaryData();
 
-  const {  store, reviewSelectedLabels: selectedLabels, setReviewSelectedLabels: setSelectedLabels  } = useDataStore(useShallow(state => ({
+  const {  store, reviewSelectedLabels: selectedLabels, setReviewSelectedLabels: setSelectedLabels, reviewLabelColors, setReviewLabelColors  } = useDataStore(useShallow(state => ({
     store: state.store,
     reviewSelectedLabels: state.reviewSelectedLabels,
+    reviewLabelColors: state.reviewLabelColors,
+    setReviewLabelColors: state.setReviewLabelColors,
     setReviewSelectedLabels: state.setReviewSelectedLabels,
   })));
 
@@ -70,11 +72,13 @@ export default function ReviewTab({ units, setUnits, versions, setVersions, acti
       .map(unit => {
         const style = unitToGroupStyle.get(unit.id)!;
         const uInfo = summaryMap.get(unit.name);
+        const sizeLabelLines = generateSizeLabelLines(unit, uInfo, selectedLabels);
         const sizeLabel = generateSizeLabel(unit, uInfo, selectedLabels);
         return {
           ...unit,
           displayColor: style.color,
           displayOpacity: style.opacity,
+          sizeLabelLines,
           sizeLabel
         };
       });
@@ -674,24 +678,41 @@ export default function ReviewTab({ units, setUnits, versions, setVersions, acti
                     
                     {/* Unit Label - only show if scale is large enough to be readable */}
                     {scale > 0.3 && (
-                      <Text
-                        text={unit.sizeLabel}
-                        x={unit.type === 'rect' ? unit.x : (unit.type === 'circle' ? unit.x - (unit.radius || 0) : (unit.points ? Math.min(...unit.points.filter((_, i) => i % 2 === 0)) : unit.x))}
-                        y={unit.type === 'rect' ? unit.y : (unit.type === 'circle' ? unit.y - (unit.radius || 0) : (unit.points ? Math.min(...unit.points.filter((_, i) => i % 2 === 1)) : unit.y))}
-                        width={unit.type === 'rect' ? unit.width : (unit.type === 'circle' ? (unit.radius || 0) * 2 : (unit.points ? Math.max(...unit.points.filter((_, i) => i % 2 === 0)) - Math.min(...unit.points.filter((_, i) => i % 2 === 0)) : 100))}
-                        height={unit.type === 'rect' ? unit.height : (unit.type === 'circle' ? (unit.radius || 0) * 2 : (unit.points ? Math.max(...unit.points.filter((_, i) => i % 2 === 1)) - Math.min(...unit.points.filter((_, i) => i % 2 === 1)) : 30))}
+                      <Group
+                        x={unit.type === 'rect' ? unit.x : (unit.type === 'circle' ? unit.x - (unit.radius || 0) : (unit.points ? Math.min(...unit.points.filter((_: any, i: number) => i % 2 === 0)) : unit.x))}
+                        y={unit.type === 'rect' ? unit.y : (unit.type === 'circle' ? unit.y - (unit.radius || 0) : (unit.points ? Math.min(...unit.points.filter((_: any, i: number) => i % 2 === 1)) : unit.y))}
+                        width={unit.type === 'rect' ? unit.width : (unit.type === 'circle' ? (unit.radius || 0) * 2 : (unit.points ? Math.max(...unit.points.filter((_: any, i: number) => i % 2 === 0)) - Math.min(...unit.points.filter((_: any, i: number) => i % 2 === 0)) : 100))}
+                        height={unit.type === 'rect' ? unit.height : (unit.type === 'circle' ? (unit.radius || 0) * 2 : (unit.points ? Math.max(...unit.points.filter((_: any, i: number) => i % 2 === 1)) - Math.min(...unit.points.filter((_: any, i: number) => i % 2 === 1)) : 30))}
                         rotation={unit.rotation || 0}
-                        align="center"
-                        verticalAlign="middle"
-                        fontSize={10 / scale}
-                        fill="#fff"
-                        fontStyle="bold"
-                        listening={false}
-                        shadowColor="black"
-                        shadowBlur={2}
-                        shadowOpacity={1}
-                        shadowOffset={{ x: 1, y: 1 }}
-                      />
+                      >
+                        {(() => {
+                          const lines = unit.sizeLabelLines || [];
+                          const fontSize = 10 / scale;
+                          const lineHeight = fontSize * 1.2;
+                          const totalHeight = lines.length * lineHeight;
+                          const boxHeight = unit.type === 'rect' ? unit.height : (unit.type === 'circle' ? (unit.radius || 0) * 2 : (unit.points ? Math.max(...unit.points.filter((_: any, i: number) => i % 2 === 1)) - Math.min(...unit.points.filter((_: any, i: number) => i % 2 === 1)) : 30));
+                          const boxWidth = unit.type === 'rect' ? unit.width : (unit.type === 'circle' ? (unit.radius || 0) * 2 : (unit.points ? Math.max(...unit.points.filter((_: any, i: number) => i % 2 === 0)) - Math.min(...unit.points.filter((_: any, i: number) => i % 2 === 0)) : 100));
+                          const startY = (boxHeight - totalHeight) / 2;
+                          return lines.map((line: any, i: number) => (
+                            <Text
+                              key={i}
+                              x={0}
+                              y={startY + i * lineHeight}
+                              width={boxWidth}
+                              text={line.text}
+                              fill={reviewLabelColors[line.key] || '#ffffff'}
+                              align="center"
+                              fontSize={fontSize}
+                              fontStyle="bold"
+                              listening={false}
+                              shadowColor="black"
+                              shadowBlur={2}
+                              shadowOpacity={1}
+                              shadowOffset={{ x: 1, y: 1 }}
+                            />
+                          ));
+                        })()}
+                      </Group>
                     )}
                   </React.Fragment>
                 );
@@ -784,6 +805,7 @@ export default function ReviewTab({ units, setUnits, versions, setVersions, acti
              paperSize={exportPaperSize}
              quality={exportQuality}
              selectedLabels={selectedLabels}
+             reviewLabelColors={reviewLabelColors}
              onComplete={handleExportAllManagerComplete} 
           />
       )}
@@ -897,7 +919,7 @@ export default function ReviewTab({ units, setUnits, versions, setVersions, acti
   );
 }
 
-const HiddenExportStage = ({ version, units, summaryData, selectedLabels, paperSize, onReady, index }: any) => {
+const HiddenExportStage = ({ version, units, summaryData, selectedLabels, reviewLabelColors, paperSize, onReady, index }: any) => {
   const styledUnits = React.useMemo(() => {
     const unitToGroupStyle = new Map<string, { color: string; opacity: number }>();
     version.groups.forEach((group: any) => {
@@ -918,11 +940,13 @@ const HiddenExportStage = ({ version, units, summaryData, selectedLabels, paperS
       .map((unit: any) => {
         const style = unitToGroupStyle.get(unit.id)!;
         const uInfo = summaryMap.get(unit.name);
+        const sizeLabelLines = generateSizeLabelLines(unit, uInfo, selectedLabels);
         const sizeLabel = generateSizeLabel(unit, uInfo, selectedLabels);
         return {
           ...unit,
           displayColor: style.color,
           displayOpacity: style.opacity,
+          sizeLabelLines,
           sizeLabel
         };
       });
@@ -1082,7 +1106,18 @@ const HiddenExportStage = ({ version, units, summaryData, selectedLabels, paperS
                     <React.Fragment key={unit.id}>
                         <Rect {...shapeProps} width={unit.width} height={unit.height} cornerRadius={4} />
                         {unit.name && (
-                            <Text x={unit.x} y={unit.y} text={unit.sizeLabel} fontSize={14} fill="white" fontStyle="bold" align="center" verticalAlign="middle" width={unit.width} height={unit.height} listening={false} shadowColor="black" shadowBlur={2} shadowOpacity={1} />
+                            <Group x={unit.x} y={unit.y} width={unit.width} height={unit.height} rotation={unit.rotation || 0}>
+                                {(() => {
+                                  const lines = unit.sizeLabelLines || [];
+                                  const fontSize = 14;
+                                  const lineHeight = fontSize * 1.2;
+                                  const totalHeight = lines.length * lineHeight;
+                                  const startY = (unit.height - totalHeight) / 2;
+                                  return lines.map((line: any, i: number) => (
+                                    <Text key={i} x={0} y={startY + i * lineHeight} width={unit.width} text={line.text} fill={reviewLabelColors?.[line.key] || '#ffffff'} align="center" fontSize={fontSize} fontStyle="bold" listening={false} shadowColor="black" shadowBlur={2} shadowOpacity={1} />
+                                  ));
+                                })()}
+                            </Group>
                         )}
                     </React.Fragment>
                 );
@@ -1091,7 +1126,18 @@ const HiddenExportStage = ({ version, units, summaryData, selectedLabels, paperS
                     <React.Fragment key={unit.id}>
                         <Circle {...shapeProps} radius={unit.radius} />
                         {unit.name && (
-                            <Text x={unit.x - (unit.radius||0)} y={unit.y - 14} text={unit.sizeLabel} fontSize={14} fill="white" fontStyle="bold" align="center" verticalAlign="middle" width={(unit.radius||0)*2} height={(unit.radius||0)*2} listening={false} shadowColor="black" shadowBlur={2} shadowOpacity={1} />
+                            <Group x={unit.x - (unit.radius||0)} y={unit.y - (unit.radius||0)} width={(unit.radius||0)*2} height={(unit.radius||0)*2}>
+                                {(() => {
+                                  const lines = unit.sizeLabelLines || [];
+                                  const fontSize = 14;
+                                  const lineHeight = fontSize * 1.2;
+                                  const totalHeight = lines.length * lineHeight;
+                                  const startY = ((unit.radius||0)*2 - totalHeight) / 2;
+                                  return lines.map((line: any, i: number) => (
+                                    <Text key={i} x={0} y={startY + i * lineHeight} width={(unit.radius||0)*2} text={line.text} fill={reviewLabelColors?.[line.key] || '#ffffff'} align="center" fontSize={fontSize} fontStyle="bold" listening={false} shadowColor="black" shadowBlur={2} shadowOpacity={1} />
+                                  ));
+                                })()}
+                            </Group>
                         )}
                     </React.Fragment>
                 );
@@ -1099,24 +1145,26 @@ const HiddenExportStage = ({ version, units, summaryData, selectedLabels, paperS
                 return (
                     <React.Fragment key={unit.id}>
                         <Line {...shapeProps} points={unit.points} closed={true} />
-                        {unit.name && (
-                            <Text 
-                                x={unit.points ? Math.min(...unit.points.filter((_: any, i: number) => i % 2 === 0)) : unit.x} 
-                                y={unit.points ? Math.min(...unit.points.filter((_: any, i: number) => i % 2 === 1)) : unit.y} 
-                                width={unit.points ? Math.max(...unit.points.filter((_: any, i: number) => i % 2 === 0)) - Math.min(...unit.points.filter((_: any, i: number) => i % 2 === 0)) : 100}
-                                height={unit.points ? Math.max(...unit.points.filter((_: any, i: number) => i % 2 === 1)) - Math.min(...unit.points.filter((_: any, i: number) => i % 2 === 1)) : 30}
-                                align="center"
-                                verticalAlign="middle"
-                                text={unit.sizeLabel} 
-                                fontSize={14} 
-                                fill="white" 
-                                fontStyle="bold" 
-                                listening={false} 
-                                shadowColor="black"
-                                shadowBlur={2}
-                                shadowOpacity={1}
-                            />
-                        )}
+                        {unit.name && (() => {
+                                const bx = unit.points ? Math.min(...unit.points.filter((_: any, i: number) => i % 2 === 0)) : unit.x;
+                                const by = unit.points ? Math.min(...unit.points.filter((_: any, i: number) => i % 2 === 1)) : unit.y;
+                                const bw = unit.points ? Math.max(...unit.points.filter((_: any, i: number) => i % 2 === 0)) - bx : 100;
+                                const bh = unit.points ? Math.max(...unit.points.filter((_: any, i: number) => i % 2 === 1)) - by : 30;
+                                return (
+                                  <Group x={bx} y={by} width={bw} height={bh}>
+                                    {(() => {
+                                      const lines = unit.sizeLabelLines || [];
+                                      const fontSize = 14;
+                                      const lineHeight = fontSize * 1.2;
+                                      const totalHeight = lines.length * lineHeight;
+                                      const startY = (bh - totalHeight) / 2;
+                                      return lines.map((line: any, i: number) => (
+                                        <Text key={i} x={0} y={startY + i * lineHeight} width={bw} text={line.text} fill={reviewLabelColors?.[line.key] || '#ffffff'} align="center" fontSize={fontSize} fontStyle="bold" listening={false} shadowColor="black" shadowBlur={2} shadowOpacity={1} />
+                                      ));
+                                    })()}
+                                  </Group>
+                                );
+                            })()}
                     </React.Fragment>
                 );
             }
@@ -1127,7 +1175,7 @@ const HiddenExportStage = ({ version, units, summaryData, selectedLabels, paperS
   );
 };
 
-export const ExportAllManager = ({ versions, units, summaryData, format, paperSize, quality, selectedLabels, onComplete }: any) => {
+export const ExportAllManager = ({ versions, units, summaryData, format, paperSize, quality, selectedLabels, reviewLabelColors, onComplete }: any) => {
     const [stagesReady, setStagesReady] = useState<Record<number, any>>({});
     const hasExportedRef = React.useRef(false);
     
@@ -1314,6 +1362,7 @@ export const ExportAllManager = ({ versions, units, summaryData, format, paperSi
                         units={units} 
                         summaryData={summaryData} 
                         selectedLabels={selectedLabels}
+             reviewLabelColors={reviewLabelColors}
                         paperSize={paperSize}
                         onReady={handleStageReady} 
                     />

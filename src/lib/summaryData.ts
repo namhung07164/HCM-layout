@@ -265,39 +265,44 @@ export function useSummaryData() {
 export const formatMoney = (val: any) => val ? Number(val).toLocaleString('en-US', { maximumFractionDigits: 0 }) : '0';
 export const formatPercent = (val: any) => val ? (Number(val) * 100).toLocaleString('en-US', { maximumFractionDigits: 1 }) + '%' : '0%';
 
+export const generateSizeLabelLines = (unit: Record<string, any>, uInfo: any, selectedLabels: string[]) => {
+    const lines: { key: string, text: string }[] = [];
+    if (selectedLabels.includes('Unit ID')) lines.push({ key: 'Unit ID', text: unit.name });
+    if (selectedLabels.includes('Size SQM') && uInfo?.size) lines.push({ key: 'Size SQM', text: `${uInfo.size} SQM` });
+    if (selectedLabels.includes('Floor') && uInfo?.floor) lines.push({ key: 'Floor', text: `Floor: ${uInfo.floor}` });
+    if (selectedLabels.includes('Brand Code') && uInfo?.brandCode) lines.push({ key: 'Brand Code', text: `Brand Code: ${uInfo.brandCode}` });
+    if (selectedLabels.includes('Brand Name') && uInfo?.brandName) lines.push({ key: 'Brand Name', text: uInfo.brandName });
+    if (selectedLabels.includes('Vendor Code') && uInfo?.vendorCode) lines.push({ key: 'Vendor Code', text: `Vendor Code: ${uInfo.vendorCode}` });
+    if (selectedLabels.includes('Name') && uInfo?.className) lines.push({ key: 'Name', text: uInfo.className });
+    if (selectedLabels.includes('Class Code') && uInfo?.classCode) lines.push({ key: 'Class Code', text: uInfo.classCode });
+    if (selectedLabels.includes('Update') && uInfo?.update) lines.push({ key: 'Update', text: `Update: ${uInfo.update}` });
+    if (selectedLabels.includes('Status') && uInfo?.status) lines.push({ key: 'Status', text: `Status: ${uInfo.status}` });
+    if (selectedLabels.includes('MD Status') && uInfo?.mdStatus) lines.push({ key: 'MD Status', text: `MD Status: ${uInfo.mdStatus}` });
+    if (selectedLabels.includes('MD Notes') && uInfo?.mdNotes) lines.push({ key: 'MD Notes', text: `MD Notes: ${uInfo.mdNotes}` });
+    if (selectedLabels.includes('Task') && uInfo?.task) lines.push({ key: 'Task', text: `Task: ${uInfo.task}` });
+    if (selectedLabels.includes('Project Status') && uInfo?.projectStatus) lines.push({ key: 'Project Status', text: `Project Status: ${uInfo.projectStatus}` });
+    if (selectedLabels.includes('Act: Status') && uInfo?.actStatus) lines.push({ key: 'Act: Status', text: `Act: Status: ${uInfo.actStatus}` });
+    if (selectedLabels.includes('Start Date') && uInfo?.startDate) lines.push({ key: 'Start Date', text: `Start Date: ${uInfo.startDate}` });
+    if (selectedLabels.includes('End Date') && uInfo?.endDate) lines.push({ key: 'End Date', text: `End Date: ${uInfo.endDate}` });
+    
+    if (selectedLabels.includes('Sales') && uInfo?.salesAmount !== undefined) lines.push({ key: 'Sales', text: `Sales: ${formatMoney(uInfo.salesAmount)}` });
+    if (selectedLabels.includes('Sales By CP') && uInfo?.salesByCp !== undefined) lines.push({ key: 'Sales By CP', text: `Sales (CP): ${formatMoney(uInfo.salesByCp)}` });
+    if (selectedLabels.includes('Sales By HCM Categ') && uInfo?.salesByHcmcate !== undefined) lines.push({ key: 'Sales By HCM Categ', text: `Sales (HCM): ${formatMoney(uInfo.salesByHcmcate)}` });
+    
+    if (selectedLabels.includes('Profit') && uInfo?.profitAmount !== undefined) lines.push({ key: 'Profit', text: `Profit: ${formatMoney(uInfo.profitAmount)}` });
+    if (selectedLabels.includes('Profit By CP') && uInfo?.profitByCp !== undefined) lines.push({ key: 'Profit By CP', text: `Profit (CP): ${formatMoney(uInfo.profitByCp)}` });
+    if (selectedLabels.includes('Profit By HCM Categ') && uInfo?.profitByHcmcate !== undefined) lines.push({ key: 'Profit By HCM Categ', text: `Profit (HCM): ${formatMoney(uInfo.profitByHcmcate)}` });
+    
+    if (selectedLabels.includes('Margin') && uInfo?.margin !== undefined) lines.push({ key: 'Margin', text: `Margin: ${formatPercent(uInfo.margin)}` });
+    if (selectedLabels.includes('Margin By CP') && uInfo?.marginByCp !== undefined) lines.push({ key: 'Margin By CP', text: `Margin (CP): ${formatPercent(uInfo.marginByCp)}` });
+    if (selectedLabels.includes('HCM Margin') && uInfo?.hcmMargin !== undefined) lines.push({ key: 'HCM Margin', text: `HCM Margin: ${formatPercent(uInfo.hcmMargin)}` });
+    
+    if (selectedLabels.includes('HCM Sales Effi') && uInfo?.hcmSalesEffi !== undefined) lines.push({ key: 'HCM Sales Effi', text: `HCM Sales Effi: ${formatMoney(uInfo.hcmSalesEffi)}` });
+    
+    if (lines.length === 0) lines.push({ key: 'Unit ID', text: unit.name });
+    return lines;
+};
+
 export const generateSizeLabel = (unit: Record<string, any>, uInfo: any, selectedLabels: string[]) => {
-    const parts = [];
-    if (selectedLabels.includes('Unit ID')) parts.push(unit.name);
-    if (selectedLabels.includes('Size SQM') && uInfo?.size) parts.push(`${uInfo.size} SQM`);
-    if (selectedLabels.includes('Floor') && uInfo?.floor) parts.push(`Floor: ${uInfo.floor}`);
-    if (selectedLabels.includes('Brand Code') && uInfo?.brandCode) parts.push(`Brand Code: ${uInfo.brandCode}`);
-    if (selectedLabels.includes('Brand Name') && uInfo?.brandName) parts.push(uInfo.brandName);
-    if (selectedLabels.includes('Vendor Code') && uInfo?.vendorCode) parts.push(`Vendor Code: ${uInfo.vendorCode}`);
-    if (selectedLabels.includes('Name') && uInfo?.className) parts.push(uInfo.className);
-    if (selectedLabels.includes('Class Code') && uInfo?.classCode) parts.push(uInfo.classCode);
-    if (selectedLabels.includes('Update') && uInfo?.update) parts.push(`Update: ${uInfo.update}`);
-    if (selectedLabels.includes('Status') && uInfo?.status) parts.push(`Status: ${uInfo.status}`);
-    if (selectedLabels.includes('MD Status') && uInfo?.mdStatus) parts.push(`MD Status: ${uInfo.mdStatus}`);
-    if (selectedLabels.includes('MD Notes') && uInfo?.mdNotes) parts.push(`MD Notes: ${uInfo.mdNotes}`);
-    if (selectedLabels.includes('Task') && uInfo?.task) parts.push(`Task: ${uInfo.task}`);
-    if (selectedLabels.includes('Project Status') && uInfo?.projectStatus) parts.push(`Project Status: ${uInfo.projectStatus}`);
-    if (selectedLabels.includes('Act: Status') && uInfo?.actStatus) parts.push(`Act: Status: ${uInfo.actStatus}`);
-    if (selectedLabels.includes('Start Date') && uInfo?.startDate) parts.push(`Start Date: ${uInfo.startDate}`);
-    if (selectedLabels.includes('End Date') && uInfo?.endDate) parts.push(`End Date: ${uInfo.endDate}`);
-    
-    if (selectedLabels.includes('Sales') && uInfo?.salesAmount !== undefined) parts.push(`Sales: ${formatMoney(uInfo.salesAmount)}`);
-    if (selectedLabels.includes('Sales By CP') && uInfo?.salesByCp !== undefined) parts.push(`Sales (CP): ${formatMoney(uInfo.salesByCp)}`);
-    if (selectedLabels.includes('Sales By HCM Categ') && uInfo?.salesByHcmcate !== undefined) parts.push(`Sales (HCM): ${formatMoney(uInfo.salesByHcmcate)}`);
-    
-    if (selectedLabels.includes('Profit') && uInfo?.profitAmount !== undefined) parts.push(`Profit: ${formatMoney(uInfo.profitAmount)}`);
-    if (selectedLabels.includes('Profit By CP') && uInfo?.profitByCp !== undefined) parts.push(`Profit (CP): ${formatMoney(uInfo.profitByCp)}`);
-    if (selectedLabels.includes('Profit By HCM Categ') && uInfo?.profitByHcmcate !== undefined) parts.push(`Profit (HCM): ${formatMoney(uInfo.profitByHcmcate)}`);
-    
-    if (selectedLabels.includes('Margin') && uInfo?.margin !== undefined) parts.push(`Margin: ${formatPercent(uInfo.margin)}`);
-    if (selectedLabels.includes('Margin By CP') && uInfo?.marginByCp !== undefined) parts.push(`Margin (CP): ${formatPercent(uInfo.marginByCp)}`);
-    if (selectedLabels.includes('HCM Margin') && uInfo?.hcmMargin !== undefined) parts.push(`HCM Margin: ${formatPercent(uInfo.hcmMargin)}`);
-    
-    if (selectedLabels.includes('HCM Sales Effi') && uInfo?.hcmSalesEffi !== undefined) parts.push(`HCM Sales Effi: ${formatMoney(uInfo.hcmSalesEffi)}`);
-    
-    return parts.join('\n') || unit.name;
+    return generateSizeLabelLines(unit, uInfo, selectedLabels).map(l => l.text).join('\n') || unit.name;
 };

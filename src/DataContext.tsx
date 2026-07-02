@@ -29,6 +29,7 @@ interface DataContextType {
   mapVersions: MapVersion[];
   activeMapVersionId: string | null;
   reviewSelectedLabels: string[];
+  reviewLabelColors: Record<string, string>;
 
   setActualClassInfo: (data: ActualClassInfo[]) => void;
   setClassInfo: (data: ClassInfo[]) => void;
@@ -66,6 +67,7 @@ interface DataContextType {
   isAppLocked: boolean;
   setIsAppLocked: (v: boolean) => void;
   setReviewSelectedLabels: (labels: string[]) => void;
+  setReviewLabelColors: (colors: Record<string, string>) => void;
 }
 
 import { create } from 'zustand';
@@ -89,6 +91,7 @@ export const useDataStore = create<DataContextType>((set, get) => ({
   mapVersions: [],
   activeMapVersionId: null,
   reviewSelectedLabels: ['Unit ID', 'Size SQM'],
+  reviewLabelColors: {},
   
   setActualClassInfo: (data) => set({ actualClassInfo: data }),
   setClassInfo: (data) => set({ classInfo: data }),
@@ -135,7 +138,8 @@ export const useDataStore = create<DataContextType>((set, get) => ({
   store: 'HCM' as StoreRegion, 
   isAppLocked: true,
   setIsAppLocked: (v) => set({ isAppLocked: v }),
-  setReviewSelectedLabels: (labels) => set({ reviewSelectedLabels: labels })
+  setReviewSelectedLabels: (labels) => set({ reviewSelectedLabels: labels }),
+  setReviewLabelColors: (colors) => set({ reviewLabelColors: colors })
 }));
 
 export function DataProvider({ children, store }: { children: React.ReactNode, store: StoreRegion }) {
@@ -163,7 +167,8 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
       needsPermission,
       spreadsheetId,
       isAppLocked,
-      reviewSelectedLabels
+      reviewSelectedLabels,
+      reviewLabelColors
   } = state;
 
   const validUnits = React.useMemo(() => units.map(u => u.unit), [units]);
@@ -341,6 +346,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
       if (parsed.mapVersions) set({ mapVersions: parsed.mapVersions });
       if (parsed.activeMapVersionId) set({ activeMapVersionId: parsed.activeMapVersionId });
       if (parsed.reviewSelectedLabels) set({ reviewSelectedLabels: parsed.reviewSelectedLabels });
+      if (parsed.reviewLabelColors) set({ reviewLabelColors: parsed.reviewLabelColors });
       
       try {
         const sharedHandle = await handle.getFileHandle('SheetSyncData_Shared.json');
@@ -426,6 +432,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
         set({ mapVersions: data.mapVersions || [] });
         set({ activeMapVersionId: data.activeMapVersionId || null });
         if (data.reviewSelectedLabels) set({ reviewSelectedLabels: data.reviewSelectedLabels });
+        if (data.reviewLabelColors) set({ reviewLabelColors: data.reviewLabelColors });
         
         let salesData = data.sales || [];
         let profitsData = data.profits || [];
@@ -519,7 +526,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
   const saveToHandlers = async (
     c: ClassInfo[], ac: ActualClassInfo[], s: SalesInfo[], u: UnitInfo[], p: ProfitInfo[], md: MDStatusInfo[], 
     sf: SubFeeInfo[], ps: ProjectStatusInfo[], pl: ProjectLinkInfo[], bp: BasePlanInfo[], un: UnitDataInfo[],
-    mu: UnitShape[], mv: MapVersion[], amvId: string | null, rsl: string[],
+    mu: UnitShape[], mv: MapVersion[], amvId: string | null, rsl: string[], rlc: Record<string, string>,
     customHandle?: any,
     isManualClick: boolean = false
   ) => {
@@ -544,6 +551,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
           mapVersions: mv,
           activeMapVersionId: amvId,
           reviewSelectedLabels: rsl,
+          reviewLabelColors: rlc,
           migrated_scaled_1000: true, // Set flag to avoid re-migration
           r2Config: {
             accountId: localStorage.getItem('r2_account_id') || '',
@@ -596,6 +604,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
             mapVersions: mv,
             activeMapVersionId: amvId,
             reviewSelectedLabels: rsl,
+          reviewLabelColors: rlc,
             lastUpdated: timestamp,
             migrated_scaled_1000: true, // Set flag to avoid re-migration
             r2Config: {
@@ -718,13 +727,13 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
     }
 
     saveTimeoutRef.current = setTimeout(() => {
-      saveToHandlers(classInfo, actualClassInfo, sales, unitInfo, profits, mdStatus, subFees, projectStatus, projectLink, basePlan, units, mapUnits, mapVersions, activeMapVersionId, reviewSelectedLabels);
+      saveToHandlers(classInfo, actualClassInfo, sales, unitInfo, profits, mdStatus, subFees, projectStatus, projectLink, basePlan, units, mapUnits, mapVersions, activeMapVersionId, reviewSelectedLabels, reviewLabelColors);
     }, 2000); // Wait 2 seconds of silence before saving
   
     return () => {
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
     };
-  }, [classInfo, actualClassInfo, sales, unitInfo, profits, mdStatus, subFees, projectStatus, projectLink, basePlan, units, mapUnits, mapVersions, activeMapVersionId, reviewSelectedLabels]);
+  }, [classInfo, actualClassInfo, sales, unitInfo, profits, mdStatus, subFees, projectStatus, projectLink, basePlan, units, mapUnits, mapVersions, activeMapVersionId, reviewSelectedLabels, reviewLabelColors]);
 
   const setActualClassInfo = (data: ActualClassInfo[]) => {
     set({ actualClassInfo: data });
@@ -914,7 +923,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
   };
 
   const triggerManualBackup = async () => {
-    await saveToHandlers(classInfo, actualClassInfo, sales, unitInfo, profits, mdStatus, subFees, projectStatus, projectLink, basePlan, units, mapUnits, mapVersions, activeMapVersionId, reviewSelectedLabels, undefined, true);
+    await saveToHandlers(classInfo, actualClassInfo, sales, unitInfo, profits, mdStatus, subFees, projectStatus, projectLink, basePlan, units, mapUnits, mapVersions, activeMapVersionId, reviewSelectedLabels, reviewLabelColors, undefined, true);
   };
 
   const triggerManualLoad = async () => {
