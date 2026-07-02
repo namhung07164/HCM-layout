@@ -566,6 +566,12 @@ export default function ReviewTab({ units, setUnits, versions, setVersions, acti
                     {AVAILABLE_LABELS.map(label => (
                       <label key={label} className="flex items-center gap-2 cursor-pointer group">
                         <input 
+                          type="color"
+                          className="w-4 h-4 rounded cursor-pointer border-0 p-0 appearance-none bg-transparent"
+                          value={reviewLabelColors?.[label] || '#ffffff'}
+                          onChange={(e) => setReviewLabelColors({ ...(reviewLabelColors || {}), [label]: e.target.value })}
+                        />
+                        <input 
                           type="checkbox" 
                           className="rounded border-slate-600 bg-slate-800 focus:ring-brand-500"
                           checked={selectedLabels.includes(label)}
