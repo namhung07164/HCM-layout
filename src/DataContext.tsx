@@ -156,6 +156,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
       actualClassInfo,
       sales,
       profits,
+      dailySalesProfits,
       mdStatus,
       subFees,
       projectStatus,
@@ -301,6 +302,42 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
     });
   }, [units, classInfo, isLoading]);
 
+
+
+  async function rotateBackups(handle: any, baseName: string) {
+    try {
+      for (let i = 2; i >= 1; i--) {
+        const srcName = `${baseName}_v${i}.json`;
+        const destName = `${baseName}_v${i+1}.json`;
+        try {
+          const srcHandle = await handle.getFileHandle(srcName);
+          const file = await srcHandle.getFile();
+          const text = await file.text();
+          
+          try { await handle.removeEntry(destName); } catch(e) {}
+          const destHandle = await handle.getFileHandle(destName, { create: true });
+          const destWritable = await destHandle.createWritable();
+          await destWritable.write(text);
+          await destWritable.close();
+        } catch (e) {} // Ignore if src doesn't exist
+      }
+      
+      // Main file to v1
+      try {
+        const mainHandle = await handle.getFileHandle(`${baseName}.json`);
+        const file = await mainHandle.getFile();
+        const text = await file.text();
+        
+        try { await handle.removeEntry(`${baseName}_v1.json`); } catch(e) {}
+        const v1Handle = await handle.getFileHandle(`${baseName}_v1.json`, { create: true });
+        const v1Writable = await v1Handle.createWritable();
+        await v1Writable.write(text);
+        await v1Writable.close();
+      } catch (e) {}
+    } catch (err) {
+      console.warn("Backup rotation failed", err);
+    }
+  }
 
   async function checkFilePermissions(handle: any): Promise<boolean> {
     try {
@@ -585,6 +622,18 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
     });
   }, []);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const isDirtyRef = useRef(false);
+
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (isDirtyRef.current || useDataStore.getState().isSaving) {
+        e.preventDefault();
+        e.returnValue = 'Data is currently saving. Are you sure you want to leave?';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, []);
 
   const saveToHandlers = async (
     c: ClassInfo[], ac: ActualClassInfo[], s: SalesInfo[], u: UnitInfo[], p: ProfitInfo[], md: MDStatusInfo[], 
@@ -651,7 +700,8 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
         const canWrite = await checkFilePermissions(activeHandle);
         if (hasPerm && canWrite) {
           const timestamp = new Date().toISOString();
-          const targetFile = `SheetSyncData_${store}.json`;
+          const baseName = `SheetSyncData_${store}`;
+          const targetFile = `${baseName}.json`;
           const tempFile = `.__tmp_${targetFile}`;
           const jsonPayload = JSON.stringify({ 
             classInfo: c, 
@@ -683,65 +733,80 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
             }
           });
 
-          // Write to temp file then rename to bypass Chrome network drive timestamp mismatch bugs
+          let saveSuccess = false;
           try {
+            await rotateBackups(activeHandle, baseName);
             try { await activeHandle.removeEntry(tempFile); } catch(e) {}
             const tempFileHandle = await activeHandle.getFileHandle(tempFile, { create: true });
             const tempWritable = await tempFileHandle.createWritable();
             await tempWritable.write(jsonPayload);
             await tempWritable.close();
 
-            // Try to move/rename
-            if (typeof (tempFileHandle as any).move === 'function') {
-               try { await activeHandle.removeEntry(targetFile); } catch(e) {}
-               await (tempFileHandle as any).move(targetFile);
-            } else {
-               throw new Error("move_not_supported"); // Trigger fallback
+            try {
+              if (typeof (tempFileHandle as any).move === 'function') {
+                await (tempFileHandle as any).move(targetFile);
+                saveSuccess = true;
+              } else {
+                throw new Error("move not supported");
+              }
+            } catch (moveErr) {
+               // Fallback: write directly without removing the original file first to prevent data loss
+               const targetHandle = await activeHandle.getFileHandle(targetFile, { create: true });
+               const targetWritable = await targetHandle.createWritable();
+               await targetWritable.write(jsonPayload);
+               await targetWritable.close();
+               saveSuccess = true;
             }
             
-            const isIntact = await validateBackupIntegrity(activeHandle, targetFile);
-            if (!isIntact) throw new Error("Integrity check failed after rename");
+            if (saveSuccess) {
+               try { await activeHandle.removeEntry(tempFile); } catch(e) {}
+               const isIntact = await validateBackupIntegrity(activeHandle, targetFile);
+               if (!isIntact) throw new Error("Integrity check failed after write");
+            }
           } catch(err: any) {
-            // Fallback for older browsers
-            try { await activeHandle.removeEntry(targetFile); } catch(e) {}
-            const targetHandle = await activeHandle.getFileHandle(targetFile, { create: true });
-            const targetWritable = await targetHandle.createWritable();
-            await targetWritable.write(jsonPayload);
-            await targetWritable.close();
-            try { await activeHandle.removeEntry(tempFile); } catch(e) {}
-            
-            const isIntact = await validateBackupIntegrity(activeHandle, targetFile);
-            if (!isIntact) throw new Error("Integrity check failed after write fallback");
+             throw new Error("Local save failed: " + err.message);
           }
 
           try {
-            const targetSharedFile = 'SheetSyncData_Shared.json';
+            const sharedBaseName = 'SheetSyncData_Shared';
+            const targetSharedFile = `${sharedBaseName}.json`;
             const tempSharedFile = `.__tmp_${targetSharedFile}`;
             const sharedPayload = JSON.stringify({
               classInfo: c,
               actualClassInfo: ac
             });
 
+            let sharedSaveSuccess = false;
             try {
+              await rotateBackups(activeHandle, sharedBaseName);
               try { await activeHandle.removeEntry(tempSharedFile); } catch(e) {}
               const tempSharedHandle = await activeHandle.getFileHandle(tempSharedFile, { create: true });
               const tempSharedWritable = await tempSharedHandle.createWritable();
               await tempSharedWritable.write(sharedPayload);
               await tempSharedWritable.close();
 
-              if (typeof (tempSharedHandle as any).move === 'function') {
-                 try { await activeHandle.removeEntry(targetSharedFile); } catch(e) {}
-                 await (tempSharedHandle as any).move(targetSharedFile);
-              } else {
-                 throw new Error("move_not_supported");
+              try {
+                if (typeof (tempSharedHandle as any).move === 'function') {
+                  await (tempSharedHandle as any).move(targetSharedFile);
+                  sharedSaveSuccess = true;
+                } else {
+                  throw new Error("move not supported");
+                }
+              } catch (moveErr) {
+                 const targetSharedHandle = await activeHandle.getFileHandle(targetSharedFile, { create: true });
+                 const targetSharedWritable = await targetSharedHandle.createWritable();
+                 await targetSharedWritable.write(sharedPayload);
+                 await targetSharedWritable.close();
+                 sharedSaveSuccess = true;
+              }
+              
+              if (sharedSaveSuccess) {
+                 try { await activeHandle.removeEntry(tempSharedFile); } catch(e) {}
+                 const isIntact = await validateBackupIntegrity(activeHandle, targetSharedFile);
+                 if (!isIntact) throw new Error("Integrity check failed for shared file");
               }
             } catch(err: any) {
-              try { await activeHandle.removeEntry(targetSharedFile); } catch(e) {}
-              const targetSharedHandle = await activeHandle.getFileHandle(targetSharedFile, { create: true });
-              const targetSharedWritable = await targetSharedHandle.createWritable();
-              await targetSharedWritable.write(sharedPayload);
-              await targetSharedWritable.close();
-              try { await activeHandle.removeEntry(tempSharedFile); } catch(e) {}
+              throw err;
             }
           } catch(e) {
             console.warn('Failed to save shared data locally', e);
@@ -794,19 +859,21 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
     // Skip the first render load
     if (isLoading) return;
 
+    isDirtyRef.current = true;
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
     }
 
     saveTimeoutRef.current = setTimeout(() => {
+      isDirtyRef.current = false;
       saveToHandlers(classInfo, actualClassInfo, sales, unitInfo, profits, mdStatus, subFees, projectStatus, projectLink, basePlan, units, mapUnits, mapVersions, activeMapVersionId, reviewSelectedLabels, reviewLabelColors);
-      idbSet('dailySalesProfits', useDataStore.getState().dailySalesProfits);
+      idbSet('dailySalesProfits', dailySalesProfits);
     }, 2000); // Wait 2 seconds of silence before saving
   
     return () => {
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
     };
-  }, [classInfo, actualClassInfo, sales, unitInfo, profits, mdStatus, subFees, projectStatus, projectLink, basePlan, units, mapUnits, mapVersions, activeMapVersionId, reviewSelectedLabels, reviewLabelColors]);
+  }, [classInfo, actualClassInfo, sales, unitInfo, profits, dailySalesProfits, mdStatus, subFees, projectStatus, projectLink, basePlan, units, mapUnits, mapVersions, activeMapVersionId, reviewSelectedLabels, reviewLabelColors]);
 
   const setActualClassInfo = (data: ActualClassInfo[]) => {
     set({ actualClassInfo: data });
