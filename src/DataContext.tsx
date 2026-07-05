@@ -301,6 +301,45 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
     });
   }, [units, classInfo, isLoading]);
 
+
+  async function checkFilePermissions(handle: any): Promise<boolean> {
+    try {
+      const testFile = await handle.getFileHandle('.__perm_check.tmp', { create: true });
+      const writable = await testFile.createWritable();
+      await writable.write('test');
+      await writable.close();
+      const file = await testFile.getFile();
+      const text = await file.text();
+      await handle.removeEntry('.__perm_check.tmp');
+      return text === 'test';
+    } catch (e) {
+      console.warn('File system permission check failed:', e);
+      return false;
+    }
+  }
+
+  async function validateBackupIntegrity(handle: any, fileName: string): Promise<boolean> {
+    for (let i = 0; i < 3; i++) {
+        try {
+            const fileHandle = await handle.getFileHandle(fileName);
+            const file = await fileHandle.getFile();
+            const text = await file.text();
+            if (!text || text.trim() === '') {
+                throw new Error("File is empty");
+            }
+            const parsed = JSON.parse(text);
+            if (!parsed || typeof parsed !== 'object') {
+                throw new Error("Invalid JSON structure");
+            }
+            return true;
+        } catch (err) {
+            console.warn(`Integrity check failed for ${fileName} (attempt ${i + 1}/3):`, err);
+            await new Promise(res => setTimeout(res, 500)); // wait before retry
+        }
+    }
+    return false;
+  }
+
   // Verify permission for a directory handle
   async function verifyPermission(fileHandle: any, readWrite: boolean) {
     const opts: any = {};
@@ -318,27 +357,33 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
   // Load data from a given handle
   async function loadFromHandle(handle: any) {
     try {
-      let fileHandle;
-      try {
-        fileHandle = await handle.getFileHandle(`SheetSyncData_${store}.json`);
-      } catch (err) {
-        if (store === 'HCM') {
-            try {
+      let parsed: any = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          let fileHandle;
+          try {
+            fileHandle = await handle.getFileHandle(`SheetSyncData_${store}.json`);
+          } catch (err) {
+            if (store === 'HCM') {
                 fileHandle = await handle.getFileHandle('SheetSyncData.json');
-                console.log("Found legacy SheetSyncData.json for HCM, will use it.");
-            } catch (fallbackErr) {
+            } else {
                 throw err;
             }
-        } else {
-            throw err;
+          }
+          const file = await fileHandle.getFile();
+          const text = await file.text();
+          if (!text || text.trim() === '') throw new Error("File is empty");
+          parsed = JSON.parse(text);
+          break; // success
+        } catch (err) {
+          console.warn(`Load attempt ${attempt + 1} failed for ${store}:`, err);
+          if (attempt === 2) throw err;
+          await new Promise(res => setTimeout(res, 500));
         }
       }
-      
-      const file = await fileHandle.getFile();
-      const text = await file.text();
-      const parsed = JSON.parse(text);
       if (parsed.classInfo) set({ classInfo: parsed.classInfo });
       if (parsed.actualClassInfo) set({ actualClassInfo: parsed.actualClassInfo });
+      if (parsed.dailySalesProfits) set({ dailySalesProfits: parsed.dailySalesProfits });
       if (parsed.unitInfo) set({ unitInfo: parsed.unitInfo });
       if (parsed.mdStatus) set({ mdStatus: parsed.mdStatus });
       if (parsed.subFees) set({ subFees: parsed.subFees });
@@ -353,10 +398,23 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
       if (parsed.reviewLabelColors) set({ reviewLabelColors: parsed.reviewLabelColors });
       
       try {
-        const sharedHandle = await handle.getFileHandle('SheetSyncData_Shared.json');
-        const sharedFile = await sharedHandle.getFile();
-        const sharedText = await sharedFile.text();
-        const sharedParsed = JSON.parse(sharedText);
+        let sharedParsed: any = null;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            const sharedHandle = await handle.getFileHandle('SheetSyncData_Shared.json');
+            const sharedFile = await sharedHandle.getFile();
+            const sharedText = await sharedFile.text();
+            if (sharedText && sharedText.trim() !== '') {
+               sharedParsed = JSON.parse(sharedText);
+            }
+            break;
+          } catch (err: any) {
+            if (err.name === 'NotFoundError') throw err;
+            console.warn(`Shared file load attempt ${attempt + 1} failed:`, err);
+            if (attempt === 2) throw err;
+            await new Promise(res => setTimeout(res, 300));
+          }
+        }
         if (sharedParsed.classInfo) set({ classInfo: sharedParsed.classInfo });
         if (sharedParsed.actualClassInfo) set({ actualClassInfo: sharedParsed.actualClassInfo });
       } catch (e) {
@@ -435,6 +493,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
         set({ mapUnits: data.mapUnits || [] });
         set({ mapVersions: data.mapVersions || [] });
         set({ activeMapVersionId: data.activeMapVersionId || null });
+        if (data.dailySalesProfits) set({ dailySalesProfits: data.dailySalesProfits });
         if (data.reviewSelectedLabels) set({ reviewSelectedLabels: data.reviewSelectedLabels });
         if (data.reviewLabelColors) set({ reviewLabelColors: data.reviewLabelColors });
         
@@ -589,7 +648,8 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
             }
         }
 
-        if (hasPerm) {
+        const canWrite = await checkFilePermissions(activeHandle);
+        if (hasPerm && canWrite) {
           const timestamp = new Date().toISOString();
           const targetFile = `SheetSyncData_${store}.json`;
           const tempFile = `.__tmp_${targetFile}`;
@@ -638,6 +698,9 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
             } else {
                throw new Error("move_not_supported"); // Trigger fallback
             }
+            
+            const isIntact = await validateBackupIntegrity(activeHandle, targetFile);
+            if (!isIntact) throw new Error("Integrity check failed after rename");
           } catch(err: any) {
             // Fallback for older browsers
             try { await activeHandle.removeEntry(targetFile); } catch(e) {}
@@ -646,6 +709,9 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
             await targetWritable.write(jsonPayload);
             await targetWritable.close();
             try { await activeHandle.removeEntry(tempFile); } catch(e) {}
+            
+            const isIntact = await validateBackupIntegrity(activeHandle, targetFile);
+            if (!isIntact) throw new Error("Integrity check failed after write fallback");
           }
 
           try {
