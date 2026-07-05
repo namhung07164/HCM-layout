@@ -35,6 +35,17 @@ export interface SalesInfo {
   [key: string]: any;
 }
 
+export interface DailySalesProfitInfo {
+  update?: string;
+  date: string;
+  brandCode: string;
+  brandName: string;
+  sales: number;
+  profit: number;
+  margin: number;
+  [key: string]: any;
+}
+
 export interface ProfitInfo {
   update?: string;
   brandCode: string;
@@ -153,6 +164,7 @@ export type InputSubTabType =
   | "actual-class-info"
   | "sales"
   | "profit"
+  | "daily-sales-profit"
   | "sub-fee";
 export type MappingSubTabType =
   | "summary"

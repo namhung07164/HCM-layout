@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
-import { ClassInfo, ActualClassInfo, SalesInfo, ProfitInfo, UnitInfo, MDStatusInfo, SubFeeInfo, ProjectStatusInfo, ProjectLinkInfo, BasePlanInfo, UnitDataInfo, StoreRegion } from './types';
+import { ClassInfo, ActualClassInfo, SalesInfo, ProfitInfo, DailySalesProfitInfo, UnitInfo, MDStatusInfo, SubFeeInfo, ProjectStatusInfo, ProjectLinkInfo, BasePlanInfo, UnitDataInfo, StoreRegion } from './types';
 import { UnitShape, MapVersion } from './components/DataMapping/types';
 import { loadPersistentData, savePersistentData } from './lib/sheets';
 import { get as idbGet, set as idbSet } from 'idb-keyval';
@@ -16,6 +16,7 @@ interface DataContextType {
   classInfo: ClassInfo[];
   sales: SalesInfo[];
   profits: ProfitInfo[];
+  dailySalesProfits: DailySalesProfitInfo[];
   unitInfo: UnitInfo[];
   mdStatus: MDStatusInfo[];
   subFees: SubFeeInfo[];
@@ -35,6 +36,7 @@ interface DataContextType {
   setClassInfo: (data: ClassInfo[]) => void;
   setSales: (data: SalesInfo[]) => void;
   setProfits: (data: ProfitInfo[]) => void;
+  setDailySalesProfits: (data: DailySalesProfitInfo[]) => void;
   setUnitInfo: (data: UnitInfo[]) => void;
   setMdStatus: (data: MDStatusInfo[]) => void;
   setSubFees: (data: SubFeeInfo[]) => void;
@@ -79,6 +81,7 @@ export const useDataStore = create<DataContextType>((set, get) => ({
   classInfo: [],
   sales: [],
   profits: [],
+  dailySalesProfits: [],
   unitInfo: [],
   mdStatus: [],
   subFees: [],
@@ -97,6 +100,7 @@ export const useDataStore = create<DataContextType>((set, get) => ({
   setClassInfo: (data) => set({ classInfo: data }),
   setSales: (data) => set({ sales: data }),
   setProfits: (data) => set({ profits: data }),
+  setDailySalesProfits: (data) => set({ dailySalesProfits: data }),
   setUnitInfo: (data) => set({ unitInfo: data }),
   setMdStatus: (data) => set({ mdStatus: data }),
   setSubFees: (data) => set({ subFees: data }),
@@ -541,6 +545,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
           sales: s,
           unitInfo: u,
           profits: p,
+          dailySalesProfits: useDataStore.getState().dailySalesProfits,
           mdStatus: md,
           subFees: sf,
           projectStatus: ps,
@@ -594,6 +599,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
             sales: s, 
             unitInfo: u,
             profits: p,
+            dailySalesProfits: useDataStore.getState().dailySalesProfits,
             mdStatus: md,
             subFees: sf,
             projectStatus: ps,
@@ -728,6 +734,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
 
     saveTimeoutRef.current = setTimeout(() => {
       saveToHandlers(classInfo, actualClassInfo, sales, unitInfo, profits, mdStatus, subFees, projectStatus, projectLink, basePlan, units, mapUnits, mapVersions, activeMapVersionId, reviewSelectedLabels, reviewLabelColors);
+      idbSet('dailySalesProfits', useDataStore.getState().dailySalesProfits);
     }, 2000); // Wait 2 seconds of silence before saving
   
     return () => {
@@ -889,6 +896,15 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
           ...p,
           profit: Number(p.profit) || 0,
           profitByCp: Number(p.profitByCp) || 0
+        })) });
+      }
+      if (results['Daily Sales & Profit']) {
+        const dsData = parseSheetData(results['Daily Sales & Profit']);
+        set({ dailySalesProfits: dsData.map((d: any) => ({
+          ...d,
+          sales: Number(d.sales) || 0,
+          profit: Number(d.profit) || 0,
+          margin: Number(d.margin) || 0
         })) });
       }
       if (results['MD Status']) set({ mdStatus: parseSheetData(results['MD Status']) });

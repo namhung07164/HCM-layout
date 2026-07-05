@@ -4,6 +4,7 @@ import { cn } from "../lib/utils";
 import ClassInfoTab from "./ClassInfoTab";
 import SalesTab from "./SalesTab";
 import ProfitTab from "./ProfitTab";
+import DailySalesProfitTab from "./DailySalesProfitTab";
 import AllSubFeeTab from "./AllSubFeeTab";
 import BasePlanTab from "./BasePlanTab";
 import UnitsTab from "./UnitsTab";
@@ -31,6 +32,7 @@ export default React.memo(function InputTab() {
     { id: "actual-class-info", label: "Class Info", icon: Info },
     { id: "sales", label: "Sales", icon: TrendingUp },
     { id: "profit", label: "Profit", icon: DollarSign },
+    { id: "daily-sales-profit", label: "Daily S&P", icon: TrendingUp },
     { id: "sub-fee", label: "All Sub-Fee", icon: FileStack },
   ];
 
@@ -81,6 +83,7 @@ export default React.memo(function InputTab() {
         {activeSubTab === "actual-class-info" && <ActualClassInfoTab />}
         {activeSubTab === "sales" && <SalesTab />}
         {activeSubTab === "profit" && <ProfitTab />}
+        {activeSubTab === "daily-sales-profit" && <DailySalesProfitTab />}
         {activeSubTab === "sub-fee" && <AllSubFeeTab />}
       </div>
     </div>
