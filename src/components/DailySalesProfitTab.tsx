@@ -14,14 +14,18 @@ export default function DailySalesProfitTab() {
 
   const handleDataChange = (newData: any[]) => {
     // Extract only the fields from DailySalesProfitInfo to save
-    const cleanData: DailySalesProfitInfo[] = newData.map(({ date, brandCode, brandName, sales, profit, margin }) => ({
-      date: date || '',
-      brandCode: brandCode || '',
-      brandName: brandName || '',
-      sales: Number(sales) || 0,
-      profit: Number(profit) || 0,
-      margin: Number(margin) || 0
-    }));
+    const cleanData: DailySalesProfitInfo[] = newData.map(({ date, brandCode, brandName, sales, profit }) => {
+      const s = Number(sales) || 0;
+      const p = Number(profit) || 0;
+      return {
+        date: date || '',
+        brandCode: brandCode || '',
+        brandName: brandName || '',
+        sales: s,
+        profit: p,
+        margin: s !== 0 ? p / s : 0
+      };
+    });
     setDailySalesProfits(cleanData);
   };
 
@@ -61,7 +65,7 @@ export default function DailySalesProfitTab() {
         if (isPercent) {
           displayValue = (Number(val) * 100).toLocaleString('en-US', { maximumFractionDigits: 1 }) + '%';
         } else {
-          displayValue = Number(val).toLocaleString('en-US', { maximumFractionDigits: 2 });
+          displayValue = Number(val).toLocaleString('en-US', { maximumFractionDigits: 0 });
         }
       }
     }
@@ -106,7 +110,7 @@ export default function DailySalesProfitTab() {
       label: 'Sales', 
       summary: (
         <span className="flex items-center gap-1">
-          {Number(totalSalesSum).toLocaleString('en-US', { maximumFractionDigits: 2 })}
+          {Number(totalSalesSum).toLocaleString('en-US', { maximumFractionDigits: 0 })}
         </span>
       ),
       renderCell: renderNumericCell('sales')
@@ -116,7 +120,7 @@ export default function DailySalesProfitTab() {
       label: 'Profit', 
       summary: (
         <span className="flex items-center gap-1">
-          {Number(totalProfitSum).toLocaleString('en-US', { maximumFractionDigits: 2 })}
+          {Number(totalProfitSum).toLocaleString('en-US', { maximumFractionDigits: 0 })}
         </span>
       ),
       renderCell: renderNumericCell('profit')
@@ -125,7 +129,11 @@ export default function DailySalesProfitTab() {
       key: 'margin', 
       label: 'Margin', 
       summary: '',
-      renderCell: renderNumericCell('margin', true)
+      renderCell: (val: any) => (
+        <div className="px-2 font-mono text-brand-400">
+          {(Number(val) * 100).toLocaleString('en-US', { maximumFractionDigits: 1 })}%
+        </div>
+      )
     },
   ], [dailySalesProfits, totalSalesSum, totalProfitSum, renderTextCell, renderNumericCell]);
 
@@ -157,7 +165,7 @@ export default function DailySalesProfitTab() {
         brandName: row['brand name'] || row['brandName'] || row['Brand Name'] || '',
         sales: isNaN(parsedSales) ? 0 : parsedSales,
         profit: isNaN(parsedProfit) ? 0 : parsedProfit,
-        margin: isNaN(parsedMargin) ? 0 : parsedMargin
+        margin: (isNaN(parsedSales) || parsedSales === 0) ? 0 : (isNaN(parsedProfit) ? 0 : parsedProfit / parsedSales)
       };
     }
   }), []);
