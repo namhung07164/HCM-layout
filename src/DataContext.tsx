@@ -57,6 +57,7 @@ interface DataContextType {
   lastBackup: string | null;
   triggerManualBackup: () => Promise<void>;
   triggerManualLoad: () => Promise<void>;
+  restoreBackup: () => Promise<void>;
   selectLocalFolder: () => Promise<void>;
   hasLocalFolder: boolean;
   needsPermission: boolean;
@@ -130,6 +131,7 @@ export const useDataStore = create<DataContextType>((set, get) => ({
   
   triggerManualBackup: async () => {}, // injected
   triggerManualLoad: async () => {}, // injected
+  restoreBackup: async () => {}, // injected
   selectLocalFolder: async () => {}, // injected
   hasLocalFolder: false,
   needsPermission: false,
@@ -392,19 +394,23 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
   }
 
   // Load data from a given handle
-  async function loadFromHandle(handle: any) {
+  async function loadFromHandle(handle: any, forceFileName?: string) {
     try {
       let parsed: any = null;
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
           let fileHandle;
-          try {
-            fileHandle = await handle.getFileHandle(`SheetSyncData_${store}.json`);
-          } catch (err) {
-            if (store === 'HCM') {
-                fileHandle = await handle.getFileHandle('SheetSyncData.json');
-            } else {
-                throw err;
+          if (forceFileName) {
+            fileHandle = await handle.getFileHandle(forceFileName);
+          } else {
+            try {
+              fileHandle = await handle.getFileHandle(`SheetSyncData_${store}.json`);
+            } catch (err) {
+              if (store === 'HCM') {
+                  fileHandle = await handle.getFileHandle('SheetSyncData.json');
+              } else {
+                  throw err;
+              }
             }
           }
           const file = await fileHandle.getFile();
@@ -602,12 +608,25 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
       await idbSet('dirHandle', handle); // Save handle to IndexedDB
       set({ hasLocalFolder: true });
       
-      alert('Đã kết nối thư mục thành công!');
+      // Prevent any pending auto-saves from overwriting the folder before we load
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+      
+      set({ isLoading: true });
+      const loaded = await loadFromHandle(handle);
+      if (loaded) {
+        alert('Đã kết nối và tải dữ liệu từ thư mục thành công!');
+      } else {
+        alert('Đã kết nối thư mục, nhưng không tìm thấy dữ liệu cũ.');
+      }
     } catch(err: any) {
       console.error(err);
       if (err.name !== 'AbortError') {
         alert("Không thể chọn thư mục. Hãy chắc chắn bạn mở app trên tab mới và trình duyệt hỗ trợ File System Access API.");
       }
+    } finally {
+      set({ isLoading: false });
     }
   };
 
@@ -616,6 +635,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
     set({
       triggerManualLoad,
       triggerManualBackup,
+      restoreBackup,
       selectLocalFolder,
       requestFolderPermission,
       syncWithGoogleSheets
@@ -1073,6 +1093,34 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
 
   const triggerManualBackup = async () => {
     await saveToHandlers(classInfo, actualClassInfo, sales, unitInfo, profits, mdStatus, subFees, projectStatus, projectLink, basePlan, units, mapUnits, mapVersions, activeMapVersionId, reviewSelectedLabels, reviewLabelColors, undefined, true);
+  };
+
+  const restoreBackup = async () => {
+    if (!dirHandleRef.current) {
+        alert("Chưa chọn thư mục nào!");
+        return;
+    }
+    const isPermitted = await verifyPermission(dirHandleRef.current, true);
+    if (!isPermitted) {
+         alert("Bạn cần cấp quyền truy cập lại cho thư mục này.");
+         return;
+    }
+    
+    set({ isLoading: true });
+    try {
+      const backupFile = `SheetSyncData_${store}_v1.json`;
+      const loaded = await loadFromHandle(dirHandleRef.current, backupFile);
+      if (loaded) {
+          alert(`Khôi phục thành công từ file ${backupFile}!`);
+      } else {
+          alert(`Không tìm thấy file backup (${backupFile}) hoặc dữ liệu bị lỗi.`);
+      }
+    } catch(err: any) {
+        console.error(err);
+        alert('Lỗi khi khôi phục dữ liệu: ' + err.message);
+    } finally {
+        set({ isLoading: false });
+    }
   };
 
   const triggerManualLoad = async () => {
