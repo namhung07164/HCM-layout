@@ -1117,11 +1117,42 @@ const HiddenExportStage = ({ version, units, summaryData, selectedLabels, review
                                   const lines = unit.sizeLabelLines || [];
                                   const fontSize = 14;
                                   const lineHeight = fontSize * 1.2;
-                                  const totalHeight = lines.length * lineHeight;
-                                  const startY = (unit.height - totalHeight) / 2;
-                                  return lines.map((line: any, i: number) => (
-                                    <Text key={i} x={0} y={startY + i * lineHeight} width={unit.width} text={line.text} fill={reviewLabelColors?.[line.key] || '#ffffff'} align="center" fontSize={fontSize} fontStyle="bold" listening={false} shadowColor="black" shadowBlur={2} shadowOpacity={1} />
-                                  ));
+                                  const estimatedCharWidth = fontSize * 0.55;
+                                  const effectiveWidth = unit.width;
+                                  
+                                  const blocks = lines.map((line: any) => {
+                                      const charsPerLine = Math.max(1, effectiveWidth / estimatedCharWidth);
+                                      const words = String(line.text).split(' ');
+                                      let linesCount = 1;
+                                      let currentLineLen = 0;
+                                      for (let i = 0; i < words.length; i++) {
+                                          const wordLen = words[i].length;
+                                          if (wordLen > charsPerLine) {
+                                              // Word itself is longer than a line, it will wrap
+                                              linesCount += Math.floor(wordLen / charsPerLine);
+                                              currentLineLen = wordLen % charsPerLine;
+                                          } else if (currentLineLen > 0 && currentLineLen + 1 + wordLen <= charsPerLine) {
+                                              currentLineLen += 1 + wordLen;
+                                          } else {
+                                              if (i > 0) linesCount++;
+                                              currentLineLen = wordLen;
+                                          }
+                                      }
+                                      const explicitNewlines = (String(line.text).match(/\n/g) || []).length;
+                                      linesCount += explicitNewlines;
+                                      return { ...line, blockHeight: linesCount * lineHeight };
+                                  });
+                                  
+                                  const totalHeight = blocks.reduce((sum: number, b: any) => sum + b.blockHeight, 0);
+                                  let currentY = (unit.height - totalHeight) / 2;
+                                  
+                                  return blocks.map((block: any, i: number) => {
+                                      const y = currentY;
+                                      currentY += block.blockHeight;
+                                      return (
+                                        <Text key={i} x={0} y={y} width={effectiveWidth} text={block.text} fill={reviewLabelColors?.[block.key] || '#ffffff'} align="center" fontSize={fontSize} fontStyle="bold" listening={false} shadowColor="black" shadowBlur={2} shadowOpacity={1} />
+                                      );
+                                  });
                                 })()}
                             </Group>
                         )}
@@ -1137,11 +1168,42 @@ const HiddenExportStage = ({ version, units, summaryData, selectedLabels, review
                                   const lines = unit.sizeLabelLines || [];
                                   const fontSize = 14;
                                   const lineHeight = fontSize * 1.2;
-                                  const totalHeight = lines.length * lineHeight;
-                                  const startY = ((unit.radius||0)*2 - totalHeight) / 2;
-                                  return lines.map((line: any, i: number) => (
-                                    <Text key={i} x={0} y={startY + i * lineHeight} width={(unit.radius||0)*2} text={line.text} fill={reviewLabelColors?.[line.key] || '#ffffff'} align="center" fontSize={fontSize} fontStyle="bold" listening={false} shadowColor="black" shadowBlur={2} shadowOpacity={1} />
-                                  ));
+                                  const estimatedCharWidth = fontSize * 0.55;
+                                  const effectiveWidth = (unit.radius||0)*2;
+                                  
+                                  const blocks = lines.map((line: any) => {
+                                      const charsPerLine = Math.max(1, effectiveWidth / estimatedCharWidth);
+                                      const words = String(line.text).split(' ');
+                                      let linesCount = 1;
+                                      let currentLineLen = 0;
+                                      for (let i = 0; i < words.length; i++) {
+                                          const wordLen = words[i].length;
+                                          if (wordLen > charsPerLine) {
+                                              // Word itself is longer than a line, it will wrap
+                                              linesCount += Math.floor(wordLen / charsPerLine);
+                                              currentLineLen = wordLen % charsPerLine;
+                                          } else if (currentLineLen > 0 && currentLineLen + 1 + wordLen <= charsPerLine) {
+                                              currentLineLen += 1 + wordLen;
+                                          } else {
+                                              if (i > 0) linesCount++;
+                                              currentLineLen = wordLen;
+                                          }
+                                      }
+                                      const explicitNewlines = (String(line.text).match(/\n/g) || []).length;
+                                      linesCount += explicitNewlines;
+                                      return { ...line, blockHeight: linesCount * lineHeight };
+                                  });
+                                  
+                                  const totalHeight = blocks.reduce((sum: number, b: any) => sum + b.blockHeight, 0);
+                                  let currentY = (effectiveWidth - totalHeight) / 2;
+                                  
+                                  return blocks.map((block: any, i: number) => {
+                                      const y = currentY;
+                                      currentY += block.blockHeight;
+                                      return (
+                                        <Text key={i} x={0} y={y} width={effectiveWidth} text={block.text} fill={reviewLabelColors?.[block.key] || '#ffffff'} align="center" fontSize={fontSize} fontStyle="bold" listening={false} shadowColor="black" shadowBlur={2} shadowOpacity={1} />
+                                      );
+                                  });
                                 })()}
                             </Group>
                         )}
@@ -1162,11 +1224,37 @@ const HiddenExportStage = ({ version, units, summaryData, selectedLabels, review
                                       const lines = unit.sizeLabelLines || [];
                                       const fontSize = 14;
                                       const lineHeight = fontSize * 1.2;
-                                      const totalHeight = lines.length * lineHeight;
-                                      const startY = (bh - totalHeight) / 2;
-                                      return lines.map((line: any, i: number) => (
-                                        <Text key={i} x={0} y={startY + i * lineHeight} width={bw} text={line.text} fill={reviewLabelColors?.[line.key] || '#ffffff'} align="center" fontSize={fontSize} fontStyle="bold" listening={false} shadowColor="black" shadowBlur={2} shadowOpacity={1} />
-                                      ));
+                                      const estimatedCharWidth = fontSize * 0.55;
+                                      const effectiveWidth = bw;
+                                      
+                                      const blocks = lines.map((line: any) => {
+                                          const charsPerLine = Math.max(1, effectiveWidth / estimatedCharWidth);
+                                          const words = String(line.text).split(' ');
+                                          let linesCount = 1;
+                                          let currentLineLen = words[0].length;
+                                          for (let i = 1; i < words.length; i++) {
+                                              if (currentLineLen + 1 + words[i].length <= charsPerLine) {
+                                                  currentLineLen += 1 + words[i].length;
+                                              } else {
+                                                  linesCount++;
+                                                  currentLineLen = words[i].length;
+                                              }
+                                          }
+                                          const explicitNewlines = (String(line.text).match(/\n/g) || []).length;
+                                          linesCount += explicitNewlines;
+                                          return { ...line, blockHeight: linesCount * lineHeight };
+                                      });
+                                      
+                                      const totalHeight = blocks.reduce((sum: number, b: any) => sum + b.blockHeight, 0);
+                                      let currentY = (bh - totalHeight) / 2;
+                                      
+                                      return blocks.map((block: any, i: number) => {
+                                          const y = currentY;
+                                          currentY += block.blockHeight;
+                                          return (
+                                            <Text key={i} x={0} y={y} width={effectiveWidth} text={block.text} fill={reviewLabelColors?.[block.key] || '#ffffff'} align="center" fontSize={fontSize} fontStyle="bold" listening={false} shadowColor="black" shadowBlur={2} shadowOpacity={1} />
+                                          );
+                                      });
                                     })()}
                                   </Group>
                                 );
