@@ -389,10 +389,12 @@ export default function UnitInfoTab() {
                    }
                  }
               });
-              if (bestClassInfo && bestSim > 0.4) { // Minimum similarity threshold
+              
+              // First take project name, then if we find a good match in classInfo, use that instead.
+              if (bestClassInfo && bestSim > 0.4) {
                  bestBrandMatch = bestClassInfo.brandName;
                  bestBrandCode = bestClassInfo.brandCode;
-              } else if (!bestBrandMatch && projName) {
+              } else {
                  bestBrandMatch = projName;
               }
             }
