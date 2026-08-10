@@ -423,9 +423,13 @@ export default function CsvExportTab() {
         templateData.forEach(taskDef => {
           if (finalJson.length >= 10) return;
           const taskName = taskDef['Task name'] || '';
-          let taskCodePhu = taskDef['Task code phá»¥'] || taskDef['Task code phụ'] || '';
+          const tcKey = Object.keys(taskDef).find(k => {
+            const clean = k.toLowerCase().replace(/á»¥/g, 'ụ').replace(/\s+/g, '');
+            return clean.includes('taskcodeph');
+          });
+          let taskCodePhu = tcKey ? taskDef[tcKey] : '';
           if (taskCodePhu !== undefined && taskCodePhu !== null && String(taskCodePhu).trim() !== '') {
-             taskCodePhu = `${projCode}-${taskCodePhu}`;
+             taskCodePhu = projCode ? `${projCode}-${String(taskCodePhu).trim()}` : String(taskCodePhu).trim();
           }
           let start = taskDef['start'] || '';
           let finish = taskDef['finish'] || '';
@@ -434,9 +438,10 @@ export default function CsvExportTab() {
           
           const party = taskDef['party'] || '';
           const duration = taskDef['duration'] !== undefined ? taskDef['duration'] : '';
-          let pred = taskDef['Predecessor'] || taskDef['predecessor'] || '';
+          const predKey = Object.keys(taskDef).find(k => k.toLowerCase().replace(/\s+/g, '') === 'predecessor');
+          let pred = predKey ? taskDef[predKey] : '';
           if (pred !== undefined && pred !== null && String(pred).trim() !== '') {
-             pred = `${projCode}-${pred}`;
+             pred = projCode ? `${projCode}-${String(pred).trim()}` : String(pred).trim();
           }
           let delegation = taskDef['delegation'] !== undefined ? taskDef['delegation'] : (constantMapping['delegation'] || 'true');
           
@@ -520,9 +525,13 @@ export default function CsvExportTab() {
         
         templateData.forEach(taskDef => {
           const taskName = taskDef['Task name'] || '';
-          let taskCodePhu = taskDef['Task code phá»¥'] || taskDef['Task code phụ'] || '';
+          const tcKey = Object.keys(taskDef).find(k => {
+            const clean = k.toLowerCase().replace(/á»¥/g, 'ụ').replace(/\s+/g, '');
+            return clean.includes('taskcodeph');
+          });
+          let taskCodePhu = tcKey ? taskDef[tcKey] : '';
           if (taskCodePhu !== undefined && taskCodePhu !== null && String(taskCodePhu).trim() !== '') {
-             taskCodePhu = `${projCode}-${taskCodePhu}`;
+             taskCodePhu = projCode ? `${projCode}-${String(taskCodePhu).trim()}` : String(taskCodePhu).trim();
           }
           let start = taskDef['start'] || '';
           let finish = taskDef['finish'] || '';
@@ -531,9 +540,10 @@ export default function CsvExportTab() {
           
           const party = taskDef['party'] || '';
           const duration = taskDef['duration'] !== undefined ? taskDef['duration'] : '';
-          let pred = taskDef['Predecessor'] || taskDef['predecessor'] || '';
+          const predKey = Object.keys(taskDef).find(k => k.toLowerCase().replace(/\s+/g, '') === 'predecessor');
+          let pred = predKey ? taskDef[predKey] : '';
           if (pred !== undefined && pred !== null && String(pred).trim() !== '') {
-             pred = `${projCode}-${pred}`;
+             pred = projCode ? `${projCode}-${String(pred).trim()}` : String(pred).trim();
           }
           let delegation = taskDef['delegation'] !== undefined ? taskDef['delegation'] : (constantMapping['delegation'] || 'true');
           
