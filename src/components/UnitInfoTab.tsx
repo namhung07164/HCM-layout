@@ -47,7 +47,32 @@ export default function UnitInfoTab() {
   })));
 
   const handleDataChange = (newData: UnitInfo[]) => {
-    let finalData = [...newData];
+    let finalData = [...newData].map(row => {
+       // AUTOFILL BRAND NAME IF EMPTY
+       if (row.unit && !row.brandName) {
+         const matchedProj = projectStatus.find(p => p.unit?.toLowerCase().trim() === row.unit.toLowerCase().trim());
+         if (matchedProj && matchedProj.projectName) {
+            const projName = matchedProj.projectName;
+            let bestSim = 0;
+            let bestClassInfo = null;
+            classInfo.forEach(ci => {
+               if (ci.brandName) {
+                 const sim = stringSimilarity(projName, ci.brandName);
+                 if (sim > bestSim) {
+                   bestSim = sim;
+                   bestClassInfo = ci;
+                 }
+               }
+            });
+            if (bestClassInfo && bestSim > 0.4) {
+               return { ...row, brandName: bestClassInfo.brandName, brandCode: row.brandCode || bestClassInfo.brandCode };
+            } else {
+               return { ...row, brandName: projName };
+            }
+         }
+       }
+       return row;
+    });
 
     const unitsMap = new Map<string, UnitInfo[]>();
     for (const r of finalData) {
@@ -249,6 +274,43 @@ export default function UnitInfoTab() {
     unitInfoRef.current = unitInfo;
     handleDataChangeRef.current = handleDataChange;
   }, [unitInfo, handleDataChange]);
+
+  // AUTO-FILL BRAND NAMES FROM PROJECT STATUS
+  React.useEffect(() => {
+    if (!unitInfo.length || !projectStatus.length) return;
+    
+    let hasChanges = false;
+    const updated = unitInfo.map(row => {
+      if (row.unit && !row.brandName) {
+         const matchedProj = projectStatus.find(p => p.unit?.toLowerCase().trim() === row.unit.toLowerCase().trim());
+         if (matchedProj && matchedProj.projectName) {
+            const projName = matchedProj.projectName;
+            let bestSim = 0;
+            let bestClassInfo = null;
+            classInfo.forEach(ci => {
+               if (ci.brandName) {
+                 const sim = stringSimilarity(projName, ci.brandName);
+                 if (sim > bestSim) {
+                   bestSim = sim;
+                   bestClassInfo = ci;
+                 }
+               }
+            });
+            hasChanges = true;
+            if (bestClassInfo && bestSim > 0.4) {
+               return { ...row, brandName: bestClassInfo.brandName, brandCode: row.brandCode || bestClassInfo.brandCode };
+            } else {
+               return { ...row, brandName: projName };
+            }
+         }
+      }
+      return row;
+    });
+
+    if (hasChanges) {
+      setUnitInfo(updated);
+    }
+  }, [unitInfo, projectStatus, classInfo, setUnitInfo]);
 
   const formatDate = (date: Date) => {
     return `${String(date.getMonth() + 1).padStart(2, "0")}/${String(date.getDate()).padStart(2, "0")}/${date.getFullYear()}`;
