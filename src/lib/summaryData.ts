@@ -111,29 +111,39 @@ export function useSummaryData() {
       const unit = normalize(u.unit);
       if (unit) unitsMap.set(unit, u);
     });
+const salesBrandMap = new Map();
+    const salesVendorMap = new Map();
+    (salesData || []).forEach(s => {
+      if (s?.brandCode) {
+          if (!salesBrandMap.has(s.brandCode)) salesBrandMap.set(s.brandCode, []);
+          salesBrandMap.get(s.brandCode).push(s);
+      } else if (s?.vendorCode) {
+          if (!salesVendorMap.has(s.vendorCode)) salesVendorMap.set(s.vendorCode, []);
+          salesVendorMap.get(s.vendorCode).push(s);
+      }
+    });
+
+    const salesDataCache = (unit: any) => {
+        let matches: any[] = [];
+        if (unit.brandCode && salesBrandMap.has(unit.brandCode)) {
+            matches = salesBrandMap.get(unit.brandCode);
+        } else if (unit.vendorCode && salesVendorMap.has(unit.vendorCode)) {
+            matches = salesVendorMap.get(unit.vendorCode);
+        }
+        return matches.filter((s: any) => {
+            let isMatch = true;
+            if (s?.vendorCode && unit.vendorCode && s.vendorCode !== unit.vendorCode) isMatch = false;
+            if (s?.brandName && unit.brandName && s.brandName !== unit.brandName) isMatch = false;
+            if (s?.classCode && unit.classCode && s.classCode !== unit.classCode) isMatch = false;
+            return isMatch;
+        });
+    };
 
     return (unitInfo || []).map((unit) => {
       let salesAmount = 0;
       let salesByCpAmount = 0;
 
-      const matches = (salesData || []).filter((s) => {
-        if (!s?.vendorCode && !s?.brandCode && !s?.brandName && !s?.classCode)
-          return false;
-        let isMatch = true;
-        if (s?.vendorCode) {
-          if (unit.vendorCode !== s.vendorCode) isMatch = false;
-        }
-        if (s?.brandCode) {
-          if (unit.brandCode !== s.brandCode) isMatch = false;
-        }
-        if (s?.brandName) {
-          if (unit.brandName !== s.brandName) isMatch = false;
-        }
-        if (s?.classCode && unit.classCode) {
-          if (unit.classCode !== s.classCode) isMatch = false;
-        }
-        return isMatch;
-      });
+      const matches = salesDataCache(unit);
 
       if (matches.length > 0) {
         salesAmount = matches.reduce((sum, s) => sum + (Number(s?.sales) || 0), 0);
