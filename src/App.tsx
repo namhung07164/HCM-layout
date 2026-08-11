@@ -243,7 +243,7 @@ function MainApp({ store, onSwitchStore }: { store: StoreRegion, onSwitchStore: 
                 </button>
               </div>
 
-              <nav className="flex-1 px-4 py-8 space-y-2">
+              <nav className="flex-1 overflow-y-auto custom-scrollbar px-4 py-8 space-y-2">
                 <p className="text-[10px] text-slate-500 uppercase tracking-[0.2em] font-bold px-4 mb-4">
                   Navigation
                 </p>
