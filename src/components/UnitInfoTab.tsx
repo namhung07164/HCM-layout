@@ -50,42 +50,45 @@ export default function UnitInfoTab() {
     classInfo: state.classInfo,
   })));
 
-  const handleDataChange = (newData: UnitInfo[]) => {
-    let finalData = [...newData].map(row => {
-       // AUTOFILL BRAND NAME IF EMPTY
-       if (row.unit && (!row.brandName || row.brandName.trim() === '' || row.brandName === '-')) {
-         console.group(`handleDataChange Auto-fill Debugging (${row.unit})`);
-         const matchedProj = projectStatus.find(p => normalizeUnit(p.unit) === normalizeUnit(row.unit) || (p.unitLink && normalizeUnit(p.unitLink) === normalizeUnit(row.unit)));
-         if (matchedProj) {
-            console.log(`Found matching project:`, matchedProj);
-            if (matchedProj.projectName) {
-              const projName = matchedProj.projectName;
-              let bestSim = 0;
-              let bestClassInfo = null;
-              classInfo.forEach(ci => {
-                 if (ci.brandName) {
-                   const sim = stringSimilarity(projName, ci.brandName);
-                   if (sim > bestSim) {
-                     bestSim = sim;
-                     bestClassInfo = ci;
-                   }
-                 }
-              });
-              
-              if (bestClassInfo && bestSim > 0.4) {
-                 console.log(`-> Best class match: '${bestClassInfo.brandName}' (similarity: ${bestSim})`);
-                 console.groupEnd();
-                 return { ...row, brandName: bestClassInfo.brandName, brandCode: row.brandCode || bestClassInfo.brandCode };
-              } else {
-                 console.log(`-> No sufficient class match. Using projName: '${projName}'`);
-                 console.groupEnd();
-                 return { ...row, brandName: projName };
+  
+  const autofillBrandName = (row: UnitInfo, targetUnit: string): UnitInfo => {
+      const matchedProj = projectStatus.find(p => normalizeUnit(p.unit) === normalizeUnit(targetUnit) || (p.unitLink && normalizeUnit(p.unitLink) === normalizeUnit(targetUnit)));
+      const projName = matchedProj?.projectName?.trim();
+
+      // If no project name is found, do nothing (do not clear existing brandName)
+      if (!projName) return row;
+
+      const isBrandEmpty = (!row.brandName || row.brandName.trim() === '' || row.brandName === '-');
+      // It's a "new" project name if it differs from what we last tracked.
+      const isProjectNameNew = row._lastProjectName !== projName;
+
+      if (isBrandEmpty || isProjectNameNew) {
+         let bestSim = 0;
+         let bestClassInfo = null;
+         classInfo.forEach(ci => {
+            if (ci.brandName) {
+              const sim = stringSimilarity(projName, ci.brandName);
+              if (sim > bestSim) {
+                bestSim = sim;
+                bestClassInfo = ci;
               }
             }
+         });
+         
+         if (bestClassInfo && bestSim > 0.4) {
+            return { ...row, brandName: bestClassInfo.brandName, brandCode: row.brandCode || bestClassInfo.brandCode, _lastProjectName: projName };
          } else {
-            console.log(`No matching project found for unit '${row.unit}'`);
+            return { ...row, brandName: projName, _lastProjectName: projName };
          }
-         console.groupEnd();
+      }
+      
+      return row;
+  };
+
+  const handleDataChange = (newData: UnitInfo[]) => {
+    let finalData = [...newData].map(row => {
+       if (row.unit) {
+          return autofillBrandName(row, row.unit);
        }
        return row;
     });
@@ -296,44 +299,16 @@ export default function UnitInfoTab() {
     if (!unitInfo.length || !projectStatus.length) return;
     
     let hasChanges = false;
-    console.group("UnitInfoTab Auto-fill Debugging (Effect)");
     const updated = unitInfo.map(row => {
-      if (row.unit && (!row.brandName || row.brandName.trim() === '' || row.brandName === '-')) {
-         console.log(`Evaluating row with unit '${row.unit}' (brandName is empty)`);
-         const matchedProj = projectStatus.find(p => normalizeUnit(p.unit) === normalizeUnit(row.unit) || (p.unitLink && normalizeUnit(p.unitLink) === normalizeUnit(row.unit)));
-         if (matchedProj) {
-            console.log(`Found matching project for unit '${row.unit}':`, matchedProj);
-            if (matchedProj.projectName) {
-              const projName = matchedProj.projectName;
-              let bestSim = 0;
-              let bestClassInfo = null;
-              classInfo.forEach(ci => {
-                 if (ci.brandName) {
-                   const sim = stringSimilarity(projName, ci.brandName);
-                   if (sim > bestSim) {
-                     bestSim = sim;
-                     bestClassInfo = ci;
-                   }
-                 }
-              });
-              hasChanges = true;
-              if (bestClassInfo && bestSim > 0.4) {
-                 console.log(`-> Best class match: '${bestClassInfo.brandName}' (similarity: ${bestSim})`);
-                 return { ...row, brandName: bestClassInfo.brandName, brandCode: row.brandCode || bestClassInfo.brandCode };
-              } else {
-                 console.log(`-> No sufficient class match. Using projName: '${projName}'`);
-                 return { ...row, brandName: projName };
-              }
-            } else {
-               console.log(`-> Matched project has no projectName.`);
-            }
-         } else {
-            console.log(`No matching project found for unit '${row.unit}' in projectStatus dataset.`);
+      if (row.unit) {
+         const newRow = autofillBrandName(row, row.unit);
+         if (newRow !== row) {
+             hasChanges = true;
          }
+         return newRow;
       }
       return row;
     });
-    console.groupEnd();
 
     if (hasChanges) {
       setUnitInfo(updated);
