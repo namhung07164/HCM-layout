@@ -6,7 +6,7 @@ import { useDataStore } from '../DataContext';
 import { cn, standardizeDateToMMDDYYYY } from '../lib/utils';
 import AutocompleteCell from './AutocompleteCell';
 
-export default function ProjectStatusTab() {
+function ProjectStatusTab() {
   const {  projectStatus, setProjectStatus, units  } = useDataStore(useShallow(state => ({
     projectStatus: state.projectStatus,
     setProjectStatus: state.setProjectStatus,
@@ -179,3 +179,5 @@ export default function ProjectStatusTab() {
     </>
   );
 }
+
+export default React.memo(ProjectStatusTab);

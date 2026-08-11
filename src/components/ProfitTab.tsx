@@ -12,7 +12,7 @@ interface EnrichedProfitInfo extends ProfitInfo {
   marginByCpOutput: React.ReactNode;
 }
 
-export default function ProfitTab() {
+function ProfitTab() {
   const {  profits, setProfits, sales  } = useDataStore(useShallow(state => ({
     profits: state.profits,
     setProfits: state.setProfits,
@@ -202,3 +202,5 @@ export default function ProfitTab() {
     />
   );
 }
+
+export default React.memo(ProfitTab);

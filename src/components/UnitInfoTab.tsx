@@ -41,7 +41,7 @@ function stringSimilarity(s1: string, s2: string) {
   return (maxLen - costs[b.length]) / maxLen;
 }
 
-export default function UnitInfoTab() {
+function UnitInfoTab() {
   const {  unitInfo, setUnitInfo, units, classInfo, projectStatus  } = useDataStore(useShallow(state => ({
     unitInfo: state.unitInfo,
     setUnitInfo: state.setUnitInfo,
@@ -919,3 +919,5 @@ export default function UnitInfoTab() {
     />
   );
 }
+
+export default React.memo(UnitInfoTab);

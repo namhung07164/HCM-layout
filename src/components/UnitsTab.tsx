@@ -6,7 +6,7 @@ import { useDataStore } from '../DataContext';
 import { cn } from "../lib/utils";
 import AutocompleteCell from "./AutocompleteCell";
 
-export default function UnitsTab() {
+function UnitsTab() {
   const {  units, setUnits  } = useDataStore(useShallow(state => ({
     units: state.units,
     setUnits: state.setUnits,
@@ -322,3 +322,5 @@ export default function UnitsTab() {
     />
   );
 }
+
+export default React.memo(UnitsTab);

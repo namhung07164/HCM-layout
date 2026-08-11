@@ -33,7 +33,7 @@ const AVAILABLE_LABELS = [
     'HCM Sales Effi'
 ];
 
-export default function ReviewTab({ units, setUnits, versions, setVersions, activeVersionId: initialActiveVersionId }: ReviewTabProps) {
+function ReviewTab({ units, setUnits, versions, setVersions, activeVersionId: initialActiveVersionId }: ReviewTabProps) {
   const [activeVersionId, setActiveVersionId] = useState<string | null>(initialActiveVersionId || versions[0]?.id || null);
   const activeVersion = versions.find(v => v.id === activeVersionId);
   const summaryData = useSummaryData();
@@ -1464,4 +1464,6 @@ export const ExportAllManager = ({ versions, units, summaryData, format, paperSi
             </div>
         </>
     );
-};
+}
+
+export default React.memo(ReviewTab);

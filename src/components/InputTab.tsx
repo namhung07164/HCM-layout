@@ -17,9 +17,7 @@ import {
   Box,
   RefreshCw,
 } from "lucide-react";
-import { InputSubTabType } from "../types";
-
-import ActualClassInfoTab from "./ActualClassInfoTab";
+import { InputSubTabType } from '../types';
 
 export default React.memo(function InputTab() {
   const [activeSubTab, setActiveSubTab] =

@@ -163,7 +163,7 @@ const Row = React.memo(({ index, style, data }: { index: number, style: React.CS
          prevProps.data.isLocked === nextProps.data.isLocked;
 });
 
-export default function DataTable<T extends Record<string, any>>({
+function DataTable<T extends Record<string, any>>({
   columns: initialColumns,
   data,
   onDataChange,
@@ -821,3 +821,4 @@ export default function DataTable<T extends Record<string, any>>({
   );
 }
 
+export default React.memo(DataTable) as typeof DataTable;

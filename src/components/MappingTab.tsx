@@ -7,7 +7,7 @@ import MDStatusTab from "./MDStatusTab";
 import ProjectStatusTab from "./ProjectStatusTab";
 import ProjectLinkTab from "./ProjectLinkTab";
 import { Table2, Activity, Briefcase, FileSpreadsheet, Link } from "lucide-react";
-import { MappingSubTabType } from "../types";
+import { MappingSubTabType } from '../types';
 
 export default React.memo(function MappingTab() {
   const [activeSubTab, setActiveSubTab] =

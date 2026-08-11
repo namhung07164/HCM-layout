@@ -271,7 +271,7 @@ const VersionStage = ({ version, mapUnits, summaryData, selectedLabels, reviewLa
   );
 };
 
-export default function ReviewOnlyView() {
+function ReviewOnlyView() {
   const { mapUnits, mapVersions, isLoading, reviewLabelColors } = useDataStore(useShallow(state => ({
     mapUnits: state.mapUnits,
     mapVersions: state.mapVersions,
@@ -322,3 +322,5 @@ export default function ReviewOnlyView() {
     </div>
   );
 }
+
+export default React.memo(ReviewOnlyView);

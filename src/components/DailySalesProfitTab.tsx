@@ -6,7 +6,7 @@ import { useDataStore } from '../DataContext';
 import { cn } from '../lib/utils';
 import AutocompleteCell from './AutocompleteCell';
 
-export default function DailySalesProfitTab() {
+function DailySalesProfitTab() {
   const {  dailySalesProfits, setDailySalesProfits } = useDataStore(useShallow(state => ({
     dailySalesProfits: state.dailySalesProfits,
     setDailySalesProfits: state.setDailySalesProfits,
@@ -211,3 +211,5 @@ export default function DailySalesProfitTab() {
     />
   );
 }
+
+export default React.memo(DailySalesProfitTab);

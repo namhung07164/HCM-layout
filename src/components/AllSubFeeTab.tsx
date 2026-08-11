@@ -6,7 +6,7 @@ import { useDataStore } from '../DataContext';
 import { standardizeDateToMMDDYYYY, cn } from '../lib/utils';
 import AutocompleteCell from './AutocompleteCell';
 
-export default function AllSubFeeTab() {
+function AllSubFeeTab() {
   const {  subFees, setSubFees  } = useDataStore(useShallow(state => ({
     subFees: state.subFees,
     setSubFees: state.setSubFees,
@@ -142,3 +142,5 @@ export default function AllSubFeeTab() {
     />
   );
 }
+
+export default React.memo(AllSubFeeTab);

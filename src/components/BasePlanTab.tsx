@@ -6,7 +6,7 @@ import { useDataStore } from '../DataContext';
 import { standardizeDateToMMDDYYYY, cn } from '../lib/utils';
 import AutocompleteCell from './AutocompleteCell';
 
-export default function BasePlanTab() {
+function BasePlanTab() {
   const {  basePlan, setBasePlan  } = useDataStore(useShallow(state => ({
     basePlan: state.basePlan,
     setBasePlan: state.setBasePlan,
@@ -127,3 +127,5 @@ export default function BasePlanTab() {
     />
   );
 }
+
+export default React.memo(BasePlanTab);

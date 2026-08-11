@@ -26,7 +26,7 @@ interface DynamicHierarchyTabProps {
   setActiveVersionId: (id: string | null) => void;
 }
 
-export default function DynamicHierarchyTab({
+function DynamicHierarchyTab({
   units,
   setUnits,
   versions,
@@ -811,3 +811,5 @@ export default function DynamicHierarchyTab({
     </div>
   );
 }
+
+export default React.memo(DynamicHierarchyTab);

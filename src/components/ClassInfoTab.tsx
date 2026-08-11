@@ -6,7 +6,7 @@ import { useDataStore } from '../DataContext';
 import { cn } from '../lib/utils';
 import AutocompleteCell from './AutocompleteCell';
 
-export default function ClassInfoTab() {
+function ClassInfoTab() {
   const {  classInfo, setClassInfo  } = useDataStore(useShallow(state => ({
     classInfo: state.classInfo,
     setClassInfo: state.setClassInfo,
@@ -134,3 +134,5 @@ export default function ClassInfoTab() {
     />
   );
 }
+
+export default React.memo(ClassInfoTab);

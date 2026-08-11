@@ -6,7 +6,7 @@ import { useDataStore } from '../DataContext';
 import { cn, standardizeDateToMMDDYYYY } from '../lib/utils';
 import AutocompleteCell from './AutocompleteCell';
 
-export default function ProjectLinkTab() {
+function ProjectLinkTab() {
   const {  projectLink, setProjectLink, projectStatus, units  } = useDataStore(useShallow(state => ({
     projectLink: state.projectLink,
     setProjectLink: state.setProjectLink,
@@ -179,3 +179,5 @@ export default function ProjectLinkTab() {
     </>
   );
 }
+
+export default React.memo(ProjectLinkTab);

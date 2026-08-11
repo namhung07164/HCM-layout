@@ -134,7 +134,7 @@ function SearchableSelect({
     );
 }
 
-export default function EditTab({ units, setUnits, versions, setVersions, activeVersionId, setActiveVersionId }: EditTabProps) {
+function EditTab({ units, setUnits, versions, setVersions, activeVersionId, setActiveVersionId }: EditTabProps) {
   const summaryData = useSummaryData();
   const masterUnits = React.useMemo(() => {
     // Unique by unit name
@@ -1669,3 +1669,5 @@ function createGridPattern(gridSize: number) {
     }
     return canvas;
 }
+
+export default React.memo(EditTab);

@@ -10,8 +10,6 @@ import ReviewTab from './DataMapping/ReviewTab';
 import { UnitShape, Group, MapVersion } from './DataMapping/types';
 import { useDataStore } from '../DataContext';
 
-type SubTab = 'edit' | 'hierarchy' | 'dynamic-hierarchy' | 'review';
-
 export default React.memo(function DataMappingTab() {
   const [activeSubTab, setActiveSubTab] = useState<SubTab>('edit');
   const [isTabFullscreen, setIsTabFullscreen] = useState(false);

@@ -7,7 +7,7 @@ import { standardizeDateToMMDDYYYY, cn } from '../lib/utils';
 import AutocompleteCell from './AutocompleteCell';
 import { useSummaryData } from '../lib/summaryData';
 
-export default function MDStatusTab() {
+function MDStatusTab() {
   const {  mdStatus, setMdStatus, classInfo, projectStatus  } = useDataStore(useShallow(state => ({
     mdStatus: state.mdStatus,
     setMdStatus: state.setMdStatus,
@@ -229,3 +229,5 @@ export default function MDStatusTab() {
     </>
   );
 }
+
+export default React.memo(MDStatusTab);

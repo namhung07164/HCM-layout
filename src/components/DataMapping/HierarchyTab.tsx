@@ -14,7 +14,7 @@ interface HierarchyTabProps {
   setActiveVersionId: (id: string | null) => void;
 }
 
-export default function HierarchyTab({ units, setUnits, versions, setVersions, activeVersionId, setActiveVersionId }: HierarchyTabProps) {
+function HierarchyTab({ units, setUnits, versions, setVersions, activeVersionId, setActiveVersionId }: HierarchyTabProps) {
   const [selectedGroupToAssign, setSelectedGroupToAssign] = useState<string | null>(null);
   const [isVersionActive, setIsVersionActive] = useState<boolean>(false);
 
@@ -459,3 +459,5 @@ export default function HierarchyTab({ units, setUnits, versions, setVersions, a
     </div>
   );
 }
+
+export default React.memo(HierarchyTab);
