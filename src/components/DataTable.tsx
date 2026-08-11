@@ -39,6 +39,15 @@ const formatDate = (date: Date) => {
 };
 
 // Extracted Row component for react-window to prevent unmounting and focus loss
+const areEqual = (prevProps: any, nextProps: any) => {
+  if (prevProps.index !== nextProps.index || prevProps.style !== nextProps.style) return false;
+  if (prevProps.data.visibleColumns !== nextProps.data.visibleColumns) return false;
+  if (prevProps.data.isLocked !== nextProps.data.isLocked) return false;
+  // Deep check the actual row data object reference
+  if (prevProps.data.filteredData[prevProps.index] !== nextProps.data.filteredData[nextProps.index]) return false;
+  return true;
+};
+
 const Row = React.memo(({ index, style, data }: { index: number, style: React.CSSProperties, data: any }) => {
   const {  filteredData, visibleColumns, isLocked, onDataChange, originalData } = data;
   const row = filteredData[index];

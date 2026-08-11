@@ -51,9 +51,25 @@ export default function UnitInfoTab() {
   })));
 
   
+  const projectStatusMap = React.useMemo(() => {
+    const map = new Map<string, string>();
+    projectStatus.forEach(p => {
+       if (p.projectName) {
+          if (p.unit) map.set(normalizeUnit(p.unit), p.projectName.trim());
+          if (p.unitLink) map.set(normalizeUnit(p.unitLink), p.projectName.trim());
+       }
+    });
+    return map;
+  }, [projectStatus]);
+
+  const classInfoMatches = React.useMemo(() => {
+     // Pre-calculate similarities for known project names? Too complex. We'll just optimize projectStatusMap.
+     return new Map();
+  }, []);
+
   const autofillBrandName = (row: UnitInfo, targetUnit: string): UnitInfo => {
-      const matchedProj = projectStatus.find(p => normalizeUnit(p.unit) === normalizeUnit(targetUnit) || (p.unitLink && normalizeUnit(p.unitLink) === normalizeUnit(targetUnit)));
-      const projName = matchedProj?.projectName?.trim();
+      const normalizedTarget = normalizeUnit(targetUnit);
+      const projName = projectStatusMap.get(normalizedTarget);
 
       // If no project name is found, do nothing (do not clear existing brandName)
       if (!projName) return row;
@@ -374,13 +390,7 @@ export default function UnitInfoTab() {
   );
 
   const renderUnitCell = React.useCallback(
-    () =>
-      (
-        val: any,
-        row: UnitInfo,
-        updateRow: (newRow: UnitInfo) => void,
-        isLocked: boolean,
-      ) => {
+    () => {
         const activeUnits = units.filter(
           (u) =>
             u.active !== "Unactive" &&
@@ -392,7 +402,12 @@ export default function UnitInfoTab() {
           label: `Floor ${u.floor} - ${u.size} SQM`,
           item: u,
         }));
-
+      return (
+        val: any,
+        row: UnitInfo,
+        updateRow: (newRow: UnitInfo) => void,
+        isLocked: boolean,
+      ) => {
         const commitUnit = (
           newUnitName: string,
           selectedInfo?: any,
@@ -435,68 +450,26 @@ export default function UnitInfoTab() {
           );
           let newUnitInfo = [...currentUnits];
 
-          // AUTOFILL BRAND NAME LOGIC
-          let bestBrandMatch = row.brandName;
-          let bestBrandCode = row.brandCode;
-          
-          console.group(`commitUnit Auto-fill Debugging (${finalUnitName})`);
-          if (finalUnitName && (!row.brandName || row.brandName.trim() === '' || row.brandName === '-')) { // ONLY IF EMPTY
-            console.log(`Looking for project match for unit '${finalUnitName}'`);
-            const matchedProj = projectStatus.find(p => normalizeUnit(p.unit) === normalizeUnit(finalUnitName) || (p.unitLink && normalizeUnit(p.unitLink) === normalizeUnit(finalUnitName)));
-            if (matchedProj) {
-               console.log(`Found matching project:`, matchedProj);
-               if (matchedProj.projectName) {
-                 const projName = matchedProj.projectName;
-                 let bestSim = 0;
-                 let bestClassInfo = null;
-                 classInfo.forEach(ci => {
-                    if (ci.brandName) {
-                      const sim = stringSimilarity(projName, ci.brandName);
-                      if (sim > bestSim) {
-                        bestSim = sim;
-                        bestClassInfo = ci;
-                      }
-                    }
-                 });
-                 
-                 // First take project name, then if we find a good match in classInfo, use that instead.
-                 if (bestClassInfo && bestSim > 0.4) {
-                    console.log(`-> Best class match: '${bestClassInfo.brandName}' (similarity: ${bestSim})`);
-                    bestBrandMatch = bestClassInfo.brandName;
-                    bestBrandCode = bestClassInfo.brandCode;
-                 } else {
-                    console.log(`-> No sufficient class match. Using projName: '${projName}'`);
-                    bestBrandMatch = projName;
-                 }
-               }
-            } else {
-               console.log(`No matching project found.`);
-            }
-          } else {
-            console.log(`Skipping project status autofill. finalUnitName: '${finalUnitName}', row.brandName: '${row.brandName}'`);
-          }
-          console.groupEnd();
-
           if (dataIndex > -1) {
-            const newRow = { ...row, unit: finalUnitName };
+            let newRow = { ...row, unit: finalUnitName };
             if (infoToApply) {
               newRow.floor = infoToApply.floor;
               newRow.size = String(infoToApply.size);
             }
-            if (bestBrandMatch) newRow.brandName = bestBrandMatch;
-            if (bestBrandCode) newRow.brandCode = bestBrandCode;
             
+            newRow = autofillBrandName(newRow, finalUnitName);
+               
             newUnitInfo[dataIndex] = newRow;
             handleDataChangeRef.current(newUnitInfo);
           } else {
-            const updatePayload: any = { ...row, unit: finalUnitName };
+            let updatePayload: any = { ...row, unit: finalUnitName };
             if (infoToApply) {
               updatePayload.floor = infoToApply.floor;
               updatePayload.size = String(infoToApply.size);
             }
-            if (bestBrandMatch) updatePayload.brandName = bestBrandMatch;
-            if (bestBrandCode) updatePayload.brandCode = bestBrandCode;
             
+            updatePayload = autofillBrandName(updatePayload, finalUnitName);
+               
             updateRow(updatePayload);
           }
           return true;
@@ -591,13 +564,17 @@ export default function UnitInfoTab() {
             )}
           </div>
         );
-      },
+      };
+    },
     [units],
   );
 
   const renderClassCodeCell = React.useCallback(
-    () =>
-      (
+    () => {
+      const options = Array.from(
+        new Set(classInfo.map((c) => c.classCode).filter(Boolean))
+      );
+      return (
         val: any,
         row: UnitInfo,
         updateRow: (newRow: UnitInfo) => void,
@@ -616,22 +593,24 @@ export default function UnitInfoTab() {
             )}
           >
             <option value="">--Select--</option>
-            {Array.from(
-              new Set(classInfo.map((c) => c.classCode).filter(Boolean)),
-            ).map((cc) => (
+            {options.map((cc) => (
               <option key={cc} value={cc}>
                 {cc}
               </option>
             ))}
           </select>
         );
-      },
+      };
+    },
     [classInfo],
   );
 
   const renderVendorCodeCell = React.useCallback(
-    () =>
-      (
+    () => {
+      const options = Array.from(
+        new Set(classInfo.map((c) => c.vendorCode).filter(Boolean))
+      );
+      return (
         val: any,
         row: UnitInfo,
         updateRow: (newRow: UnitInfo) => void,
@@ -650,16 +629,15 @@ export default function UnitInfoTab() {
             )}
           >
             <option value="">--Select--</option>
-            {Array.from(
-              new Set(classInfo.map((c) => c.vendorCode).filter(Boolean)),
-            ).map((vc) => (
+            {options.map((vc) => (
               <option key={vc} value={vc}>
                 {vc}
               </option>
             ))}
           </select>
         );
-      },
+      };
+    },
     [classInfo],
   );
 
@@ -679,7 +657,8 @@ export default function UnitInfoTab() {
       return (
         <AutocompleteCell
           value={val}
-          onChange={(newVal) => {
+          onChange={() => {}}
+          onBlur={(newVal) => {
             const found = classInfo.find((c) => c.brandCode === newVal);
             if (found) {
               updateRow({
@@ -726,7 +705,8 @@ export default function UnitInfoTab() {
       return (
         <AutocompleteCell
           value={val}
-          onChange={(newVal) => {
+          onChange={() => {}}
+          onBlur={(newVal) => {
             const found = classInfo.find((c) => c.brandName === newVal);
             if (found) {
               updateRow({
