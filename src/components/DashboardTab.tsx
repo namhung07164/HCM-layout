@@ -106,19 +106,6 @@ export default React.memo(function DashboardTab() {
     return map;
   }, [unitInfo]);
 
-// Create lookup for Project Status by Unit
-  const projectStatusByUnitMap = useMemo(() => {
-    const map = new Map<string, typeof projectStatus[0][]>();
-    (projectStatus || []).forEach(p => {
-      if (p?.unit) {
-        const list = map.get(p.unit) || [];
-        list.push(p);
-        map.set(p.unit, list);
-      }
-    });
-    return map;
-  }, [projectStatus]);
-
   // Join and Filter Data
   const { filteredSalesData, filteredProfitsData } = useMemo(() => {
     const fSales = sales.filter(sale => {
@@ -138,8 +125,9 @@ export default React.memo(function DashboardTab() {
       // Filter by Unit
       if (filters.unit && !units.some(u => (u || '').toLowerCase().includes(filters.unit.toLowerCase()))) return false;
 
-      // Filter by Project fields
-      const brandProjects = units.flatMap(u => projectStatusByUnitMap.get(u) || []);
+      // Filter by Project fields (this is harder because one brand can have multiple units/projects)
+      // For now, let's just check if any project for this brand's units matches
+      const brandProjects = projectStatus.filter(p => units.includes(p.unit));
       if (filters.projectStatus && !brandProjects.some(p => (p.status || '').toLowerCase().includes(filters.projectStatus.toLowerCase()))) return false;
       if (filters.task && !brandProjects.some(p => (p.task || '').toLowerCase().includes(filters.task.toLowerCase()))) return false;
       if (filters.startDate && !brandProjects.some(p => (p.startDate || '').includes(filters.startDate))) return false;
@@ -148,14 +136,13 @@ export default React.memo(function DashboardTab() {
       return true;
     });
 
-    const fSalesBrandCodes = new Set(fSales.map(s => s.brandCode));
     const fProfits = profits.filter(profit => {
       // Apply same brand-based filters if possible
       const units = brandToUnitMap.get(profit.brandCode) || [];
       const mds = mdStatusMap.get(profit.brandCode);
       const cls = classInfoMap.get(profit.brandCode);
 
-      if (filters.brandName && !fSalesBrandCodes.has(profit.brandCode)) return false;
+      if (filters.brandName && !fSales.some(s => s.brandCode === profit.brandCode)) return false;
       if (filters.mdStatus && !(mds || '').toLowerCase().includes(filters.mdStatus.toLowerCase())) return false;
       if (filters.floor && !(cls?.floor || '').toLowerCase().includes(filters.floor.toLowerCase())) return false;
       if (filters.unit && !units.some(u => (u || '').toLowerCase().includes(filters.unit.toLowerCase()))) return false;
