@@ -106,6 +106,12 @@ export default function CsvExportTab() {
     return TAB_CONFIG['project'].columns.reduce((acc: any, col: string) => ({ ...acc, [col]: parsed[col] || '' }), {});
   });
   
+  const [keepOriginal, setKeepOriginal] = useState<Record<string, boolean>>(() => {
+    const saved = safeGetStorage(`taka_keeporiginal_project`);
+    const parsed = safeJSONParse(saved);
+    return TAB_CONFIG['project'].columns.reduce((acc: any, col: string) => ({ ...acc, [col]: !!parsed[col] }), {});
+  });
+
   const [constantMapping, setConstantMapping] = useState<Record<string, string>>(() => {
     const saved = safeGetStorage(`taka_constant_project`);
     const parsed = safeJSONParse(saved);
@@ -155,6 +161,10 @@ export default function CsvExportTab() {
       }
       return { ...acc, [col]: val };
     }, {}));
+    
+    const savedKeepOriginal = safeGetStorage(`taka_keeporiginal_${tabId}`);
+    const parsedKeepOriginal = safeJSONParse(savedKeepOriginal);
+    setKeepOriginal(TAB_CONFIG[tabId].columns.reduce((acc: any, col: string) => ({ ...acc, [col]: !!parsedKeepOriginal[col] }), {}));
 
     setIsLocked(safeGetStorage(`taka_locked_${tabId}`) === 'true');
   };
@@ -300,6 +310,7 @@ export default function CsvExportTab() {
   const handleSaveMapping = () => {
     safeSetStorage(`taka_mapping_${activeTab}`, JSON.stringify(mapping));
     safeSetStorage(`taka_constant_${activeTab}`, JSON.stringify(constantMapping));
+    safeSetStorage(`taka_keeporiginal_${activeTab}`, JSON.stringify(keepOriginal));
     safeSetStorage(`taka_locked_${activeTab}`, 'true');
     setIsLocked(true);
   };
@@ -371,7 +382,7 @@ export default function CsvExportTab() {
     
     let val = constantMapping[colName] || row[mapping[colName]];
 
-    if (activeTab === 'task' && colName.toLowerCase() === 'predecessor') {
+    if (activeTab === 'task' && colName.toLowerCase() === 'predecessor' && !keepOriginal[colName]) {
       let projCode = constantMapping['projectCode'] || row[mapping['projectCode']] || '';
       if (val !== undefined && val !== null && String(val).trim() !== '') {
         val = `${projCode}-${val}`;
@@ -428,7 +439,7 @@ export default function CsvExportTab() {
             return clean.includes('taskcodeph');
           });
           let taskCodePhu = tcKey ? taskDef[tcKey] : '';
-          if (taskCodePhu !== undefined && taskCodePhu !== null && String(taskCodePhu).trim() !== '') {
+          if (!keepOriginal['Task code phá»¥'] && taskCodePhu !== undefined && taskCodePhu !== null && String(taskCodePhu).trim() !== '') {
              taskCodePhu = projCode ? `${projCode}-${String(taskCodePhu).trim()}` : String(taskCodePhu).trim();
           }
           let start = taskDef['start'] || '';
@@ -440,7 +451,7 @@ export default function CsvExportTab() {
           const duration = taskDef['duration'] !== undefined ? taskDef['duration'] : '';
           const predKey = Object.keys(taskDef).find(k => k.toLowerCase().replace(/\s+/g, '') === 'predecessor');
           let pred = predKey ? taskDef[predKey] : '';
-          if (pred !== undefined && pred !== null && String(pred).trim() !== '') {
+          if (!keepOriginal['predecessor'] && pred !== undefined && pred !== null && String(pred).trim() !== '') {
              pred = projCode ? `${projCode}-${String(pred).trim()}` : String(pred).trim();
           }
           let delegation = taskDef['delegation'] !== undefined ? taskDef['delegation'] : (constantMapping['delegation'] || 'true');
@@ -530,7 +541,7 @@ export default function CsvExportTab() {
             return clean.includes('taskcodeph');
           });
           let taskCodePhu = tcKey ? taskDef[tcKey] : '';
-          if (taskCodePhu !== undefined && taskCodePhu !== null && String(taskCodePhu).trim() !== '') {
+          if (!keepOriginal['Task code phá»¥'] && taskCodePhu !== undefined && taskCodePhu !== null && String(taskCodePhu).trim() !== '') {
              taskCodePhu = projCode ? `${projCode}-${String(taskCodePhu).trim()}` : String(taskCodePhu).trim();
           }
           let start = taskDef['start'] || '';
@@ -542,7 +553,7 @@ export default function CsvExportTab() {
           const duration = taskDef['duration'] !== undefined ? taskDef['duration'] : '';
           const predKey = Object.keys(taskDef).find(k => k.toLowerCase().replace(/\s+/g, '') === 'predecessor');
           let pred = predKey ? taskDef[predKey] : '';
-          if (pred !== undefined && pred !== null && String(pred).trim() !== '') {
+          if (!keepOriginal['predecessor'] && pred !== undefined && pred !== null && String(pred).trim() !== '') {
              pred = projCode ? `${projCode}-${String(pred).trim()}` : String(pred).trim();
           }
           let delegation = taskDef['delegation'] !== undefined ? taskDef['delegation'] : (constantMapping['delegation'] || 'true');
@@ -742,9 +753,20 @@ export default function CsvExportTab() {
                       >
                         <option value="">-- Cột Excel --</option>
                         {excelHeaders.map(h => <option key={h} value={h}>{h}</option>)}
-                      </select>
+                                            </select>
+                      {(activeTab === 'task' || activeTab === 'mass_task') && (
+                        <div className="flex items-center" title="Giữ nguyên giá trị tải lên">
+                          <input 
+                            type="checkbox" 
+                            disabled={isLocked}
+                            checked={!!keepOriginal[col]}
+                            onChange={e => setKeepOriginal({...keepOriginal, [col]: e.target.checked})}
+                            className="w-4 h-4 cursor-pointer border-slate-300 rounded text-brand-600 focus:ring-brand-500"
+                          />
+                        </div>
+                      )}
                       <input 
-                        disabled={isLocked} 
+                         disabled={isLocked}  
                         type="text" 
                         placeholder="Giá trị tĩnh..." 
                         className="w-24 p-2 border border-slate-200 rounded-lg text-xs disabled:bg-slate-100 disabled:text-slate-400 outline-none focus:border-brand-500 text-slate-800" 
