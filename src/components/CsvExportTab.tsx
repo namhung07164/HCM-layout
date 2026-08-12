@@ -450,7 +450,9 @@ export default function CsvExportTab() {
           const party = taskDef['party'] || '';
           const duration = taskDef['duration'] !== undefined ? taskDef['duration'] : '';
           const predKey = Object.keys(taskDef).find(k => k.toLowerCase().replace(/\s+/g, '') === 'predecessor');
-          let pred = predKey ? taskDef[predKey] : '';
+          let templatePred = predKey ? taskDef[predKey] : '';
+          let mappedPred = constantMapping['predecessor'] || proj[mapping['predecessor']];
+          let pred = (mappedPred !== undefined && mappedPred !== null && String(mappedPred).trim() !== '') ? mappedPred : templatePred;
           if (!keepOriginal['predecessor'] && pred !== undefined && pred !== null && String(pred).trim() !== '') {
              pred = projCode ? `${projCode}-${String(pred).trim()}` : String(pred).trim();
           }
@@ -552,7 +554,9 @@ export default function CsvExportTab() {
           const party = taskDef['party'] || '';
           const duration = taskDef['duration'] !== undefined ? taskDef['duration'] : '';
           const predKey = Object.keys(taskDef).find(k => k.toLowerCase().replace(/\s+/g, '') === 'predecessor');
-          let pred = predKey ? taskDef[predKey] : '';
+          let templatePred = predKey ? taskDef[predKey] : '';
+          let mappedPred = constantMapping['predecessor'] || proj[mapping['predecessor']];
+          let pred = (mappedPred !== undefined && mappedPred !== null && String(mappedPred).trim() !== '') ? mappedPred : templatePred;
           if (!keepOriginal['predecessor'] && pred !== undefined && pred !== null && String(pred).trim() !== '') {
              pred = projCode ? `${projCode}-${String(pred).trim()}` : String(pred).trim();
           }
@@ -737,7 +741,7 @@ export default function CsvExportTab() {
                 {TAB_CONFIG[activeTab].columns
                   .filter((col: string) => {
                     if (activeTab === 'mass_task') {
-                      return ['store', 'location', 'projectCode', 'projectYear'].includes(col);
+                      return ['store', 'location', 'projectCode', 'predecessor', 'projectYear'].includes(col);
                     }
                     return true;
                   })
