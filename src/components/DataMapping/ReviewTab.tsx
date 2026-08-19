@@ -1071,13 +1071,6 @@ const HiddenExportStage = ({ version, units, summaryData, selectedLabels, review
   const exportWidth = logicalWidth * stageScale;
   const exportHeight = logicalHeight * stageScale;
 
-  // Helper for day mode text color
-  const getDayModeFill = (key: string) => {
-      const c = reviewLabelColors?.[key] || '#ffffff';
-      return (c.toLowerCase() === '#ffffff' || c.toLowerCase() === '#fff') ? '#1e293b' : c;
-  };
-
-
   return (
     <Stage 
       ref={stageRef}
@@ -1107,10 +1100,10 @@ const HiddenExportStage = ({ version, units, summaryData, selectedLabels, review
                 fill: displayColor,
                 opacity: displayOpacity,
                 rotation: unit.rotation || 0,
-                stroke: '#1e293b',
-                strokeWidth: 1.5,
-                shadowBlur: 2,
-                shadowColor: 'rgba(0,0,0,0.2)',
+                stroke: '#ffffff',
+                strokeWidth: 2,
+                shadowBlur: 4,
+                shadowColor: 'rgba(0,0,0,0.5)',
                 listening: false,
             };
 
@@ -1157,7 +1150,7 @@ const HiddenExportStage = ({ version, units, summaryData, selectedLabels, review
                                       const y = currentY;
                                       currentY += block.blockHeight;
                                       return (
-                                        <Text key={i} x={0} y={y} width={effectiveWidth} text={block.text} fill={getDayModeFill(block.key)} align="center" fontSize={fontSize} fontStyle="bold" listening={false} shadowColor="rgba(255,255,255,0.9)" shadowBlur={3} shadowOpacity={1} />
+                                        <Text key={i} x={0} y={y} width={effectiveWidth} text={block.text} fill={reviewLabelColors?.[block.key] || '#ffffff'} align="center" fontSize={fontSize} fontStyle="bold" listening={false} shadowColor="black" shadowBlur={2} shadowOpacity={1} />
                                       );
                                   });
                                 })()}
@@ -1208,7 +1201,7 @@ const HiddenExportStage = ({ version, units, summaryData, selectedLabels, review
                                       const y = currentY;
                                       currentY += block.blockHeight;
                                       return (
-                                        <Text key={i} x={0} y={y} width={effectiveWidth} text={block.text} fill={getDayModeFill(block.key)} align="center" fontSize={fontSize} fontStyle="bold" listening={false} shadowColor="rgba(255,255,255,0.9)" shadowBlur={3} shadowOpacity={1} />
+                                        <Text key={i} x={0} y={y} width={effectiveWidth} text={block.text} fill={reviewLabelColors?.[block.key] || '#ffffff'} align="center" fontSize={fontSize} fontStyle="bold" listening={false} shadowColor="black" shadowBlur={2} shadowOpacity={1} />
                                       );
                                   });
                                 })()}
@@ -1259,7 +1252,7 @@ const HiddenExportStage = ({ version, units, summaryData, selectedLabels, review
                                           const y = currentY;
                                           currentY += block.blockHeight;
                                           return (
-                                            <Text key={i} x={0} y={y} width={effectiveWidth} text={block.text} fill={getDayModeFill(block.key)} align="center" fontSize={fontSize} fontStyle="bold" listening={false} shadowColor="rgba(255,255,255,0.9)" shadowBlur={3} shadowOpacity={1} />
+                                            <Text key={i} x={0} y={y} width={effectiveWidth} text={block.text} fill={reviewLabelColors?.[block.key] || '#ffffff'} align="center" fontSize={fontSize} fontStyle="bold" listening={false} shadowColor="black" shadowBlur={2} shadowOpacity={1} />
                                           );
                                       });
                                     })()}

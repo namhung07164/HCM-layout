@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { ClassInfo, ActualClassInfo, SalesInfo, ProfitInfo, DailySalesProfitInfo, UnitInfo, MDStatusInfo, SubFeeInfo, ProjectStatusInfo, ProjectLinkInfo, BasePlanInfo, UnitDataInfo, StoreRegion } from './types';
 import { UnitShape, MapVersion } from './components/DataMapping/types';
+import { defaultDb } from './lib/firebase';
+import { doc, setDoc, onSnapshot } from 'firebase/firestore';
 import { loadPersistentData, savePersistentData } from './lib/sheets';
 import { get as idbGet, set as idbSet } from 'idb-keyval';
 
@@ -149,6 +151,36 @@ export const useDataStore = create<DataContextType>((set, get) => ({
 }));
 
 export function DataProvider({ children, store }: { children: React.ReactNode, store: StoreRegion }) {
+  useEffect(() => {
+    const docRef = doc(defaultDb, 'artifacts/taka-projects-app-v1/public/data/taka_brand_info', 'global');
+    let isInitialized = false;
+    const unsub = onSnapshot(docRef, async (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data().data || [];
+        useDataStore.setState({ classInfo: data });
+        isInitialized = true;
+      } else {
+        if (!isInitialized) {
+          // Document doesn't exist, try to migrate from local
+          try {
+            const currentStore = useDataStore.getState().store;
+            const data = await loadPersistentData(currentStore);
+            if (data && data.classInfo && data.classInfo.length > 0) {
+              console.log("Migrating Brand Info to Firestore...");
+              useDataStore.getState().setClassInfo(data.classInfo);
+            }
+          } catch(e) {
+            console.warn("Migration failed or no local data", e);
+          }
+          isInitialized = true;
+        }
+      }
+    }, (error) => {
+      console.error("Error reading brand info from Firestore:", error);
+    });
+    return () => unsub();
+  }, []);
+
   const set = useDataStore.setState;
   const state = useDataStore();
   const { 
@@ -424,7 +456,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
           await new Promise(res => setTimeout(res, 500));
         }
       }
-      if (parsed.classInfo) set({ classInfo: parsed.classInfo });
+      if (parsed.classInfo) useDataStore.getState().setClassInfo(parsed.classInfo);
       if (parsed.actualClassInfo) set({ actualClassInfo: parsed.actualClassInfo });
       if (parsed.dailySalesProfits) set({ dailySalesProfits: parsed.dailySalesProfits });
       if (parsed.unitInfo) set({ unitInfo: parsed.unitInfo });
@@ -458,7 +490,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
             await new Promise(res => setTimeout(res, 300));
           }
         }
-        if (sharedParsed.classInfo) set({ classInfo: sharedParsed.classInfo });
+        if (sharedParsed.classInfo) useDataStore.getState().setClassInfo(sharedParsed.classInfo);
         if (sharedParsed.actualClassInfo) set({ actualClassInfo: sharedParsed.actualClassInfo });
       } catch (e) {
         console.log('No shared class/brand info found, using store-specific data.');
@@ -524,7 +556,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
 
         // 2. Fallback: Load from Server
         const data = await loadPersistentData(store);
-        set({ classInfo: data.classInfo || [] });
+        // set({ classInfo: data.classInfo || [] });
         set({ actualClassInfo: data.actualClassInfo || [] });
         set({ unitInfo: data.unitInfo || [] });
         set({ mdStatus: data.mdStatus || [] });
@@ -900,7 +932,9 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
   };
 
   const setClassInfo = (data: ClassInfo[]) => {
-    set({ classInfo: data });
+    useDataStore.setState({ classInfo: data });
+    const docRef = doc(defaultDb, 'artifacts/taka-projects-app-v1/public/data/taka_brand_info', 'global');
+    setDoc(docRef, { data }).catch(err => console.error("Error saving brand info to Firestore:", err));
   };
 
   const setSales = (data: SalesInfo[]) => {
@@ -998,8 +1032,8 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
         };
       });
 
-      if (results['Brand Info']) set({ classInfo: mapClassInfo(parseSheetData(results['Brand Info']))});
-      else if (results['Class Info'] && !results['Brand Info']) set({ classInfo: mapClassInfo(parseSheetData(results['Class Info']))});
+      if (results['Brand Info']) useDataStore.getState().setClassInfo(mapClassInfo(parseSheetData(results['Brand Info'])));
+      else if (results['Class Info'] && !results['Brand Info']) useDataStore.getState().setClassInfo(mapClassInfo(parseSheetData(results['Class Info'])));
       
       if (results['Class Info'] && results['Brand Info']) {
         const mappedActualClassInfo = parseSheetData(results['Class Info']).map((c: any) => ({
