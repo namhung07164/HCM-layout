@@ -84,7 +84,7 @@ function ReviewTab({ units, setUnits, versions, setVersions, activeVersionId: in
       });
   }, [units, activeVersion, summaryData, selectedLabels]);
 
-  const [image] = useImage(activeVersion?.backgroundUrl ? activeVersion.backgroundUrl + (activeVersion.backgroundUrl.includes('?') ? '&' : '?') + 'view=' + Date.now() : '', 'anonymous');
+  const [image] = useImage(activeVersion?.backgroundUrl || '', 'anonymous');
   const [scale, setScale] = useState(activeVersion?.backgroundScale || 1);
   const [position, setPosition] = useState(activeVersion?.backgroundPos || { x: 0, y: 0 });
   const [copiedLink, setCopiedLink] = useState(false);
@@ -958,7 +958,7 @@ const HiddenExportStage = ({ version, units, summaryData, selectedLabels, review
       });
   }, [units, version, summaryData, selectedLabels]);
 
-  const [image, status] = useImage(version.backgroundUrl ? version.backgroundUrl + (version.backgroundUrl.includes('?') ? '&' : '?') + 'export=' + Date.now() : '', 'anonymous');
+  const [image, status] = useImage(version.backgroundUrl || '', 'anonymous');
   const stageRef = useRef<any>(null);
 
   useEffect(() => {
@@ -1296,7 +1296,10 @@ export const ExportAllManager = ({ versions, units, summaryData, format, paperSi
                     jpegQuality = 0.7;
                 }
                 
-
+                const maxSize = Math.max(stagesReady[0]?.width() || 2000, stagesReady[0]?.height() || 2000);
+                if (pxRatio * maxSize > 6000) {
+                    pxRatio = 6000 / maxSize;
+                }
 
                 if (format === 'pdf' || format === 'drive' || format === 'auto_drive') {
                     // Combine into PDF
@@ -1308,12 +1311,7 @@ export const ExportAllManager = ({ versions, units, summaryData, format, paperSi
                         
                         const width = stage.width();
                         const height = stage.height();
-                        let currentPxRatio = pxRatio;
-                        const currentMaxSize = Math.max(stage.width() || 2000, stage.height() || 2000);
-                        if (currentPxRatio * currentMaxSize > 6000) {
-                            currentPxRatio = 6000 / currentMaxSize;
-                        }
-                        const dataURL = stage.toDataURL({ pixelRatio: currentPxRatio, mimeType: 'image/jpeg', quality: jpegQuality });
+                        const dataURL = stage.toDataURL({ pixelRatio: pxRatio, mimeType: 'image/jpeg', quality: jpegQuality });
                         
                         const isLandscape = width > height;
                         const orientationStr = isLandscape ? 'landscape' : 'portrait';
@@ -1403,12 +1401,7 @@ export const ExportAllManager = ({ versions, units, summaryData, format, paperSi
                     for (let i = 0; i < versions.length; i++) {
                         const stage = stagesReady[i];
                         if (!stage) continue;
-                        let currentPxRatio = pxRatio;
-                        const currentMaxSize = Math.max(stage.width() || 2000, stage.height() || 2000);
-                        if (currentPxRatio * currentMaxSize > 6000) {
-                            currentPxRatio = 6000 / currentMaxSize;
-                        }
-                        const dataURL = stage.toDataURL({ pixelRatio: currentPxRatio, mimeType: 'image/jpeg', quality: jpegQuality });
+                        const dataURL = stage.toDataURL({ pixelRatio: pxRatio, mimeType: 'image/jpeg', quality: jpegQuality });
                         const link = document.createElement('a');
                         link.download = `version_${versions[i].name || i}.jpeg`;
                         link.href = dataURL;
@@ -1425,12 +1418,7 @@ export const ExportAllManager = ({ versions, units, summaryData, format, paperSi
                         for (let i = 0; i < versions.length; i++) {
                             const stage = stagesReady[i];
                             if (!stage) continue;
-                            let currentPxRatio = pxRatio;
-                        const currentMaxSize = Math.max(stage.width() || 2000, stage.height() || 2000);
-                        if (currentPxRatio * currentMaxSize > 6000) {
-                            currentPxRatio = 6000 / currentMaxSize;
-                        }
-                        const dataURL = stage.toDataURL({ pixelRatio: currentPxRatio, mimeType: 'image/jpeg', quality: jpegQuality });
+                            const dataURL = stage.toDataURL({ pixelRatio: pxRatio, mimeType: 'image/jpeg', quality: jpegQuality });
                             const res = await fetch(dataURL);
                             const blob = await res.blob();
                             imagesData.push({ blob, name: versions[i].name || `version_${i}` });
@@ -1459,7 +1447,7 @@ export const ExportAllManager = ({ versions, units, summaryData, format, paperSi
                 <h3 className="text-xl font-bold tracking-wider">Generating Export...</h3>
                 <p className="text-slate-400 mt-2">Loading maps and generating {format.toUpperCase()} ( {Object.keys(stagesReady).length} / {versions.length} )</p>
             </div>
-            <div style={{ position: 'absolute', top: -20000, left: -20000, opacity: 0, pointerEvents: 'none' }}>
+            <div style={{ position: 'absolute', top: -10000, left: -10000, visibility: 'hidden' }}>
                 {versions.map((v: any, i: number) => (
                     <HiddenExportStage 
                         key={v.id} 

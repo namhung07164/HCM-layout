@@ -2,7 +2,6 @@ import React, { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "../lib/utils";
 import ClassInfoTab from "./ClassInfoTab";
-import ActualClassInfoTab from "./ActualClassInfoTab";
 import SalesTab from "./SalesTab";
 import ProfitTab from "./ProfitTab";
 import DailySalesProfitTab from "./DailySalesProfitTab";
