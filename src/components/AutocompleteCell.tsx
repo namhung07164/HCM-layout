@@ -40,7 +40,6 @@ export default function AutocompleteCell({
         onChange={(e) => {
           const newVal = e.target.value;
           setLocalVal(newVal);
-          onChange(newVal);
           if (newVal.length >= minChars) {
             setShow(true);
           } else {
@@ -52,11 +51,16 @@ export default function AutocompleteCell({
         }}
         onBlur={() => {
           setTimeout(() => setShow(false), 200);
-          if (!isSelectingRef.current && onBlur) {
-            const success = onBlur(localVal);
-            if (success === false) {
-              setLocalVal(value || "");
-              onChange(value || "");
+          if (!isSelectingRef.current) {
+            if (localVal !== value) {
+                onChange(localVal);
+            }
+            if (onBlur) {
+              const success = onBlur(localVal);
+              if (success === false) {
+                setLocalVal(value || "");
+                onChange(value || "");
+              }
             }
           }
         }}

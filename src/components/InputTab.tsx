@@ -8,6 +8,7 @@ import DailySalesProfitTab from "./DailySalesProfitTab";
 import AllSubFeeTab from "./AllSubFeeTab";
 import BasePlanTab from "./BasePlanTab";
 import UnitsTab from "./UnitsTab";
+import ActualClassInfoTab from "./ActualClassInfoTab";
 import {
   Info,
   TrendingUp,

@@ -1,4 +1,10 @@
-import { initializeApp } from 'firebase/app';
+with open('src/lib/firebase.ts', 'r') as f:
+    code = f.read()
+
+import_old = "import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from 'firebase/firestore';"
+import_new = "import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from 'firebase/firestore';"
+
+new_code = """import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
@@ -26,3 +32,8 @@ try {
 export const defaultDb = defaultFirestoreDb;
 
 export const auth = getAuth();
+"""
+
+with open('src/lib/firebase.ts', 'w') as f:
+    f.write(new_code)
+print("patched firebase 2")

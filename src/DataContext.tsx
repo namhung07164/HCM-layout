@@ -100,17 +100,29 @@ export const useDataStore = create<DataContextType>((set, get) => ({
   reviewLabelColors: {},
   
   setActualClassInfo: (data) => set({ actualClassInfo: data }),
-  setClassInfo: (data) => set({ classInfo: data }),
+  setClassInfo: (data) => {
+    set({ classInfo: data });
+    const docRef = doc(defaultDb, 'artifacts/taka-projects-app-v1/public/data/taka_brand_info', 'global');
+    setDoc(docRef, { data }).catch(err => console.error("Error saving brand info to Firestore:", err));
+  },
   setSales: (data) => set({ sales: data }),
   setProfits: (data) => set({ profits: data }),
   setDailySalesProfits: (data) => set({ dailySalesProfits: data }),
-  setUnitInfo: (data) => set({ unitInfo: data }),
+  setUnitInfo: (data) => {
+    set({ unitInfo: data });
+    const docRef = doc(defaultDb, 'artifacts/taka-projects-app-v1/public/data/taka_unit_info', 'global');
+    setDoc(docRef, { data }).catch(err => console.error("Error saving unit info to Firestore:", err));
+  },
   setMdStatus: (data) => set({ mdStatus: data }),
   setSubFees: (data) => set({ subFees: data }),
   setProjectStatus: (data) => set({ projectStatus: data }),
   setProjectLink: (data) => set({ projectLink: data }),
   setBasePlan: (data) => set({ basePlan: data }),
-  setUnits: (data) => set({ units: data }),
+  setUnits: (data) => {
+    set({ units: data });
+    const docRef = doc(defaultDb, 'artifacts/taka-projects-app-v1/public/data/taka_units', 'global');
+    setDoc(docRef, { data }).catch(err => console.error("Error saving units to Firestore:", err));
+  },
   setNotifications: (data) => set({ notifications: data }),
   addNotification: (message) => set(state => ({
       notifications: [{
@@ -177,6 +189,66 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
       }
     }, (error) => {
       console.error("Error reading brand info from Firestore:", error);
+    });
+    return () => unsub();
+  }, []);
+
+  // Sync units from Firestore
+  useEffect(() => {
+    const docRef = doc(defaultDb, 'artifacts/taka-projects-app-v1/public/data/taka_units', 'global');
+    let isInitialized = false;
+    const unsub = onSnapshot(docRef, async (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data().data || [];
+        useDataStore.setState({ units: data });
+        isInitialized = true;
+      } else {
+        if (!isInitialized) {
+          try {
+            const currentStore = useDataStore.getState().store;
+            const data = await loadPersistentData(currentStore);
+            if (data && data.units && data.units.length > 0) {
+              console.log("Migrating Units to Firestore...");
+              useDataStore.getState().setUnits(data.units);
+            }
+          } catch(e) {
+            console.warn("Migration failed or no local data", e);
+          }
+          isInitialized = true;
+        }
+      }
+    }, (error) => {
+      console.error("Error reading units from Firestore:", error);
+    });
+    return () => unsub();
+  }, []);
+
+  // Sync unitInfo from Firestore
+  useEffect(() => {
+    const docRef = doc(defaultDb, 'artifacts/taka-projects-app-v1/public/data/taka_unit_info', 'global');
+    let isInitialized = false;
+    const unsub = onSnapshot(docRef, async (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data().data || [];
+        useDataStore.setState({ unitInfo: data });
+        isInitialized = true;
+      } else {
+        if (!isInitialized) {
+          try {
+            const currentStore = useDataStore.getState().store;
+            const data = await loadPersistentData(currentStore);
+            if (data && data.unitInfo && data.unitInfo.length > 0) {
+              console.log("Migrating Unit Info to Firestore...");
+              useDataStore.getState().setUnitInfo(data.unitInfo);
+            }
+          } catch(e) {
+            console.warn("Migration failed or no local data", e);
+          }
+          isInitialized = true;
+        }
+      }
+    }, (error) => {
+      console.error("Error reading unit info from Firestore:", error);
     });
     return () => unsub();
   }, []);
@@ -334,7 +406,56 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
 
       return isChanged ? { unitInfo: next } : {};
     });
-  }, [units, classInfo, isLoading]);
+    }, [units, classInfo, isLoading]);
+
+  // Auto-sync projectLink when projectStatus changes
+  useEffect(() => {
+    if (isLoading) return;
+    
+    set(state => {
+      let isChanged = false;
+      const { projectLink, projectStatus } = state;
+      if (!projectLink || projectLink.length === 0 || !projectStatus || projectStatus.length === 0) {
+         return {};
+      }
+
+      const next = projectLink.map(link => {
+        if (!link.unitLink) return link;
+        const match = projectStatus.find(p => p.unit === link.unitLink);
+        if (match) {
+          if (
+            link.status !== (match.status || '') ||
+            link.actStatus !== (match.actStatus || '') ||
+            link.task !== (match.task || '') ||
+            link.startDate !== (match.startDate || '') ||
+            link.endDate !== (match.endDate || '') ||
+            link.party !== (match.party || '') ||
+            link.flowStatus !== (match.flowStatus || '') ||
+            (match.delegationStatus !== undefined && link.delegationStatus !== (match.delegationStatus || ''))
+          ) {
+            isChanged = true;
+            const today = new Date();
+            const formattedDate = `${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}/${today.getFullYear()}`;
+            return {
+              ...link,
+              status: match.status || '',
+              actStatus: match.actStatus || '',
+              task: match.task || '',
+              startDate: match.startDate || '',
+              endDate: match.endDate || '',
+              party: match.party || '',
+              flowStatus: match.flowStatus || '',
+              delegationStatus: match.delegationStatus || '',
+              update: formattedDate
+            };
+          }
+        }
+        return link;
+      });
+
+      return isChanged ? { projectLink: next } : {};
+    });
+  }, [projectStatus, isLoading]);
 
 
 
@@ -946,7 +1067,9 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
   };
 
   const setUnitInfo = (data: UnitInfo[]) => {
-    set({ unitInfo: data });
+    useDataStore.setState({ unitInfo: data });
+    const docRef = doc(defaultDb, 'artifacts/taka-projects-app-v1/public/data/taka_unit_info', 'global');
+    setDoc(docRef, { data }).catch(err => console.error("Error saving unit info to Firestore:", err));
   };
 
   const setMdStatus = (data: MDStatusInfo[]) => {
@@ -977,7 +1100,9 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
   };
 
   const setUnits = (data: UnitDataInfo[]) => {
-    set({ units: data });
+    useDataStore.setState({ units: data });
+    const docRef = doc(defaultDb, 'artifacts/taka-projects-app-v1/public/data/taka_units', 'global');
+    setDoc(docRef, { data }).catch(err => console.error("Error saving units to Firestore:", err));
   };
 
   const setSpreadsheetId = (id: string | null) => {

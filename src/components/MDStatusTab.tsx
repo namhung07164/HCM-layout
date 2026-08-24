@@ -5,6 +5,7 @@ import { MDStatusInfo } from '../types';
 import { useDataStore } from '../DataContext';
 import { standardizeDateToMMDDYYYY, cn } from '../lib/utils';
 import AutocompleteCell from './AutocompleteCell';
+import BlurInput from './BlurInput';
 import { useSummaryData } from '../lib/summaryData';
 
 function MDStatusTab() {
@@ -168,13 +169,13 @@ function MDStatusTab() {
 
   const renderMdNotesCell = React.useCallback(() => (val: any, row: MDStatusInfo, updateRow: (newRow: MDStatusInfo) => void, isLocked: boolean) => {
     return (
-      <input
+      <BlurInput
         type="text"
         className="w-full bg-transparent border-none outline-none focus:ring-0 px-2 py-1 text-slate-300"
         value={val || ''}
         placeholder="..."
-        disabled={isLocked}
-        onChange={(e) => updateRow({ ...row, mdNotes: e.target.value })}
+        isLocked={isLocked}
+        onChange={(newVal) => updateRow({ ...row, mdNotes: newVal })}
       />
     );
   }, []);
