@@ -1078,6 +1078,7 @@ const HiddenExportStage = ({ version, units, summaryData, selectedLabels, review
       height={exportHeight}
       scaleX={stageScale}
       scaleY={stageScale}
+      style={{ backgroundColor: 'white' }}
     >
       <Layer x={-minX} y={-minY}>
         <Rect x={minX} y={minY} width={logicalWidth} height={logicalHeight} fill="white" listening={false} />
@@ -1289,8 +1290,8 @@ export const ExportAllManager = ({ versions, units, summaryData, format, paperSi
                 let pxRatio = 2;
                 let jpegQuality = 0.9;
                 if (quality === 'high') {
-                    pxRatio = 4;
-                    jpegQuality = 1.0;
+                    pxRatio = 3;
+                    jpegQuality = 0.92;
                 } else if (quality === 'low') {
                     pxRatio = 1;
                     jpegQuality = 0.7;
@@ -1298,7 +1299,7 @@ export const ExportAllManager = ({ versions, units, summaryData, format, paperSi
                 
                 
                 // Safe max dimension to prevent black images from browser canvas limits (iOS limit is 4096)
-                const SAFE_MAX_DIM = 4096;
+                const SAFE_MAX_DIM = 3840;
 
 
                 if (format === 'pdf' || format === 'drive' || format === 'auto_drive') {
@@ -1465,7 +1466,7 @@ export const ExportAllManager = ({ versions, units, summaryData, format, paperSi
                 <h3 className="text-xl font-bold tracking-wider">Generating Export...</h3>
                 <p className="text-slate-400 mt-2">Loading maps and generating {format.toUpperCase()} ( {Object.keys(stagesReady).length} / {versions.length} )</p>
             </div>
-            <div style={{ position: 'absolute', top: -10000, left: -10000, visibility: 'hidden' }}>
+            <div style={{ position: 'absolute', top: 0, left: 0, zIndex: -9999, opacity: 0, pointerEvents: 'none' }}>
                 {versions.map((v: any, i: number) => (
                     <HiddenExportStage 
                         key={v.id} 
