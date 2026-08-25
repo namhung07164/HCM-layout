@@ -1296,10 +1296,10 @@ export const ExportAllManager = ({ versions, units, summaryData, format, paperSi
                     jpegQuality = 0.7;
                 }
                 
-                const maxSize = Math.max(stagesReady[0]?.width() || 2000, stagesReady[0]?.height() || 2000);
-                if (pxRatio * maxSize > 6000) {
-                    pxRatio = 6000 / maxSize;
-                }
+                
+                // Safe max dimension to prevent black images from browser canvas limits (iOS limit is 4096)
+                const SAFE_MAX_DIM = 4096;
+
 
                 if (format === 'pdf' || format === 'drive' || format === 'auto_drive') {
                     // Combine into PDF
@@ -1311,7 +1311,13 @@ export const ExportAllManager = ({ versions, units, summaryData, format, paperSi
                         
                         const width = stage.width();
                         const height = stage.height();
-                        const dataURL = stage.toDataURL({ pixelRatio: pxRatio, mimeType: 'image/jpeg', quality: jpegQuality });
+                        
+                        let currentPxRatio = pxRatio;
+                        const maxDim = Math.max(stage.width(), stage.height());
+                        if (currentPxRatio * maxDim > SAFE_MAX_DIM) {
+                            currentPxRatio = SAFE_MAX_DIM / maxDim;
+                        }
+                        const dataURL = stage.toDataURL({ pixelRatio: currentPxRatio, mimeType: 'image/jpeg', quality: jpegQuality });
                         
                         const isLandscape = width > height;
                         const orientationStr = isLandscape ? 'landscape' : 'portrait';
@@ -1401,7 +1407,13 @@ export const ExportAllManager = ({ versions, units, summaryData, format, paperSi
                     for (let i = 0; i < versions.length; i++) {
                         const stage = stagesReady[i];
                         if (!stage) continue;
-                        const dataURL = stage.toDataURL({ pixelRatio: pxRatio, mimeType: 'image/jpeg', quality: jpegQuality });
+                        
+                        let currentPxRatio = pxRatio;
+                        const maxDim = Math.max(stage.width(), stage.height());
+                        if (currentPxRatio * maxDim > SAFE_MAX_DIM) {
+                            currentPxRatio = SAFE_MAX_DIM / maxDim;
+                        }
+                        const dataURL = stage.toDataURL({ pixelRatio: currentPxRatio, mimeType: 'image/jpeg', quality: jpegQuality });
                         const link = document.createElement('a');
                         link.download = `version_${versions[i].name || i}.jpeg`;
                         link.href = dataURL;
@@ -1418,7 +1430,13 @@ export const ExportAllManager = ({ versions, units, summaryData, format, paperSi
                         for (let i = 0; i < versions.length; i++) {
                             const stage = stagesReady[i];
                             if (!stage) continue;
-                            const dataURL = stage.toDataURL({ pixelRatio: pxRatio, mimeType: 'image/jpeg', quality: jpegQuality });
+                            
+                        let currentPxRatio = pxRatio;
+                        const maxDim = Math.max(stage.width(), stage.height());
+                        if (currentPxRatio * maxDim > SAFE_MAX_DIM) {
+                            currentPxRatio = SAFE_MAX_DIM / maxDim;
+                        }
+                        const dataURL = stage.toDataURL({ pixelRatio: currentPxRatio, mimeType: 'image/jpeg', quality: jpegQuality });
                             const res = await fetch(dataURL);
                             const blob = await res.blob();
                             imagesData.push({ blob, name: versions[i].name || `version_${i}` });
