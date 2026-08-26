@@ -68,6 +68,7 @@ function UnitInfoTab() {
   }, []);
 
   const autofillBrandName = (row: UnitInfo, targetUnit: string): UnitInfo => {
+      if (!autoUpdateBrandName) return row;
       const normalizedTarget = normalizeUnit(targetUnit);
       const projName = projectStatusMap.get(normalizedTarget);
 
@@ -312,6 +313,7 @@ function UnitInfoTab() {
 
   // AUTO-FILL BRAND NAMES FROM PROJECT STATUS
   React.useEffect(() => {
+    if (!autoUpdateBrandName) return;
     if (!unitInfo.length || !projectStatus.length) return;
     
     let hasChanges = false;
@@ -329,7 +331,7 @@ function UnitInfoTab() {
     if (hasChanges) {
       setUnitInfo(updated);
     }
-  }, [unitInfo, projectStatus, classInfo, setUnitInfo]);
+  }, [unitInfo, projectStatus, classInfo, setUnitInfo, autoUpdateBrandName]);
 
   const formatDate = (date: Date) => {
     return `${String(date.getMonth() + 1).padStart(2, "0")}/${String(date.getDate()).padStart(2, "0")}/${date.getFullYear()}`;

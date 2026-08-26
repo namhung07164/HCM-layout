@@ -33,6 +33,8 @@ interface DataContextType {
   activeMapVersionId: string | null;
   reviewSelectedLabels: string[];
   reviewLabelColors: Record<string, string>;
+  autoUpdateBrandName: boolean;
+  setAutoUpdateBrandName: (val: boolean) => void;
 
   setActualClassInfo: (data: ActualClassInfo[]) => void;
   setClassInfo: (data: ClassInfo[]) => void;
@@ -98,6 +100,8 @@ export const useDataStore = create<DataContextType>((set, get) => ({
   activeMapVersionId: null,
   reviewSelectedLabels: ['Unit ID', 'Size SQM'],
   reviewLabelColors: {},
+  autoUpdateBrandName: true,
+  setAutoUpdateBrandName: (val) => set({ autoUpdateBrandName: val }),
   
   setActualClassInfo: (data) => set({ actualClassInfo: data }),
   setClassInfo: (data) => {
@@ -592,6 +596,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
       if (parsed.activeMapVersionId) set({ activeMapVersionId: parsed.activeMapVersionId });
       if (parsed.reviewSelectedLabels) set({ reviewSelectedLabels: parsed.reviewSelectedLabels });
       if (parsed.reviewLabelColors) set({ reviewLabelColors: parsed.reviewLabelColors });
+      if (parsed.autoUpdateBrandName !== undefined) set({ autoUpdateBrandName: parsed.autoUpdateBrandName });
       
       try {
         let sharedParsed: any = null;
@@ -692,6 +697,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
         if (data.dailySalesProfits) set({ dailySalesProfits: data.dailySalesProfits });
         if (data.reviewSelectedLabels) set({ reviewSelectedLabels: data.reviewSelectedLabels });
         if (data.reviewLabelColors) set({ reviewLabelColors: data.reviewLabelColors });
+        if (data.autoUpdateBrandName !== undefined) set({ autoUpdateBrandName: data.autoUpdateBrandName });
         
         let salesData = data.sales || [];
         let profitsData = data.profits || [];
@@ -811,7 +817,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
   const saveToHandlers = async (
     c: ClassInfo[], ac: ActualClassInfo[], s: SalesInfo[], u: UnitInfo[], p: ProfitInfo[], md: MDStatusInfo[], 
     sf: SubFeeInfo[], ps: ProjectStatusInfo[], pl: ProjectLinkInfo[], bp: BasePlanInfo[], un: UnitDataInfo[],
-    mu: UnitShape[], mv: MapVersion[], amvId: string | null, rsl: string[], rlc: Record<string, string>,
+    mu: UnitShape[], mv: MapVersion[], amvId: string | null, rsl: string[], rlc: Record<string, string>, autoUpdateBrandName: boolean,
     customHandle?: any,
     isManualClick: boolean = false
   ) => {
@@ -838,6 +844,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
           activeMapVersionId: amvId,
           reviewSelectedLabels: rsl,
           reviewLabelColors: rlc,
+            autoUpdateBrandName,
           migrated_scaled_1000: true, // Set flag to avoid re-migration
           r2Config: {
             accountId: localStorage.getItem('r2_account_id') || '',
@@ -894,6 +901,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
             activeMapVersionId: amvId,
             reviewSelectedLabels: rsl,
           reviewLabelColors: rlc,
+            autoUpdateBrandName,
             lastUpdated: timestamp,
             migrated_scaled_1000: true, // Set flag to avoid re-migration
             r2Config: {
@@ -1039,14 +1047,14 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
 
     saveTimeoutRef.current = setTimeout(() => {
       isDirtyRef.current = false;
-      saveToHandlers(classInfo, actualClassInfo, sales, unitInfo, profits, mdStatus, subFees, projectStatus, projectLink, basePlan, units, mapUnits, mapVersions, activeMapVersionId, reviewSelectedLabels, reviewLabelColors);
+      saveToHandlers(classInfo, actualClassInfo, sales, unitInfo, profits, mdStatus, subFees, projectStatus, projectLink, basePlan, units, mapUnits, mapVersions, activeMapVersionId, reviewSelectedLabels, reviewLabelColors, autoUpdateBrandName);
       idbSet('dailySalesProfits', dailySalesProfits);
     }, 2000); // Wait 2 seconds of silence before saving
   
     return () => {
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
     };
-  }, [classInfo, actualClassInfo, sales, unitInfo, profits, dailySalesProfits, mdStatus, subFees, projectStatus, projectLink, basePlan, units, mapUnits, mapVersions, activeMapVersionId, reviewSelectedLabels, reviewLabelColors]);
+  }, [classInfo, actualClassInfo, sales, unitInfo, profits, dailySalesProfits, mdStatus, subFees, projectStatus, projectLink, basePlan, units, mapUnits, mapVersions, activeMapVersionId, reviewSelectedLabels, reviewLabelColors, autoUpdateBrandName]);
 
   const setActualClassInfo = (data: ActualClassInfo[]) => {
     set({ actualClassInfo: data });
@@ -1251,7 +1259,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
   };
 
   const triggerManualBackup = async () => {
-    await saveToHandlers(classInfo, actualClassInfo, sales, unitInfo, profits, mdStatus, subFees, projectStatus, projectLink, basePlan, units, mapUnits, mapVersions, activeMapVersionId, reviewSelectedLabels, reviewLabelColors, undefined, true);
+    await saveToHandlers(classInfo, actualClassInfo, sales, unitInfo, profits, mdStatus, subFees, projectStatus, projectLink, basePlan, units, mapUnits, mapVersions, activeMapVersionId, reviewSelectedLabels, reviewLabelColors, autoUpdateBrandName, undefined, true);
   };
 
   const restoreBackup = async () => {

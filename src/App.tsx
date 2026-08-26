@@ -78,6 +78,8 @@ function MainApp({ store, onSwitchStore }: { store: StoreRegion, onSwitchStore: 
     notifications,
     markAllNotificationsRead,
     triggerManualBackup,
+    autoUpdateBrandName,
+    setAutoUpdateBrandName,
     triggerManualLoad,
     restoreBackup,
    } = useDataStore(useShallow(state => ({
@@ -91,6 +93,8 @@ function MainApp({ store, onSwitchStore }: { store: StoreRegion, onSwitchStore: 
     notifications: state.notifications,
     markAllNotificationsRead: state.markAllNotificationsRead,
     triggerManualBackup: state.triggerManualBackup,
+    autoUpdateBrandName: state.autoUpdateBrandName,
+    setAutoUpdateBrandName: state.setAutoUpdateBrandName,
     triggerManualLoad: state.triggerManualLoad,
     restoreBackup: state.restoreBackup,
   })));
@@ -480,6 +484,26 @@ function MainApp({ store, onSwitchStore }: { store: StoreRegion, onSwitchStore: 
                 {store === 'HCM' ? 'Hồ Chí Minh' : 'Hà Nội'}
               </span>
             </button>
+
+            
+            <div 
+              className="hidden lg:flex items-center gap-2 px-3 py-1 bg-slate-900 border border-slate-800 rounded-full cursor-pointer hover:bg-slate-800 transition-colors"
+              onClick={() => setAutoUpdateBrandName(!autoUpdateBrandName)}
+              title="Auto-update Brand Name from Project Status"
+            >
+              <div className={cn(
+                "w-8 h-4 rounded-full relative transition-colors",
+                autoUpdateBrandName ? "bg-brand-500" : "bg-slate-700"
+              )}>
+                <div className={cn(
+                  "absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all shadow-sm",
+                  autoUpdateBrandName ? "left-4.5 right-0.5 translate-x-[16px]" : "left-0.5"
+                )} />
+              </div>
+              <span className="text-[8px] font-bold uppercase tracking-widest text-slate-500 select-none">
+                Auto Sync Brand
+              </span>
+            </div>
 
             <div className="hidden lg:flex items-center gap-2 px-3 py-1 bg-slate-900 border border-slate-800 rounded-full">
               <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
