@@ -35,6 +35,16 @@ interface DataContextType {
   reviewLabelColors: Record<string, string>;
   autoUpdateBrandName: boolean;
   setAutoUpdateBrandName: (val: boolean) => void;
+  activeTab: string;
+  setActiveTab: (tab: string) => void;
+  isMenuOpen: boolean;
+  setIsMenuOpen: (open: boolean) => void;
+  isNotifOpen: boolean;
+  setIsNotifOpen: (open: boolean) => void;
+  reviewOnlyMode: boolean;
+  setReviewOnlyMode: (mode: boolean) => void;
+  store: 'HCM' | 'HN' | null;
+  setStore: (store: 'HCM' | 'HN' | null) => void;
 
   setActualClassInfo: (data: ActualClassInfo[]) => void;
   setClassInfo: (data: ClassInfo[]) => void;
@@ -70,7 +80,6 @@ interface DataContextType {
   syncWithGoogleSheets: (spreadsheetId: string) => Promise<void>;
   spreadsheetId: string | null;
   setSpreadsheetId: (id: string | null) => void;
-  store: StoreRegion;
   isAppLocked: boolean;
   setIsAppLocked: (v: boolean) => void;
   setReviewSelectedLabels: (labels: string[]) => void;
@@ -101,6 +110,16 @@ export const useDataStore = create<DataContextType>((set, get) => ({
   reviewSelectedLabels: ['Unit ID', 'Size SQM'],
   reviewLabelColors: {},
   autoUpdateBrandName: true,
+  activeTab: 'input',
+  setActiveTab: (tab) => set({ activeTab: tab }),
+  isMenuOpen: false,
+  setIsMenuOpen: (val) => set({ isMenuOpen: val }),
+  isNotifOpen: false,
+  setIsNotifOpen: (val) => set({ isNotifOpen: val }),
+  reviewOnlyMode: false,
+  setReviewOnlyMode: (val) => set({ reviewOnlyMode: val }),
+  store: null,
+  setStore: (val) => set({ store: val }),
   setAutoUpdateBrandName: (val) => set({ autoUpdateBrandName: val }),
   
   setActualClassInfo: (data) => set({ actualClassInfo: data }),
@@ -158,8 +177,7 @@ export const useDataStore = create<DataContextType>((set, get) => ({
   syncWithGoogleSheets: async () => {}, // injected
   
   spreadsheetId: null,
-  setSpreadsheetId: (id) => set({ spreadsheetId: id }),
-  store: 'HCM' as StoreRegion, 
+  setSpreadsheetId: (id) => set({ spreadsheetId: id }), 
   isAppLocked: true,
   setIsAppLocked: (v) => set({ isAppLocked: v }),
   setReviewSelectedLabels: (labels) => set({ reviewSelectedLabels: labels }),
@@ -283,7 +301,8 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
       spreadsheetId,
       isAppLocked,
       reviewSelectedLabels,
-      reviewLabelColors
+      reviewLabelColors,
+      autoUpdateBrandName
   } = state;
 
   const validUnits = React.useMemo(() => units.map(u => u.unit), [units]);

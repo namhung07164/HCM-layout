@@ -42,12 +42,13 @@ function stringSimilarity(s1: string, s2: string) {
 }
 
 function UnitInfoTab() {
-  const {  unitInfo, setUnitInfo, units, classInfo, projectStatus  } = useDataStore(useShallow(state => ({
+  const {  unitInfo, setUnitInfo, units, classInfo, projectStatus, autoUpdateBrandName  } = useDataStore(useShallow(state => ({
     unitInfo: state.unitInfo,
     setUnitInfo: state.setUnitInfo,
     units: state.units,
     projectStatus: state.projectStatus,
     classInfo: state.classInfo,
+    autoUpdateBrandName: state.autoUpdateBrandName,
   })));
 
   

@@ -47,10 +47,10 @@ import {DataProvider} from "./DataContext";
 import type { StoreRegion } from "./types";
 
 function MainApp({ store, onSwitchStore }: { store: StoreRegion, onSwitchStore: () => void }) {
-  const [activeTab, setActiveTab] = useState<TabId>("input");
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [isNotifOpen, setIsNotifOpen] = useState(false);
-  const [reviewOnlyMode, setReviewOnlyMode] = useState(false);
+  
+  
+  
+  
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -82,6 +82,14 @@ function MainApp({ store, onSwitchStore }: { store: StoreRegion, onSwitchStore: 
     setAutoUpdateBrandName,
     triggerManualLoad,
     restoreBackup,
+    activeTab,
+    setActiveTab,
+    isMenuOpen,
+    setIsMenuOpen,
+    isNotifOpen,
+    setIsNotifOpen,
+    reviewOnlyMode,
+    setReviewOnlyMode,
    } = useDataStore(useShallow(state => ({
     isLoading: state.isLoading,
     isSaving: state.isSaving,
@@ -97,6 +105,16 @@ function MainApp({ store, onSwitchStore }: { store: StoreRegion, onSwitchStore: 
     setAutoUpdateBrandName: state.setAutoUpdateBrandName,
     triggerManualLoad: state.triggerManualLoad,
     restoreBackup: state.restoreBackup,
+    activeTab: state.activeTab,
+    setActiveTab: state.setActiveTab,
+    isMenuOpen: state.isMenuOpen,
+    setIsMenuOpen: state.setIsMenuOpen,
+    isNotifOpen: state.isNotifOpen,
+    setIsNotifOpen: state.setIsNotifOpen,
+    reviewOnlyMode: state.reviewOnlyMode,
+    setReviewOnlyMode: state.setReviewOnlyMode,
+    store: state.store,
+    setStore: state.setStore,
   })));
 
   useEffect(() => {
@@ -629,11 +647,18 @@ function MainApp({ store, onSwitchStore }: { store: StoreRegion, onSwitchStore: 
   );
 }
 
+
 export default function App() {
-  const [store, setStore] = useState<StoreRegion | null>(() => {
-    const saved = localStorage.getItem('active_store');
-    return (saved === 'HCM' || saved === 'HN') ? saved : null;
-  });
+  const { store, setStore } = useDataStore();
+
+  useEffect(() => {
+    const savedStore = localStorage.getItem('active_store') as StoreRegion | null;
+    if (savedStore && store === null) {
+      setStore(savedStore);
+    }
+  }, []);
+
+  
 
   const handleSelectStore = (s: StoreRegion) => {
     localStorage.setItem('active_store', s);
