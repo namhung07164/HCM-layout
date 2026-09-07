@@ -7,7 +7,6 @@ import { uploadFileToDrive } from "../lib/drive";
 import { getAuth, onAuthStateChanged, User } from "firebase/auth";
 
 export default function GoogleSyncWidget() {
-  const dataContext = useDataStore();
   const [isDriveLoading, setIsDriveLoading] = useState(false);
   const [user, setUser] = useState<User | null>(null);
 
@@ -36,6 +35,7 @@ export default function GoogleSyncWidget() {
   const handleSaveToDrive = async () => {
     setIsDriveLoading(true);
     try {
+        const dataContext = useDataStore.getState();
         const token = await authenticateGoogle();
         
         const dataToSave = {
@@ -103,6 +103,7 @@ export default function GoogleSyncWidget() {
     
     setIsDriveLoading(true);
     try {
+        const dataContext = useDataStore.getState();
         const token = await authenticateGoogle();
 
         const query = encodeURIComponent(`name='SheetSyncData_${dataContext.store}.json' and trashed=false`);

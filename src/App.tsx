@@ -649,7 +649,10 @@ function MainApp({ store, onSwitchStore }: { store: StoreRegion, onSwitchStore: 
 
 
 export default function App() {
-  const { store, setStore } = useDataStore();
+  const { store, setStore } = useDataStore(useShallow(state => ({
+    store: state.store,
+    setStore: state.setStore,
+  })));
 
   useEffect(() => {
     const savedStore = localStorage.getItem('active_store') as StoreRegion | null;

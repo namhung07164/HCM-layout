@@ -7,8 +7,7 @@ import { useSummaryData } from '../lib/summaryData';
 import { ExportAllManager } from './DataMapping/ReviewTab';
 import { useDynamicRules } from '../hooks/useDynamicRules';
 import { MapVersion } from './DataMapping/types';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { uploadFilesToR2 } from '../lib/r2Upload';
 
 export default function DriveAutoExporter() {
   const {  mapVersions, mapUnits, setMapVersions, activeMapVersionId, setMapUnits, store, reviewSelectedLabels  } = useDataStore(useShallow(state => ({
@@ -96,84 +95,21 @@ export default function DriveAutoExporter() {
     // If it was successful and we have data for R2
     if (success && data) {
       try {
-        console.log("R2AutoExporter: Uploading to R2...");
-        const accountId = localStorage.getItem('r2_account_id') || '';
-        const accessKeyId = localStorage.getItem('r2_access_key') || '';
-        const secretAccessKey = localStorage.getItem('r2_secret_key') || '';
-        const bucketName = localStorage.getItem('r2_bucket_name') || '';
-
-        if (!accountId || !accessKeyId || !secretAccessKey || !bucketName) {
-            throw new Error('Missing R2 credentials in settings.');
-        }
-
-        const s3 = new S3Client({
-            region: 'auto',
-            endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
-            credentials: {
-                accessKeyId,
-                secretAccessKey,
-            },
+        console.log("R2AutoExporter: Uploading to R2 with fallback proxy & retries...");
+        const filesToUpload = Array.isArray(data) ? data : [{ blob: data as Blob, name: 'Data_Mapping_Export' }];
+        const uploadResult = await uploadFilesToR2(filesToUpload, ({ statusText }) => {
+          console.log(`R2AutoExporter progress: ${statusText}`);
         });
 
-        const filesToUpload = Array.isArray(data) ? data : [{blob: data as Blob, name: 'Data_Mapping_Export'}];
-
-        for (const file of filesToUpload) {
-            const safeName = (file.name || 'Export').replace(/[\/\\]/g, '_').replace(/\s+/g, '_') + '.jpeg';
-            
-            const command = new PutObjectCommand({
-                Bucket: bucketName,
-                Key: safeName,
-                ContentType: 'image/jpeg',
-            });
-
-            const signedUrl = await getSignedUrl(s3, command, { expiresIn: 3600 });
-
-            let response;
-            try {
-                response = await fetch(signedUrl, {
-                    method: 'PUT',
-                    headers: {
-                        'Content-Type': 'image/jpeg'
-                    },
-                    body: file.blob
-                });
-            } catch (netErr: any) {
-                throw new Error(`Network/CORS error for ${safeName}. Vui lòng kiểm tra cấu hình CORS trên bucket R2 của bạn. Chi tiết: ${netErr.message}`);
-            }
-
-            if (!response.ok) {
-                const textRes = await response.text().catch(() => '');
-                throw new Error(`Upload failed for ${safeName}: Status ${response.status} - ${textRes.substring(0, 50)}`);
-            }
+        if (uploadResult.failedCount > 0) {
+          console.error(`R2AutoExporter: ${uploadResult.failedCount} files failed to upload.`);
+          success = false;
+        } else {
+          console.log('R2AutoExporter: Successfully uploaded all files to Cloudflare R2!');
         }
-
-        console.log('R2AutoExporter: Successfully uploaded all files to Cloudflare R2!');
-        
-        // Attempt to purge cache if credentials exist
-        const cfZoneId = localStorage.getItem('cf_zone_id');
-        const cfApiToken = localStorage.getItem('cf_api_token');
-        if (cfZoneId && cfApiToken) {
-           console.log('R2AutoExporter: Triggering Cloudflare Cache Purge...');
-           try {
-             const purgeRes = await fetch('/api/purge-cache', {
-                 method: 'POST',
-                 headers: { 'Content-Type': 'application/json' },
-                 body: JSON.stringify({ zoneId: cfZoneId, apiToken: cfApiToken })
-             });
-             const purgeData = await purgeRes.json();
-             if (purgeData.success) {
-                 console.log('R2AutoExporter: Cloudflare Cache successfully purged!');
-             } else {
-                 console.warn('R2AutoExporter: Cloudflare Cache purge returned error:', purgeData.error);
-             }
-           } catch (purgeErr) {
-               console.error('R2AutoExporter: Failed to call purge cache API', purgeErr);
-           }
-        }
-        
       } catch (err: any) {
         console.error('R2AutoExporter: Upload failed', err);
-        success = false; // Mark as failed to handle error clearing
+        success = false;
       }
     }
 

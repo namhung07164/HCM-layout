@@ -14,6 +14,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { uploadFileToDrive } from '../../lib/drive';
 import { initAuth, googleSignIn, getAccessToken } from '../../lib/auth';
 import R2UploadModal from '../R2UploadModal';
+import { uploadFilesToR2 } from '../../lib/r2Upload';
 
 interface ReviewTabProps {
   units: UnitShape[];
@@ -127,107 +128,51 @@ function ReviewTab({ units, setUnits, versions, setVersions, activeVersionId: in
       return (localStorage.getItem('export_quality') as any) || 'medium';
   });
   const [selectedVersionsToExport, setSelectedVersionsToExport] = useState<Record<string, boolean>>({});
+  const [showR2Modal, setShowR2Modal] = useState(false);
+  const [isUploadingToR2, setIsUploadingToR2] = useState(false);
+  const [r2UploadProgress, setR2UploadProgress] = useState(0);
+  const [r2StatusMessage, setR2StatusMessage] = useState('');
 
   const handleExportAllManagerComplete = async (success: boolean, data?: any) => {
     if (exportAllFormat === 'r2_jpeg') {
-        if (!success || !data) {
-            alert('Lỗi tạo ảnh JPEG.');
+        if (!success || !data || (Array.isArray(data) && data.length === 0)) {
+            alert('Lỗi tạo ảnh JPEG cho bản vẽ.');
             setExportAllFormat(null);
             setIsUploadingToR2(false);
             setShowR2Modal(false);
+            setR2UploadProgress(0);
+            setR2StatusMessage('');
             return;
         }
 
         setIsUploadingToR2(true);
+        setShowR2Modal(true);
         try {
-            const accountId = localStorage.getItem('r2_account_id') || '';
-            const accessKeyId = localStorage.getItem('r2_access_key') || '';
-            const secretAccessKey = localStorage.getItem('r2_secret_key') || '';
-            const bucketName = localStorage.getItem('r2_bucket_name') || '';
-
-            if (!accountId || !accessKeyId || !secretAccessKey || !bucketName) {
-                throw new Error('Missing R2 credentials in settings.');
-            }
-
-            const s3 = new S3Client({
-                region: 'auto',
-                endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
-                credentials: {
-                    accessKeyId,
-                    secretAccessKey,
-                },
+            const filesToUpload = Array.isArray(data) ? data : [{ blob: data as Blob, name: 'Data_Mapping_Export' }];
+            
+            const uploadResult = await uploadFilesToR2(filesToUpload, ({ percent, statusText }) => {
+                setR2UploadProgress(percent);
+                setR2StatusMessage(statusText);
             });
 
-            const filesToUpload = Array.isArray(data) ? data : [{blob: data as Blob, name: 'Data_Mapping_Export'}];
-
-            try {
-                for (const file of filesToUpload) {
-                    const safeName = (file.name || 'Export').replace(/[\/\\]/g, '_').replace(/\s+/g, '_') + '.jpeg';
-                    
-                    const command = new PutObjectCommand({
-                        Bucket: bucketName,
-                        Key: safeName,
-                        ContentType: 'image/jpeg',
-                    });
-
-                    const signedUrl = await getSignedUrl(s3, command, { expiresIn: 3600 });
-
-                    let response;
-                    try {
-                        response = await fetch(signedUrl, {
-                            method: 'PUT',
-                            headers: {
-                                'Content-Type': 'image/jpeg'
-                            },
-                            body: file.blob
-                        });
-                    } catch (netErr: any) {
-                        throw new Error(`Network/CORS error for ${safeName}. Vui lòng kiểm tra cấu hình CORS trên bucket R2 của bạn để cho phép phương thức PUT từ domain hiện tại. Chi tiết: ${netErr.message}`);
-                    }
-
-                    if (!response.ok) {
-                        const textRes = await response.text().catch(() => '');
-                        throw new Error(`Upload failed for ${safeName}: Status ${response.status} - ${textRes.substring(0, 50)}`);
-                    }
-                }
-
-                // Attempt to purge cache if credentials exist
-                const cfZoneId = localStorage.getItem('cf_zone_id');
-                const cfApiToken = localStorage.getItem('cf_api_token');
-                if (cfZoneId && cfApiToken) {
-                   console.log('ReviewTab: Triggering Cloudflare Cache Purge...');
-                   try {
-                     const purgeRes = await fetch('/api/purge-cache', {
-                         method: 'POST',
-                         headers: { 'Content-Type': 'application/json' },
-                         body: JSON.stringify({ zoneId: cfZoneId, apiToken: cfApiToken })
-                     });
-                     const purgeData = await purgeRes.json();
-                     if (purgeData.success) {
-                         console.log('ReviewTab: Cloudflare Cache successfully purged!');
-                     } else {
-                         console.warn('ReviewTab: Cloudflare Cache purge returned error:', purgeData.error);
-                     }
-                   } catch (purgeErr) {
-                       console.error('ReviewTab: Failed to call purge cache API', purgeErr);
-                   }
-                }
-
-                alert(`Upload thành công ${filesToUpload.length} file lên Cloudflare R2!`);
-            } catch (err: any) {
-                console.error(err);
-                alert('Lỗi upload R2: ' + err.message);
-            } finally {
-                setIsUploadingToR2(false);
-                setShowR2Modal(false);
-                setExportAllFormat(null);
+            if (uploadResult.failedCount === 0) {
+                alert(`Upload thành công toàn bộ ${uploadResult.successCount} file lên Cloudflare R2!`);
+            } else if (uploadResult.successCount > 0) {
+                const failedNames = uploadResult.results.filter(r => !r.success).map(r => `${r.name}: ${r.error}`).join('\n- ');
+                alert(`Upload hoàn tất: ${uploadResult.successCount}/${uploadResult.total} file thành công.\nCó ${uploadResult.failedCount} file thất bại:\n- ${failedNames}`);
+            } else {
+                const errors = uploadResult.results.map(r => `${r.name}: ${r.error}`).join('\n- ');
+                alert(`Upload thất bại toàn bộ ${uploadResult.total} file lên Cloudflare R2:\n- ${errors}`);
             }
         } catch (err: any) {
-            console.error(err);
-            alert('Lỗi chuẩn bị dữ liệu: ' + err.message);
+            console.error('[R2 Upload Error]', err);
+            alert('Lỗi upload Cloudflare R2: ' + (err.message || 'Lỗi không xác định'));
+        } finally {
             setIsUploadingToR2(false);
             setShowR2Modal(false);
             setExportAllFormat(null);
+            setR2UploadProgress(0);
+            setR2StatusMessage('');
         }
     } else {
         setExportAllFormat(null);
@@ -235,11 +180,8 @@ function ReviewTab({ units, setUnits, versions, setVersions, activeVersionId: in
   };
 
   const startR2Export = () => {
-      // setShowR2Modal(false) -> We'll hide it after upload is done, so it stays open showing "Uploading..." state.
       setExportAllFormat('r2_jpeg');
   };
-  const [showR2Modal, setShowR2Modal] = useState(false);
-  const [isUploadingToR2, setIsUploadingToR2] = useState(false);
 
   useEffect(() => {
     const unsubscribe = initAuth();
@@ -819,12 +761,14 @@ function ReviewTab({ units, setUnits, versions, setVersions, activeVersionId: in
       <R2UploadModal 
           isOpen={showR2Modal} 
           onClose={() => {
+              if (isUploadingToR2) return;
               setShowR2Modal(false);
               setExportAllFormat(null);
           }}
           onStartExport={startR2Export}
           uploading={isUploadingToR2}
-          uploadProgress={0}
+          uploadProgress={r2UploadProgress}
+          statusMessage={r2StatusMessage}
       />
 
       {exportModalVisible && (
@@ -962,15 +906,23 @@ const HiddenExportStage = ({ version, units, summaryData, selectedLabels, review
   const stageRef = useRef<any>(null);
 
   useEffect(() => {
+    let timer: any;
     if (status === 'loaded' || status === 'failed') {
-      setTimeout(() => {
+      timer = setTimeout(() => {
         if (stageRef.current) {
           onReady(index, stageRef.current);
         } else {
           onReady(index, null);
         }
-      }, 500); // Give Konva a moment to render
+      }, 350); // Give Konva a moment to render
+    } else {
+      // Safety timeout: if image takes more than 8 seconds to load, proceed anyway
+      timer = setTimeout(() => {
+        console.warn(`[HiddenExportStage] Image timeout for version: ${version?.name}`);
+        onReady(index, stageRef.current || null);
+      }, 8000);
     }
+    return () => clearTimeout(timer);
   }, [status, index, onReady]);
 
   if (status !== 'loaded' && status !== 'failed') {
@@ -1270,219 +1222,258 @@ const HiddenExportStage = ({ version, units, summaryData, selectedLabels, review
   );
 };
 
-export const ExportAllManager = ({ versions, units, summaryData, format, paperSize, quality, selectedLabels, reviewLabelColors, onComplete }: any) => {
-    const [stagesReady, setStagesReady] = useState<Record<number, any>>({});
-    const hasExportedRef = React.useRef(false);
-    
-    const handleStageReady = React.useCallback((index: number, stage: any) => {
-        setStagesReady(prev => ({ ...prev, [index]: stage }));
-    }, []);
+// High-performance canvas to JPEG Blob converter avoiding base64 overhead
+async function captureStageBlob(stage: any, pixelRatio: number, quality: number): Promise<Blob | null> {
+  // Method 1: native HTMLCanvasElement.toBlob via Konva stage.toCanvas()
+  try {
+    const canvas = stage.toCanvas({ pixelRatio });
+    if (canvas && typeof canvas.toBlob === 'function') {
+      const blob = await new Promise<Blob | null>((resolve) => {
+        canvas.toBlob((b: Blob | null) => resolve(b), 'image/jpeg', quality);
+      });
+      if (blob && blob.size > 0) return blob;
+    }
+  } catch (err) {
+    console.warn('[captureStageBlob] stage.toCanvas failed, falling back to toDataURL', err);
+  }
 
-    useEffect(() => {
-        const readyCount = Object.keys(stagesReady).length;
-        if (readyCount === versions.length && readyCount > 0) {
-            if (hasExportedRef.current) return;
-            hasExportedRef.current = true;
-            // all stages loaded
-            const doExport = async () => {
-                
-                // Determine pixelRatio and jpeg quality based on selected quality
-                let pxRatio = 2;
-                let jpegQuality = 0.9;
-                if (quality === 'high') {
-                    pxRatio = 3;
-                    jpegQuality = 0.92;
-                } else if (quality === 'low') {
-                    pxRatio = 1;
-                    jpegQuality = 0.7;
-                }
-                
-                
-                // Safe max dimension to prevent black images from browser canvas limits (iOS limit is 4096)
-                const SAFE_MAX_DIM = 3840;
-
-
-                if (format === 'pdf' || format === 'drive' || format === 'auto_drive') {
-                    // Combine into PDF
-                    let pdf: jsPDF | null = null;
-                    
-                    for (let i = 0; i < versions.length; i++) {
-                        const stage = stagesReady[i];
-                        if (!stage) continue;
-                        
-                        const width = stage.width();
-                        const height = stage.height();
-                        
-                        let currentPxRatio = pxRatio;
-                        const maxDim = Math.max(stage.width(), stage.height());
-                        if (currentPxRatio * maxDim > SAFE_MAX_DIM) {
-                            currentPxRatio = SAFE_MAX_DIM / maxDim;
-                        }
-                        const dataURL = stage.toDataURL({ pixelRatio: currentPxRatio, mimeType: 'image/jpeg', quality: jpegQuality });
-                        
-                        const isLandscape = width > height;
-                        const orientationStr = isLandscape ? 'landscape' : 'portrait';
-
-                        if (!pdf) {
-                            if (paperSize === 'original') {
-                                pdf = new jsPDF({
-                                    orientation: orientationStr,
-                                    unit: 'px',
-                                    format: [width, height]
-                                });
-                            } else {
-                                pdf = new jsPDF({
-                                    orientation: orientationStr,
-                                    unit: 'mm',
-                                    format: paperSize
-                                });
-                            }
-                        } else {
-                            if (paperSize === 'original') {
-                                pdf.addPage([width, height], orientationStr);
-                            } else {
-                                pdf.addPage(paperSize, orientationStr);
-                            }
-                        }
-                        
-                        if (paperSize === 'original') {
-                             pdf.addImage(dataURL, 'JPEG', 0, 0, width, height);
-                        } else {
-                             const pageWidth = pdf.internal.pageSize.getWidth();
-                             const pageHeight = pdf.internal.pageSize.getHeight();
-
-                             // We want to fit the image horizontally while maintaining aspect ratio
-                             let imgWidth = pageWidth;
-                             let imgHeight = (height * pageWidth) / width;
-
-                             if (imgHeight > pageHeight) {
-                                 // Or if they wanted full fit without cutting
-                                 imgHeight = pageHeight;
-                                 imgWidth = (width * pageHeight) / height;
-                             }
-
-                             const x = (pageWidth - imgWidth) / 2;
-                             const y = (pageHeight - imgHeight) / 2;
-
-                             pdf.addImage(dataURL, 'JPEG', x, y, imgWidth, imgHeight);
-                        }
-                    }
-                    
-                    if (pdf) {
-                        if (format === 'drive' || format === 'auto_drive') {
-                            const pdfBlob = pdf.output('blob');
-                            const token = await getAccessToken();
-                            if (!token) {
-                                if (format !== 'auto_drive') alert("Vui lòng đăng nhập Google để upload file.");
-                                if (onComplete) onComplete(false);
-                            } else {
-                                const confirmSave = format === 'auto_drive' ? true : window.confirm("Đồng ý tạo (hoặc ghi đè) file Data_Mapping_Export.pdf trên Google Drive của bạn?");
-                                if (confirmSave) {
-                                    try {
-                                        await uploadFileToDrive({
-                                            accessToken: token,
-                                            fileBlob: pdfBlob,
-                                            fileName: 'Data_Mapping_Export.pdf',
-                                            mimeType: 'application/pdf',
-                                            fileId: '1hxzPKKhQWhQ-tAThmgan8eNqqy5GN-Ds'
-                                        });
-                                        if (format !== 'auto_drive') alert("Upload thành công!");
-                                        if (onComplete) onComplete(true);
-                                    } catch (e: any) {
-                                        console.error(e);
-                                        if (format !== 'auto_drive') alert("Lỗi upload: " + e.message);
-                                        if (onComplete) onComplete(false);
-                                    }
-                                } else {
-                                    if (onComplete) onComplete(false);
-                                }
-                            }
-                        } else {
-                            pdf.save(`all_versions.pdf`);
-                            if (onComplete) onComplete(true);
-                        }
-                    }
-                } else if (format === 'jpeg') {
-                    // For jpeg, downloading multiple files is usually easiest, or combining into a tall image
-                    // We'll download them sequentially
-                    for (let i = 0; i < versions.length; i++) {
-                        const stage = stagesReady[i];
-                        if (!stage) continue;
-                        
-                        let currentPxRatio = pxRatio;
-                        const maxDim = Math.max(stage.width(), stage.height());
-                        if (currentPxRatio * maxDim > SAFE_MAX_DIM) {
-                            currentPxRatio = SAFE_MAX_DIM / maxDim;
-                        }
-                        const dataURL = stage.toDataURL({ pixelRatio: currentPxRatio, mimeType: 'image/jpeg', quality: jpegQuality });
-                        const link = document.createElement('a');
-                        link.download = `version_${versions[i].name || i}.jpeg`;
-                        link.href = dataURL;
-                        document.body.appendChild(link);
-                        link.click();
-                        document.body.removeChild(link);
-                        // Small pause to allow browser to handle multiple downloads
-                        await new Promise(r => setTimeout(r, 200));
-                    }
-                    if (onComplete) onComplete(true);
-                } else if (format === 'r2_jpeg') {
-                    try {
-                        const imagesData: {blob: Blob, name: string}[] = [];
-                        for (let i = 0; i < versions.length; i++) {
-                            const stage = stagesReady[i];
-                            if (!stage) continue;
-                            
-                        let currentPxRatio = pxRatio;
-                        const maxDim = Math.max(stage.width(), stage.height());
-                        if (currentPxRatio * maxDim > SAFE_MAX_DIM) {
-                            currentPxRatio = SAFE_MAX_DIM / maxDim;
-                        }
-                        const dataURL = stage.toDataURL({ pixelRatio: currentPxRatio, mimeType: 'image/jpeg', quality: jpegQuality });
-                            const res = await fetch(dataURL);
-                            const blob = await res.blob();
-                            imagesData.push({ blob, name: versions[i].name || `version_${i}` });
-                        }
-                        
-                        if (imagesData.length > 0) {
-                            if (onComplete) onComplete(true, imagesData);
-                            return;
-                        }
-                        if (onComplete) onComplete(false);
-                    } catch (err) {
-                        console.error(err);
-                        if (onComplete) onComplete(false);
-                    }
-                }
-            };
-            
-            doExport();
-        }
-    }, [stagesReady, versions, format, onComplete]);
-
-    return (
-        <>
-            <div className="fixed inset-0 z-[9999] bg-black/80 flex flex-col items-center justify-center text-white backdrop-blur-sm">
-                <div className="w-16 h-16 border-4 border-brand-500 border-t-transparent rounded-full animate-spin mb-6"></div>
-                <h3 className="text-xl font-bold tracking-wider">Generating Export...</h3>
-                <p className="text-slate-400 mt-2">Loading maps and generating {format.toUpperCase()} ( {Object.keys(stagesReady).length} / {versions.length} )</p>
-            </div>
-            <div style={{ position: 'absolute', top: 0, left: 0, zIndex: -9999, opacity: 0, pointerEvents: 'none' }}>
-                {versions.map((v: any, i: number) => (
-                    <HiddenExportStage 
-                        key={v.id} 
-                        index={i}
-                        version={v} 
-                        units={units} 
-                        summaryData={summaryData} 
-                        selectedLabels={selectedLabels}
-             reviewLabelColors={reviewLabelColors}
-                        paperSize={paperSize}
-                        onReady={handleStageReady} 
-                    />
-                ))}
-            </div>
-        </>
-    );
+  // Method 2: stage.toDataURL + direct ArrayBuffer parsing (no fetch)
+  try {
+    const dataURL = stage.toDataURL({ pixelRatio, mimeType: 'image/jpeg', quality });
+    const parts = dataURL.split(',');
+    if (parts.length === 2) {
+      const byteString = atob(parts[1]);
+      const mimeString = parts[0].split(':')[1]?.split(';')[0] || 'image/jpeg';
+      const ab = new ArrayBuffer(byteString.length);
+      const ia = new Uint8Array(ab);
+      for (let i = 0; i < byteString.length; i++) {
+        ia[i] = byteString.charCodeAt(i);
+      }
+      return new Blob([ab], { type: mimeString });
+    }
+  } catch (dataUrlErr) {
+    console.error('[captureStageBlob] Failed to convert dataURL to Blob', dataUrlErr);
+  }
+  return null;
 }
+
+export const ExportAllManager = ({ versions, units, summaryData, format, paperSize, quality, selectedLabels, reviewLabelColors, onComplete }: any) => {
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const isProcessingRef = useRef(false);
+  const pdfRef = useRef<jsPDF | null>(null);
+  const collectedImagesRef = useRef<{ blob: Blob; name: string }[]>([]);
+  const hasFinishedRef = useRef(false);
+
+  // Safety check: if no versions are provided, finish immediately
+  useEffect(() => {
+    if (!versions || versions.length === 0) {
+      onComplete?.(false);
+    }
+  }, [versions, onComplete]);
+
+  const handleCurrentStageReady = React.useCallback(async (index: number, stage: any) => {
+    if (isProcessingRef.current || hasFinishedRef.current) return;
+    if (index !== currentIndex) return;
+    isProcessingRef.current = true;
+
+    // Determine pixelRatio and jpeg quality based on selected quality
+    let pxRatio = 2;
+    let jpegQuality = 0.9;
+    if (quality === 'high') {
+      pxRatio = 3;
+      jpegQuality = 0.92;
+    } else if (quality === 'low') {
+      pxRatio = 1;
+      jpegQuality = 0.75;
+    }
+
+    // Safe max dimension to prevent black images from browser canvas limits
+    const SAFE_MAX_DIM = 3840;
+    const currentVersion = versions[currentIndex];
+
+    if (stage) {
+      try {
+        const width = stage.width();
+        const height = stage.height();
+
+        let currentPxRatio = pxRatio;
+        const maxDim = Math.max(width, height);
+        if (currentPxRatio * maxDim > SAFE_MAX_DIM) {
+          currentPxRatio = SAFE_MAX_DIM / maxDim;
+        }
+
+        if (format === 'pdf' || format === 'drive' || format === 'auto_drive') {
+          const dataURL = stage.toDataURL({ pixelRatio: currentPxRatio, mimeType: 'image/jpeg', quality: jpegQuality });
+          const isLandscape = width > height;
+          const orientationStr = isLandscape ? 'landscape' : 'portrait';
+
+          if (!pdfRef.current) {
+            if (paperSize === 'original') {
+              pdfRef.current = new jsPDF({
+                orientation: orientationStr,
+                unit: 'px',
+                format: [width, height],
+              });
+            } else {
+              pdfRef.current = new jsPDF({
+                orientation: orientationStr,
+                unit: 'mm',
+                format: paperSize,
+              });
+            }
+          } else {
+            if (paperSize === 'original') {
+              pdfRef.current.addPage([width, height], orientationStr);
+            } else {
+              pdfRef.current.addPage(paperSize, orientationStr);
+            }
+          }
+
+          const pdf = pdfRef.current;
+          if (paperSize === 'original') {
+            pdf.addImage(dataURL, 'JPEG', 0, 0, width, height);
+          } else {
+            const pageWidth = pdf.internal.pageSize.getWidth();
+            const pageHeight = pdf.internal.pageSize.getHeight();
+
+            let imgWidth = pageWidth;
+            let imgHeight = (height * pageWidth) / width;
+
+            if (imgHeight > pageHeight) {
+              imgHeight = pageHeight;
+              imgWidth = (width * pageHeight) / height;
+            }
+
+            const x = (pageWidth - imgWidth) / 2;
+            const y = (pageHeight - imgHeight) / 2;
+
+            pdf.addImage(dataURL, 'JPEG', x, y, imgWidth, imgHeight);
+          }
+        } else if (format === 'jpeg') {
+          const dataURL = stage.toDataURL({ pixelRatio: currentPxRatio, mimeType: 'image/jpeg', quality: jpegQuality });
+          const link = document.createElement('a');
+          link.download = `version_${currentVersion?.name || currentIndex}.jpeg`;
+          link.href = dataURL;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          await new Promise((r) => setTimeout(r, 200));
+        } else if (format === 'r2_jpeg') {
+          const blob = await captureStageBlob(stage, currentPxRatio, jpegQuality);
+          if (blob) {
+            collectedImagesRef.current.push({
+              blob,
+              name: currentVersion?.name || `version_${currentIndex}`,
+            });
+          }
+        }
+      } catch (stageErr) {
+        console.error(`[ExportAllManager] Error processing stage for version ${currentVersion?.name}:`, stageErr);
+      }
+    } else {
+      console.warn(`[ExportAllManager] Stage was null for version ${currentVersion?.name}, skipping.`);
+    }
+
+    // Yield control to let the browser garbage-collect and render animations
+    await new Promise((r) => setTimeout(r, 120));
+
+    const nextIndex = currentIndex + 1;
+    if (nextIndex < versions.length) {
+      isProcessingRef.current = false;
+      setCurrentIndex(nextIndex);
+    } else {
+      // Completed all versions
+      hasFinishedRef.current = true;
+      if (format === 'pdf' || format === 'drive' || format === 'auto_drive') {
+        const pdf = pdfRef.current;
+        if (pdf) {
+          if (format === 'drive' || format === 'auto_drive') {
+            const pdfBlob = pdf.output('blob');
+            const token = await getAccessToken();
+            if (!token) {
+              if (format !== 'auto_drive') alert('Vui lòng đăng nhập Google để upload file.');
+              onComplete?.(false);
+            } else {
+              const confirmSave = format === 'auto_drive' ? true : window.confirm('Đồng ý tạo (hoặc ghi đè) file Data_Mapping_Export.pdf trên Google Drive của bạn?');
+              if (confirmSave) {
+                try {
+                  await uploadFileToDrive({
+                    accessToken: token,
+                    fileBlob: pdfBlob,
+                    fileName: 'Data_Mapping_Export.pdf',
+                    mimeType: 'application/pdf',
+                    fileId: '1hxzPKKhQWhQ-tAThmgan8eNqqy5GN-Ds',
+                  });
+                  if (format !== 'auto_drive') alert('Upload thành công!');
+                  onComplete?.(true);
+                } catch (e: any) {
+                  console.error(e);
+                  if (format !== 'auto_drive') alert('Lỗi upload: ' + e.message);
+                  onComplete?.(false);
+                }
+              } else {
+                onComplete?.(false);
+              }
+            }
+          } else {
+            pdf.save('all_versions.pdf');
+            onComplete?.(true);
+          }
+        } else {
+          onComplete?.(false);
+        }
+      } else if (format === 'jpeg') {
+        onComplete?.(true);
+      } else if (format === 'r2_jpeg') {
+        if (collectedImagesRef.current.length > 0) {
+          onComplete?.(true, collectedImagesRef.current);
+        } else {
+          onComplete?.(false);
+        }
+      }
+    }
+  }, [currentIndex, versions, format, paperSize, quality, onComplete]);
+
+  const currentVersion = versions && versions[currentIndex];
+  const totalCount = versions ? versions.length : 0;
+  const percent = totalCount > 0 ? Math.round(((currentIndex + 1) / totalCount) * 100) : 0;
+  const currentVersionName = currentVersion?.name || `Bản vẽ ${currentIndex + 1}`;
+
+  return (
+    <>
+      <div className="fixed inset-0 z-[9999] bg-black/85 flex flex-col items-center justify-center text-white backdrop-blur-md">
+        <div className="w-16 h-16 border-4 border-amber-500 border-t-transparent rounded-full animate-spin mb-6 shadow-lg shadow-amber-500/20"></div>
+        <h3 className="text-xl font-bold tracking-wider uppercase text-white">
+          {format === 'r2_jpeg' ? 'Đang chuẩn bị ảnh cho Cloudflare R2...' : `Đang xuất ${format.toUpperCase()}...`}
+        </h3>
+        <p className="text-slate-300 mt-2 font-medium text-sm">
+          Đang xử lý {currentIndex + 1} / {totalCount}: <span className="text-amber-400 font-bold">{currentVersionName}</span>
+        </p>
+        <div className="w-80 bg-slate-800 rounded-full h-3 mt-4 overflow-hidden border border-slate-700/80 shadow-inner">
+          <div 
+            className="bg-amber-500 h-3 rounded-full transition-all duration-300 ease-out" 
+            style={{ width: `${Math.max(6, percent)}%` }}
+          ></div>
+        </div>
+        <span className="text-xs font-mono text-slate-400 mt-2">{percent}% hoàn thành</span>
+      </div>
+      <div style={{ position: 'absolute', top: 0, left: 0, zIndex: -9999, opacity: 0, pointerEvents: 'none' }}>
+        {currentVersion && (
+          <HiddenExportStage 
+            key={currentVersion.id} 
+            index={currentIndex}
+            version={currentVersion} 
+            units={units} 
+            summaryData={summaryData} 
+            selectedLabels={selectedLabels}
+            reviewLabelColors={reviewLabelColors}
+            paperSize={paperSize}
+            onReady={handleCurrentStageReady} 
+          />
+        )}
+      </div>
+    </>
+  );
+};
 
 export default React.memo(ReviewTab);

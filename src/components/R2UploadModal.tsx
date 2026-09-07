@@ -7,9 +7,10 @@ interface R2UploadModalProps {
   onStartExport: () => void;
   uploading: boolean;
   uploadProgress: number;
+  statusMessage?: string;
 }
 
-export default function R2UploadModal({ isOpen, onClose, onStartExport, uploading, uploadProgress }: R2UploadModalProps) {
+export default function R2UploadModal({ isOpen, onClose, onStartExport, uploading, uploadProgress, statusMessage }: R2UploadModalProps) {
   const [accountId, setAccountId] = useState('');
   const [accessKey, setAccessKey] = useState('');
   const [secretKey, setSecretKey] = useState('');
@@ -178,6 +179,24 @@ export default function R2UploadModal({ isOpen, onClose, onStartExport, uploadin
             </div>
           )}
           
+          {uploading && (
+            <div className="bg-amber-950/40 border border-amber-800/60 p-4 rounded-xl space-y-3">
+              <div className="flex items-center justify-between text-xs font-semibold text-amber-300">
+                <span className="flex items-center gap-2">
+                  <div className="w-3.5 h-3.5 border-2 border-amber-400 border-t-transparent rounded-full animate-spin"></div>
+                  {statusMessage || 'Đang tải file lên Cloudflare R2...'}
+                </span>
+                <span className="font-mono text-amber-400 font-bold">{uploadProgress}%</span>
+              </div>
+              <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden border border-slate-700/60">
+                <div 
+                  className="bg-amber-500 h-2 rounded-full transition-all duration-300 ease-out"
+                  style={{ width: `${uploadProgress}%` }}
+                ></div>
+              </div>
+            </div>
+          )}
+
           <div className="pt-2 text-xs text-slate-400 bg-slate-800/40 p-3 rounded-lg border border-slate-800">
             <p>Các hình sẽ được tạo/ghi đè với tên tương ứng của từng phiên bản (VD: <strong className="text-white">Ten_Phien_Ban.jpeg</strong>). Sẽ không làm tốn dung lượng Firebase.</p>
             <p className="mt-2 text-amber-500/80"><strong className="text-amber-500">Lưu ý quan trọng:</strong> Vui lòng đảm bảo bạn đã cấu hình CORS trên Cloudflare R2 Bucket (Settings {'>'} CORS Rules) để cho phép <code className="text-slate-300 bg-slate-900 border border-slate-700 px-1 rounded">PUT</code> method từ domain này.</p>

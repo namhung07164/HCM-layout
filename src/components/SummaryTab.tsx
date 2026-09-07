@@ -1,6 +1,5 @@
 import React, { useMemo, useState } from "react";
 import { Download } from "lucide-react";
-import { useData } from "../DataContext";
 import DataTable from "./DataTable";
 import { useSummaryData } from "../lib/summaryData";
 
