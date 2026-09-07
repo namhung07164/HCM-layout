@@ -244,10 +244,9 @@ export default function GoogleSyncWidget() {
               onClick={async () => {
                   try {
                       await logout();
-                      alert("Đã đăng xuất tài khoản Google.");
+                      await authenticateGoogle();
                   } catch (e: any) {
                       console.error(e);
-                      alert("Lỗi khi đăng xuất: " + e.message);
                   }
               }}
               disabled={isDriveLoading}
