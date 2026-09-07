@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { ClassInfo, ActualClassInfo, SalesInfo, ProfitInfo, DailySalesProfitInfo, UnitInfo, MDStatusInfo, SubFeeInfo, ProjectStatusInfo, ProjectLinkInfo, BasePlanInfo, UnitDataInfo, StoreRegion } from './types';
 import { UnitShape, MapVersion } from './components/DataMapping/types';
 import { defaultDb } from './lib/firebase';
@@ -276,34 +277,19 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
   }, []);
 
   const set = useDataStore.setState;
-  const state = useDataStore();
   const { 
       units, 
-      unitInfo, 
       classInfo,
-      actualClassInfo,
-      sales,
-      profits,
-      dailySalesProfits,
-      mdStatus,
-      subFees,
       projectStatus,
-      projectLink,
-      basePlan,
-      mapUnits,
-      mapVersions,
-      activeMapVersionId,
       isLoading,
-      isSaving,
-      lastBackup,
-      hasLocalFolder,
-      needsPermission,
-      spreadsheetId,
-      isAppLocked,
-      reviewSelectedLabels,
-      reviewLabelColors,
-      autoUpdateBrandName
-  } = state;
+      lastBackup
+  } = useDataStore(useShallow(state => ({
+      units: state.units,
+      classInfo: state.classInfo,
+      projectStatus: state.projectStatus,
+      isLoading: state.isLoading,
+      lastBackup: state.lastBackup
+  })));
 
   const validUnits = React.useMemo(() => units.map(u => u.unit), [units]);
   const { projectStatus: fsProjectStatus, fsMdStatus, error: fsError } = useProjectStatusSync(validUnits, store);
@@ -346,11 +332,11 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
       });
       set({ mdStatus: nextMdStatus });
     }
-  }, [fsMdStatus, unitInfo]);
+  }, [fsMdStatus]);
   
   useEffect(() => {
     if (fsError) {
-       state.addNotification(fsError);
+       useDataStore.getState().addNotification(fsError);
     }
   }, [fsError]);
 
@@ -834,12 +820,17 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
   }, []);
 
   const saveToHandlers = async (
-    c: ClassInfo[], ac: ActualClassInfo[], s: SalesInfo[], u: UnitInfo[], p: ProfitInfo[], md: MDStatusInfo[], 
-    sf: SubFeeInfo[], ps: ProjectStatusInfo[], pl: ProjectLinkInfo[], bp: BasePlanInfo[], un: UnitDataInfo[],
-    mu: UnitShape[], mv: MapVersion[], amvId: string | null, rsl: string[], rlc: Record<string, string>, autoUpdateBrandName: boolean,
     customHandle?: any,
     isManualClick: boolean = false
   ) => {
+    const currentState = useDataStore.getState();
+    const { 
+      classInfo: c, actualClassInfo: ac, sales: s, unitInfo: u, profits: p, 
+      mdStatus: md, subFees: sf, projectStatus: ps, projectLink: pl, basePlan: bp, 
+      units: un, mapUnits: mu, mapVersions: mv, activeMapVersionId: amvId, 
+      reviewSelectedLabels: rsl, reviewLabelColors: rlc, autoUpdateBrandName
+    } = currentState;
+
     set({ isSaving: true });
     let errorToReport = null;
     try {
@@ -1054,26 +1045,50 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
     }
   };
 
-  // Debounced save effect
+  // Debounced save effect using Zustand subscribe
   useEffect(() => {
-    // Skip the first render load
-    if (isLoading) return;
+    const unsub = useDataStore.subscribe((state, prevState) => {
+      if (state.isLoading) return;
 
-    isDirtyRef.current = true;
-    if (saveTimeoutRef.current) {
-      clearTimeout(saveTimeoutRef.current);
-    }
+      const changed = 
+        state.classInfo !== prevState.classInfo ||
+        state.actualClassInfo !== prevState.actualClassInfo ||
+        state.sales !== prevState.sales ||
+        state.unitInfo !== prevState.unitInfo ||
+        state.profits !== prevState.profits ||
+        state.dailySalesProfits !== prevState.dailySalesProfits ||
+        state.mdStatus !== prevState.mdStatus ||
+        state.subFees !== prevState.subFees ||
+        state.projectStatus !== prevState.projectStatus ||
+        state.projectLink !== prevState.projectLink ||
+        state.basePlan !== prevState.basePlan ||
+        state.units !== prevState.units ||
+        state.mapUnits !== prevState.mapUnits ||
+        state.mapVersions !== prevState.mapVersions ||
+        state.activeMapVersionId !== prevState.activeMapVersionId ||
+        state.reviewSelectedLabels !== prevState.reviewSelectedLabels ||
+        state.reviewLabelColors !== prevState.reviewLabelColors ||
+        state.autoUpdateBrandName !== prevState.autoUpdateBrandName;
 
-    saveTimeoutRef.current = setTimeout(() => {
-      isDirtyRef.current = false;
-      saveToHandlers(classInfo, actualClassInfo, sales, unitInfo, profits, mdStatus, subFees, projectStatus, projectLink, basePlan, units, mapUnits, mapVersions, activeMapVersionId, reviewSelectedLabels, reviewLabelColors, autoUpdateBrandName);
-      idbSet('dailySalesProfits', dailySalesProfits);
-    }, 2000); // Wait 2 seconds of silence before saving
+      if (!changed) return;
+
+      isDirtyRef.current = true;
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+
+      saveTimeoutRef.current = setTimeout(() => {
+        isDirtyRef.current = false;
+        saveToHandlers();
+        idbSet('dailySalesProfits', state.dailySalesProfits);
+      }, 2000);
+    });
   
     return () => {
+      unsub();
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
     };
-  }, [classInfo, actualClassInfo, sales, unitInfo, profits, dailySalesProfits, mdStatus, subFees, projectStatus, projectLink, basePlan, units, mapUnits, mapVersions, activeMapVersionId, reviewSelectedLabels, reviewLabelColors, autoUpdateBrandName]);
+  }, []);
 
   const setActualClassInfo = (data: ActualClassInfo[]) => {
     set({ actualClassInfo: data });
@@ -1100,8 +1115,9 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
   };
 
   const setMdStatus = (data: MDStatusInfo[]) => {
+    const currentMdStatus = useDataStore.getState().mdStatus;
     data.forEach((newItem) => {
-      const oldItem = mdStatus.find(m => m.unit === newItem.unit);
+      const oldItem = currentMdStatus.find(m => m.unit === newItem.unit);
       if (oldItem && newItem.firestoreId) {
         if (oldItem.status !== newItem.status || oldItem.mdNotes !== newItem.mdNotes) {
           updateMdStatusInFirestore(newItem.firestoreId, newItem.status, newItem.mdNotes || '');
@@ -1278,7 +1294,7 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
   };
 
   const triggerManualBackup = async () => {
-    await saveToHandlers(classInfo, actualClassInfo, sales, unitInfo, profits, mdStatus, subFees, projectStatus, projectLink, basePlan, units, mapUnits, mapVersions, activeMapVersionId, reviewSelectedLabels, reviewLabelColors, autoUpdateBrandName, undefined, true);
+    await saveToHandlers(undefined, true);
   };
 
   const restoreBackup = async () => {
@@ -1337,8 +1353,4 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
   };
 
   return <>{children}</>;
-}
-
-export function useData() {
-  return useDataStore();
 }

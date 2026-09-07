@@ -7,7 +7,6 @@ import { MousePointer2, Square, Circle as CircleIcon, Hexagon, Upload, Trash2, M
 import { UnitShape, ShapeType, MapVersion } from './types';
 import { cn } from '../../lib/utils';
 import { useDropzone } from 'react-dropzone';
-import { useData } from '../../DataContext';
 import { useSummaryData } from '../../lib/summaryData';
 
 import * as pdfjsLib from 'pdfjs-dist/build/pdf.mjs';

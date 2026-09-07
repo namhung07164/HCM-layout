@@ -12,7 +12,6 @@ import {
   Copy,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
-import { useData } from "../../DataContext";
 import { useSummaryData } from "../../lib/summaryData";
 import Papa from "papaparse";
 import { ColorPicker } from "../ColorPicker";
