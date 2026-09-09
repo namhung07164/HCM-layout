@@ -7,6 +7,11 @@ import { cn, standardizeDateToMMDDYYYY } from '../lib/utils';
 import AutocompleteCell from './AutocompleteCell';
 
 function ProjectStatusTab() {
+  React.useEffect(() => {
+    useDataStore.getState().setIsTasksRequested(true);
+    useDataStore.getState().setIsDelegationRequested(true);
+  }, []);
+
   const {  projectStatus, setProjectStatus, units  } = useDataStore(useShallow(state => ({
     projectStatus: state.projectStatus,
     setProjectStatus: state.setProjectStatus,

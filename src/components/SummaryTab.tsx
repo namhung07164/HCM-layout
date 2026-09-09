@@ -3,7 +3,14 @@ import { Download } from "lucide-react";
 import DataTable from "./DataTable";
 import { useSummaryData } from "../lib/summaryData";
 
+import { useDataStore } from "../DataContext";
+
 export default function SummaryTab() {
+  React.useEffect(() => {
+    useDataStore.getState().setIsTasksRequested(true);
+    useDataStore.getState().setIsDelegationRequested(true);
+  }, []);
+
   const summaryData = useSummaryData();
   const [searchTerm, setSearchTerm] = useState("");
 

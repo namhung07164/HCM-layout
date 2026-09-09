@@ -1,5 +1,5 @@
-import { useEffect, useState, useMemo } from 'react';
-import { collection, onSnapshot, doc, updateDoc } from 'firebase/firestore';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
+import { collection, onSnapshot, doc, updateDoc, query, or, where } from 'firebase/firestore';
 import { db, defaultDb } from '../lib/firebase';
 import { ProjectStatusInfo } from '../types';
 
@@ -94,12 +94,14 @@ const getStatus = (start: any, handover: any, opening: any, code: any) => {
   return 'On process';
 };
 
-export function useProjectStatusSync(validUnits: string[], activeStore: string) {
-  const [rawProjects, setRawProjects] = useState<any[]>([]);
-  const [rawTasks, setRawTasks] = useState<any[]>([]);
+export function useProjectStatusSync(validUnits: string[], activeStore: string, isTasksRequested: boolean, isDelegationRequested: boolean) {
+  const [projectsByStore, setProjectsByStore] = useState<Record<string, any[]>>({});
+  const [tasksByStore, setTasksByStore] = useState<Record<string, any[]>>({});
   const [rawDelegationGroups, setRawDelegationGroups] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  
+  const listenersPool = React.useRef<Record<string, () => void>>({});
 
   useEffect(() => {
     let projectsLoaded = false;
@@ -107,79 +109,104 @@ export function useProjectStatusSync(validUnits: string[], activeStore: string) 
     let delegationLoaded = false;
 
     const checkLoading = () => {
-      if (projectsLoaded && tasksLoaded && delegationLoaded) {
+      if (projectsLoaded && (!isTasksRequested || tasksLoaded) && (!isDelegationRequested || delegationLoaded)) {
         setLoading(false);
       }
     };
 
-    const unsubProjects = onSnapshot(collection(defaultDb, 'artifacts/taka-projects-app-v1/public/data/taka_projects'), (snapshot) => {
-      const projects = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      console.log("Raw taka_projects loaded from Firebase:", projects);
-      setRawProjects(projects);
-      projectsLoaded = true;
-      setError(null);
-      checkLoading();
-    }, (err) => {
-      handleFirestoreError(err, OperationType.LIST, 'artifacts/taka-projects-app-v1/public/data/taka_projects');
-      setError('Cannot read taka_projects from Firebase. Please check firebaseConfig.');
-      projectsLoaded = true;
-      checkLoading();
-    });
+    const storeKey = activeStore;
 
-    const unsubTasks = onSnapshot(collection(defaultDb, 'artifacts/taka-projects-app-v1/public/data/taka_tasks'), (snapshot) => {
-      const tasks = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      console.log("Raw taka_tasks loaded from Firebase:", tasks.length);
-      setRawTasks(tasks);
+    if (!listenersPool.current[`projects_${storeKey}`]) {
+      const q = query(
+        collection(defaultDb, 'artifacts/taka-projects-app-v1/public/data/taka_projects'),
+        or(where("store", "==", storeKey), where("STORE", "==", storeKey))
+      );
+
+      listenersPool.current[`projects_${storeKey}`] = onSnapshot(q, (snapshot) => {
+        const projects = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        console.log(`Raw taka_projects loaded for ${storeKey}:`, projects.length);
+        setProjectsByStore(prev => ({ ...prev, [storeKey]: projects }));
+        projectsLoaded = true;
+        setError(null);
+        checkLoading();
+      }, (err) => {
+        handleFirestoreError(err, OperationType.LIST, 'artifacts/taka-projects-app-v1/public/data/taka_projects');
+        setError('Cannot read taka_projects from Firebase. Please check firebaseConfig.');
+        projectsLoaded = true;
+        checkLoading();
+      });
+    } else {
+      projectsLoaded = true;
+      checkLoading();
+    }
+
+    if (isTasksRequested && !listenersPool.current[`tasks_${storeKey}`]) {
+      const q = query(
+        collection(defaultDb, 'artifacts/taka-projects-app-v1/public/data/taka_tasks'),
+        or(where("projectStore", "==", storeKey), where("store", "==", storeKey), where("STORE", "==", storeKey))
+      );
+
+      listenersPool.current[`tasks_${storeKey}`] = onSnapshot(q, (snapshot) => {
+        const tasks = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        console.log(`Raw taka_tasks loaded for ${storeKey}:`, tasks.length);
+        setTasksByStore(prev => ({ ...prev, [storeKey]: tasks }));
+        tasksLoaded = true;
+        checkLoading();
+      }, (err) => {
+        handleFirestoreError(err, OperationType.LIST, 'artifacts/taka-projects-app-v1/public/data/taka_tasks');
+        setError('Cannot read taka_tasks from Firebase. Please check firebaseConfig.');
+        tasksLoaded = true;
+        checkLoading();
+      });
+    } else if (isTasksRequested) {
       tasksLoaded = true;
       checkLoading();
-    }, (err) => {
-      handleFirestoreError(err, OperationType.LIST, 'artifacts/taka-projects-app-v1/public/data/taka_tasks');
-      setError('Cannot read taka_tasks from Firebase. Please check firebaseConfig.');
-      tasksLoaded = true;
-      checkLoading();
-    });
+    }
 
-    const unsubDelegation = onSnapshot(collection(defaultDb, 'artifacts/taka-projects-app-v1/public/data/taka_delegation_groups'), (snapshot) => {
-      let dg = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      console.log("Raw taka_delegation_groups loaded from Firebase:", dg.length);
-      setRawDelegationGroups(dg);
-      delegationLoaded = true;
-      checkLoading();
-    }, (err) => {
-      // If artifacts path fails or is empty, try root as fallback
-      handleFirestoreError(err, OperationType.LIST, 'artifacts/taka-projects-app-v1/public/data/taka_delegation_groups');
-      delegationLoaded = true;
-      checkLoading();
-    });
-
-    const unsubDelegationRoot = onSnapshot(collection(defaultDb, 'taka_delegation_groups'), (snapshot) => {
-      const dgRoot = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      if (dgRoot.length > 0) {
-        console.log("Raw root taka_delegation_groups loaded from Firebase:", dgRoot.length);
-        // We accumulate both in case they use either
+    if (isDelegationRequested && !listenersPool.current.delegation) {
+      listenersPool.current.delegation = onSnapshot(collection(defaultDb, 'artifacts/taka-projects-app-v1/public/data/taka_delegation_groups'), (snapshot) => {
+        let dg = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        console.log("Raw taka_delegation_groups loaded from Firebase:", dg.length);
         setRawDelegationGroups(prev => {
-          const combined = [...prev];
-          dgRoot.forEach(rootDoc => {
-             if (!combined.find(d => d.id === rootDoc.id)) {
-                 combined.push(rootDoc);
-             }
-          });
-          return combined;
+          const newMap = new Map(prev.map(item => [item.id, item]));
+          dg.forEach(item => newMap.set(item.id, item));
+          return Array.from(newMap.values());
         });
-      }
-    }, () => {});
+        delegationLoaded = true;
+        checkLoading();
+      }, (err) => {
+        handleFirestoreError(err, OperationType.LIST, 'artifacts/taka-projects-app-v1/public/data/taka_delegation_groups');
+        delegationLoaded = true;
+        checkLoading();
+      });
+
+      listenersPool.current.delegationRoot = onSnapshot(collection(defaultDb, 'taka_delegation_groups'), (snapshot) => {
+        const dgRoot = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        if (dgRoot.length > 0) {
+          console.log("Raw root taka_delegation_groups loaded from Firebase:", dgRoot.length);
+          setRawDelegationGroups(prev => {
+            const newMap = new Map(prev.map(item => [item.id, item]));
+            dgRoot.forEach(item => newMap.set(item.id, item));
+            return Array.from(newMap.values());
+          });
+        }
+      }, () => {});
+    } else if (isDelegationRequested) {
+      delegationLoaded = true;
+      checkLoading();
+    }
 
     return () => {
-      unsubProjects();
-      unsubTasks();
-      unsubDelegation();
-      if (unsubDelegationRoot) unsubDelegationRoot();
+      // Keep alive in the pool
     };
-  }, []);
+  }, [activeStore, isTasksRequested, isDelegationRequested]); // Dependency array includes activeStore
 
   const { projectStatus, fsMdStatus } = useMemo(() => {
+    const rawProjects = projectsByStore[activeStore] || [];
+    const rawTasks = tasksByStore[activeStore] || [];
+
     // Only map projects that have a code matching units from the Summary tab
-    // Also restrict strictly to activeStore
+    // We already filtered by store at the query level, but we keep the filter just to be strictly safe
     const filteredProjects = rawProjects.filter(p => {
       const code = String(p.code || p.CODE || '').trim();
       const store = String(p.store || p.STORE || '').trim().toUpperCase();
@@ -299,7 +326,7 @@ export function useProjectStatusSync(validUnits: string[], activeStore: string) 
     });
 
     return { projectStatus: pStatus, fsMdStatus: mdStatusList };
-  }, [rawProjects, rawTasks, rawDelegationGroups, validUnits, activeStore]);
+  }, [projectsByStore, tasksByStore, rawDelegationGroups, validUnits, activeStore]);
 
   return { projectStatus, fsMdStatus, loading, error };
 }

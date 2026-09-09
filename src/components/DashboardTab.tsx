@@ -20,6 +20,11 @@ const AVAILABLE_FILTERS = [
 type FilterKey = typeof AVAILABLE_FILTERS[number]['key'];
 
 export default React.memo(function DashboardTab() {
+  useEffect(() => {
+    useDataStore.getState().setIsTasksRequested(true);
+    useDataStore.getState().setIsDelegationRequested(true);
+  }, []);
+
   const {  sales, profits, classInfo, unitInfo, mdStatus, projectStatus  } = useDataStore(useShallow(state => ({
     sales: state.sales,
     profits: state.profits,

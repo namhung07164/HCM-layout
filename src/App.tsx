@@ -663,6 +663,38 @@ export default function App() {
 
   
 
+  useEffect(() => {
+    let idleTimer: NodeJS.Timeout;
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        // Start a 15 minute timer to clear tasks/delegation flags
+        idleTimer = setTimeout(() => {
+          console.log("App has been idle for 15 minutes. Clearing tasks/delegation flags to avoid token expiry cold boot storm.");
+          useDataStore.getState().setIsTasksRequested(false);
+          useDataStore.getState().setIsDelegationRequested(false);
+          
+          // Optionally switch back to a lightweight tab like 'input' to avoid triggering it again immediately
+          const state = useDataStore.getState();
+          if (['dashboard', 'picture'].includes(state.activeTab)) {
+             state.setActiveTab('input');
+          }
+        }, 15 * 60 * 1000);
+      } else {
+        // App is visible again, clear the timer
+        if (idleTimer) {
+          clearTimeout(idleTimer);
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (idleTimer) clearTimeout(idleTimer);
+    };
+  }, []);
+
   const handleSelectStore = (s: StoreRegion) => {
     localStorage.setItem('active_store', s);
     setStore(s);

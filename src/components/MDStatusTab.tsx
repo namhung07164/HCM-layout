@@ -9,6 +9,11 @@ import BlurInput from './BlurInput';
 import { useSummaryData } from '../lib/summaryData';
 
 function MDStatusTab() {
+  React.useEffect(() => {
+    useDataStore.getState().setIsTasksRequested(true);
+    useDataStore.getState().setIsDelegationRequested(true);
+  }, []);
+
   const {  mdStatus, setMdStatus, classInfo, projectStatus  } = useDataStore(useShallow(state => ({
     mdStatus: state.mdStatus,
     setMdStatus: state.setMdStatus,

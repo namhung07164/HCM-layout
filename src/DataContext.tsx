@@ -29,6 +29,11 @@ interface DataContextType {
   units: UnitDataInfo[];
   notifications: AppNotification[];
   
+  isTasksRequested: boolean;
+  setIsTasksRequested: (val: boolean) => void;
+  isDelegationRequested: boolean;
+  setIsDelegationRequested: (val: boolean) => void;
+  
   mapUnits: UnitShape[];
   mapVersions: MapVersion[];
   activeMapVersionId: string | null;
@@ -105,6 +110,11 @@ export const useDataStore = create<DataContextType>((set, get) => ({
   basePlan: [],
   units: [],
   notifications: [],
+  isTasksRequested: false,
+  setIsTasksRequested: (val) => set({ isTasksRequested: val }),
+  isDelegationRequested: false,
+  setIsDelegationRequested: (val) => set({ isDelegationRequested: val }),
+  
   mapUnits: [],
   mapVersions: [],
   activeMapVersionId: null,
@@ -282,17 +292,26 @@ export function DataProvider({ children, store }: { children: React.ReactNode, s
       classInfo,
       projectStatus,
       isLoading,
-      lastBackup
+      lastBackup,
+      isTasksRequested,
+      isDelegationRequested
   } = useDataStore(useShallow(state => ({
       units: state.units,
       classInfo: state.classInfo,
       projectStatus: state.projectStatus,
       isLoading: state.isLoading,
-      lastBackup: state.lastBackup
+      lastBackup: state.lastBackup,
+      isTasksRequested: state.isTasksRequested,
+      isDelegationRequested: state.isDelegationRequested
   })));
 
   const validUnits = React.useMemo(() => units.map(u => u.unit), [units]);
-  const { projectStatus: fsProjectStatus, fsMdStatus, error: fsError } = useProjectStatusSync(validUnits, store);
+  const { projectStatus: fsProjectStatus, fsMdStatus, error: fsError } = useProjectStatusSync(
+    validUnits, 
+    store,
+    isTasksRequested,
+    isDelegationRequested
+  );
 
   useEffect(() => {
     set({ store });
