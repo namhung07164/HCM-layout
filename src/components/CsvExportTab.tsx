@@ -3,7 +3,7 @@ import * as XLSX from 'xlsx';
 
 const TAB_CONFIG: Record<string, any> = {
   project: { id: 'project', label: 'Xuất Project', columns: ['store', 'location', 'year', 'code', 'name'], fileNamePrefix: 'taka_projects_exported', icon: 'ph-file-csv', exportType: 'csv' },
-  task: { id: 'task', label: 'Xuất Task detail', columns: ['store', 'location', 'projectYear', 'projectCode', 'Task name', 'start', 'finish', 'duration', 'party', 'predecessor', 'delegation'], fileNamePrefix: 'taka_tasks_exported', icon: 'ph-list-dashes', exportType: 'csv' },
+  task: { id: 'task', label: 'Xuất Task detail', columns: ['store', 'location', 'projectYear', 'projectCode', 'Task name', 'start', 'finish', 'duration', 'party', 'predecessor', 'delegation', 'comments'], fileNamePrefix: 'taka_tasks_exported', icon: 'ph-list-dashes', exportType: 'csv' },
   budget: { id: 'budget', label: 'Xuất Task budget', columns: ['location', 'code', 'name', 'budget', 'actual/forecast', 'variance', 'type', 'note'], fileNamePrefix: 'taka_projects_budget_exported', icon: 'ph-calculator', exportType: 'csv' },
   cost: { id: 'cost', label: 'Xuất Cost', columns: ['projectCode', 'budget', 'actual', 'firstPaid', 'firstPaidAt', 'secondPaid', 'secondPaidAt', 'thirdPaid', 'thirdPaidAt', 'supportingFee', 'description', 'vendor'], fileNamePrefix: 'taka_costs_exported', icon: 'ph-receipt', exportType: 'csv' },
   investment: { 
@@ -17,7 +17,7 @@ const TAB_CONFIG: Record<string, any> = {
   mass_task: { 
     id: 'mass_task', 
     label: 'Mass-import Task', 
-    columns: ['store', 'location', 'projectYear', 'projectCode', 'Task code phá»¥', 'Task name', 'start', 'finish', 'duration', 'party', 'predecessor', 'delegation'], 
+    columns: ['store', 'location', 'projectYear', 'projectCode', 'Task code phá»¥', 'Task name', 'start', 'finish', 'duration', 'party', 'predecessor', 'delegation', 'comments'], 
     fileNamePrefix: 'taka_mass_tasks_exported', 
     icon: 'ph-copy', 
     exportType: 'csv' 
@@ -457,6 +457,7 @@ export default function CsvExportTab() {
              pred = projCode ? `${projCode}-${String(pred).trim()}` : String(pred).trim();
           }
           let delegation = taskDef['delegation'] !== undefined ? taskDef['delegation'] : (constantMapping['delegation'] || 'true');
+          let comments = taskDef['comments'] !== undefined ? taskDef['comments'] : (constantMapping['comments'] || '');
           
           finalJson.push({
             'store': projStore,
@@ -470,7 +471,8 @@ export default function CsvExportTab() {
             'duration': duration,
             'party': party,
             'predecessor': pred,
-            'delegation': delegation
+            'delegation': delegation,
+            'comments': comments
           });
         });
       });
@@ -561,6 +563,7 @@ export default function CsvExportTab() {
              pred = projCode ? `${projCode}-${String(pred).trim()}` : String(pred).trim();
           }
           let delegation = taskDef['delegation'] !== undefined ? taskDef['delegation'] : (constantMapping['delegation'] || 'true');
+          let comments = taskDef['comments'] !== undefined ? taskDef['comments'] : (constantMapping['comments'] || '');
           
           finalJson.push({
             'store': projStore,
@@ -574,7 +577,8 @@ export default function CsvExportTab() {
             'duration': duration,
             'party': party,
             'predecessor': pred,
-            'delegation': delegation
+            'delegation': delegation,
+            'comments': comments
           });
         });
       });
