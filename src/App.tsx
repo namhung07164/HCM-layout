@@ -43,6 +43,7 @@ import DriveAutoExporter from "./components/DriveAutoExporter";
 type TabId = "input" | "dashboard" | "dataMapping" | "mapping" | "picture" | "csv";
 
 import GoogleSyncWidget from "./components/GoogleSyncWidget";
+import GoogleDriveHeaderButton from "./components/GoogleDriveHeaderButton";
 import {DataProvider} from "./DataContext";
 import type { StoreRegion } from "./types";
 
@@ -502,6 +503,8 @@ function MainApp({ store, onSwitchStore }: { store: StoreRegion, onSwitchStore: 
                 {store === 'HCM' ? 'Hồ Chí Minh' : 'Hà Nội'}
               </span>
             </button>
+
+            <GoogleDriveHeaderButton />
 
             
             <div 
