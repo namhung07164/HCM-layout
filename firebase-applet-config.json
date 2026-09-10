@@ -1,9 +1,8 @@
 {
-  "projectId": "taka---projec-1",
-  "appId": "1:1016991080794:web:9bee0c1b10e4505b135363",
-  "apiKey": "AIzaSyCsL4MZ76PLxV5-n0BHHLyb5dR_p5UmvTc",
-  "authDomain": "taka---projec-1.firebaseapp.com",
-  "storageBucket": "taka---projec-1.firebasestorage.app",
-  "messagingSenderId": "1016991080794",
-  "measurementId": ""
+  "projectId": "tak-project---ver1",
+  "appId": "1:855584353883:web:8819bcbf8c58a28fb8997e",
+  "apiKey": "AIzaSyAaPtg8mZabKUJ6E2xz2KrBjQSfnHICjgc",
+  "authDomain": "tak-project---ver1.firebaseapp.com",
+  "storageBucket": "tak-project---ver1.firebasestorage.app",
+  "messagingSenderId": "855584353883"
 }
