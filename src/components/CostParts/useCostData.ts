@@ -21,6 +21,12 @@ interface UseCostDataParams {
   initialSearchTerm?: string;
 }
 
+import {
+  EMPTY_COST_ARRAY,
+  getProjectCompositeKey,
+  buildProjectCostsIndex,
+} from './costMatchingEngine';
+
 export function useCostData({
   projects,
   costs,
@@ -44,70 +50,61 @@ export function useCostData({
   const setActiveTab = useAppStore((state) => state.setActiveTab);
   const costTabSearchTerm = useAppStore((state) => state.costTabSearchTerm);
 
-  const expandedCodes = useAppStore((state) => state.expandedProjectIds);
-  const toggleProjectExpansion = useAppStore((state) => state.toggleProjectExpansion);
-  const setExpandedCodes = useAppStore((state) => state.setExpandedProjectIds);
+  const [expandedCodes, setExpandedCodes] = useState<string[]>([]);
+  const toggleProjectExpansion = useCallback((id: string) => {
+    setExpandedCodes((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  }, []);
 
-  const handleProjectLinkClick = (p: Project) => {
-    if (!p) return;
-    setDetailTabFilterCode(p.code);
-    setDetailTabStoreFilter(p.store || 'all');
-    if (p.year) {
-      setGlobalYearFilter(String(p.year));
-      safeSetItemSession('taka_detail_year', String(p.year));
-    } else {
-      setGlobalYearFilter('all');
-      safeSetItemSession('taka_detail_year', 'all');
-    }
-    if (p.store) {
-      setGlobalStoreFilter(p.store);
-      safeSetItemLocal(`taka_store_filter_${currentUser.id}`, String(p.store));
-    } else {
-      setGlobalStoreFilter('all');
-      safeSetItemLocal(`taka_store_filter_${currentUser.id}`, 'all');
-    }
-    setActiveTab('detail');
-  };
-
-  // O(1) Pre-indexed Map for Costs by Project Code
-  const costsMapByCode = useMemo(() => {
-    const map = new Map<string, Cost[]>();
-    for (let i = 0; i < costs.length; i++) {
-      const c = costs[i];
-      if (c.isDeleted) continue;
-      const cCode = String(c.projectCode || (c as any).code || '').trim().toLowerCase();
-      if (!cCode) continue;
-      let list = map.get(cCode);
-      if (!list) {
-        list = [];
-        map.set(cCode, list);
-      }
-      list.push(c);
-    }
-    return map;
-  }, [costs]);
-
-  // Helper to get matching costs for a project in O(1) + O(k) candidate filter
-  const getGroupCostsForProject = useCallback(
+  const handleProjectLinkClick = useCallback(
     (p: Project) => {
-      const pCode = String(p.code || '').trim().toLowerCase();
-      const candidateCosts = costsMapByCode.get(pCode) || [];
-      const pYr = String(p.year || (p.start ? String(p.start).substring(0, 4) : '')).trim();
-      const pStore = String(p.store || '').trim().toLowerCase();
-
-      return candidateCosts.filter((c) => {
-        const costYear = String(c.projectYear || (c as any).year || '').trim();
-        const matchesYear = !costYear || !pYr || costYear === pYr;
-        if (!matchesYear) return false;
-
-        const costStore = String(c.projectStore || (c as any).store || '').trim().toLowerCase();
-        const matchesStore = !costStore || !pStore || costStore === pStore;
-        if (!matchesStore) return false;
-
-        return true;
-      });
+      if (!p) return;
+      useAppStore.getState().setFixedProjectCode(String(p.code || '').trim().toUpperCase());
+      setDetailTabFilterCode(p.code);
+      setDetailTabStoreFilter(p.store || 'all');
+      if (p.year) {
+        setGlobalYearFilter(String(p.year));
+        safeSetItemSession('taka_detail_year', String(p.year));
+      } else {
+        setGlobalYearFilter('all');
+        safeSetItemSession('taka_detail_year', 'all');
+      }
+      if (p.store) {
+        setGlobalStoreFilter(p.store);
+        safeSetItemLocal(`taka_store_filter_${currentUser.id}`, String(p.store));
+      } else {
+        setGlobalStoreFilter('all');
+        safeSetItemLocal(`taka_store_filter_${currentUser.id}`, 'all');
+      }
+      setActiveTab('detail');
     },
-    [costsMapByCode]
+    [
+      currentUser.id,
+      setActiveTab,
+      setDetailTabFilterCode,
+      setDetailTabStoreFilter,
+      setGlobalStoreFilter,
+      setGlobalYearFilter,
+    ]
+  );
+
+  // O(1) Pre-indexed Map for Costs by Project Code, with referentially stable arrays per project
+  const prevProjectCostsCacheRef = React.useRef<Map<string, Cost[]>>(new Map());
+
+  const projectCostsByCompositeKey = useMemo(() => {
+    const nextCache = buildProjectCostsIndex(projects, costs, prevProjectCostsCacheRef.current);
+    prevProjectCostsCacheRef.current = nextCache;
+    return nextCache;
+  }, [costs, projects]);
+
+  // Helper to get matching costs for a project in O(1) with referential stability
+  const getGroupCostsForProject = useCallback(
+    (p: Project): Cost[] => {
+      if (!p) return EMPTY_COST_ARRAY;
+      return projectCostsByCompositeKey.get(getProjectCompositeKey(p)) || EMPTY_COST_ARRAY;
+    },
+    [projectCostsByCompositeKey]
   );
 
   // Sub-hook: Search term & filter synchronization
@@ -182,16 +179,40 @@ export function useCostData({
   const stores = allowedStores;
   const locationOptions = useLocationOptions();
 
-  const toggleGroup = (id: string | number) => {
-    toggleProjectExpansion(String(id));
-  };
+  const toggleGroup = useCallback(
+    (id: string | number) => {
+      toggleProjectExpansion(String(id));
+    },
+    [toggleProjectExpansion]
+  );
 
-  const formatCurrency = (val: number | undefined) => {
-    return formatCurrencyValue(val, currency, jpyRate, usdRate);
-  };
+  const formatCurrency = useCallback(
+    (val: number | undefined) => {
+      return formatCurrencyValue(val, currency, jpyRate, usdRate);
+    },
+    [currency, jpyRate, usdRate]
+  );
+
+  const fixedProjectCode = useAppStore((state) => state.fixedProjectCode);
 
   const filteredProjectsForDisplay = useMemo(() => {
     return projects.filter((p) => {
+      if (fixedProjectCode && fixedProjectCode.trim()) {
+        const fix = fixedProjectCode.trim().toLowerCase();
+        const pCode = (p.code || '').trim().toLowerCase();
+        const pName = (p.name || '').trim().toLowerCase();
+        const pLink = Array.isArray(p.linkCodes)
+          ? p.linkCodes.join(' ').toLowerCase()
+          : String(p.linkCodes || '').toLowerCase();
+        const matchesFix =
+          pCode === fix ||
+          pCode.includes(fix) ||
+          pName.includes(fix) ||
+          pLink.includes(fix) ||
+          String(p.id).toLowerCase() === fix;
+        if (!matchesFix) return false;
+      }
+
       const pYear = p.year
         ? String(p.year).trim()
         : p.start
@@ -246,14 +267,11 @@ export function useCostData({
             p.note,
           ],
           [],
-          (term) => {
-            return matchingGroupCosts.some((c) => {
+          (term) =>
+            matchingGroupCosts.some((c) => {
               const cBalance =
-                (c.actual || 0) -
-                (c.firstPaid || 0) -
-                (c.secondPaid || 0) -
-                (c.thirdPaid || 0);
-              const costFields = [
+                (c.actual || 0) - (c.firstPaid || 0) - (c.secondPaid || 0) - (c.thirdPaid || 0);
+              return matchesAdvancedSearch(term, [
                 c.description,
                 c.vendor,
                 c.actual,
@@ -262,23 +280,18 @@ export function useCostData({
                 c.thirdPaid,
                 c.supportingFee,
                 cBalance,
-              ];
-              return costFields.some((val) =>
-                String(val || '').toLowerCase().includes(term)
-              );
-            });
-          }
+              ]);
+            })
         );
         if (!isMatch) return false;
       }
 
-      const totalAct =
-        matchingGroupCosts.length > 0
-          ? matchingGroupCosts.reduce((sum, c) => sum + (c.actual || 0), 0)
-          : p.financial?.totalActualPaid || p.actual || 0;
+      const hasCostEntries = matchingGroupCosts.length > 0;
+      const totalAct = matchingGroupCosts.reduce((sum, c) => sum + (c.actual || 0), 0);
       if (
         hasActForcFilter === 'has_value' &&
         totalAct === 0 &&
+        !hasCostEntries &&
         !paidDateStart &&
         !paidDateEnd
       )
@@ -288,7 +301,7 @@ export function useCostData({
     });
   }, [
     projects,
-    costs,
+    fixedProjectCode,
     globalYearFilter,
     effectiveStore,
     globalLocationFilter,
@@ -346,18 +359,25 @@ export function useCostData({
       setExpandedCodes(
         filteredProjectsForDisplay.map((p) => `${p.code}-${p.year}-${p.store}-${p.no}`)
       );
+    } else if (fixedProjectCode && filteredProjectsForDisplay.length > 0) {
+      const keysToExpand: string[] = [];
+      filteredProjectsForDisplay.forEach((sp) => {
+        const derivedYear = sp.year ? sp.year : sp.start ? Number(String(sp.start).substring(0, 4)) : undefined;
+        keysToExpand.push(`${sp.code}-${derivedYear}-${sp.store}-${sp.no}`);
+        if (sp.id) keysToExpand.push(String(sp.id));
+        if (sp.code) keysToExpand.push(String(sp.code));
+      });
+      setExpandedCodes((prev) => Array.from(new Set([...prev, ...keysToExpand])));
     }
-  }, [paidDateStart, paidDateEnd, paidStageFilter, filteredProjectsForDisplay, setExpandedCodes]);
+  }, [paidDateStart, paidDateEnd, paidStageFilter, fixedProjectCode, filteredProjectsForDisplay, setExpandedCodes]);
 
-  const toggleAll = () => {
-    if (expandedCodes.length === 0) {
-      setExpandedCodes(
-        filteredProjectsForDisplay.map((p) => `${p.code}-${p.year}-${p.store}-${p.no}`)
-      );
-    } else {
-      setExpandedCodes([]);
-    }
-  };
+  const toggleAll = useCallback(() => {
+    setExpandedCodes((prev) =>
+      prev.length === 0
+        ? filteredProjectsForDisplay.map((p) => `${p.code}-${p.year}-${p.store}-${p.no}`)
+        : []
+    );
+  }, [filteredProjectsForDisplay]);
 
   return {
     currency,

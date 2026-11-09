@@ -1,12 +1,16 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useCsvExportState } from './CsvExportParts/useCsvExportState';
 import { CsvExportHeaderTabs } from './CsvExportParts/CsvExportHeaderTabs';
 import { CsvExportFileSection } from './CsvExportParts/CsvExportFileSection';
 import { CsvExportMappingTable } from './CsvExportParts/CsvExportMappingTable';
 import { CsvExportPreviewSection } from './CsvExportParts/CsvExportPreviewSection';
 import { CsvExportUnlockModal } from './CsvExportParts/CsvExportUnlockModal';
+import { CsvExportR2TemplateModal } from './CsvExportParts/CsvExportR2TemplateModal';
 
 export default function CsvExportTab() {
+  const [showR2Modal, setShowR2Modal] = useState(false);
+  const [r2ModalTarget, setR2ModalTarget] = useState<'source' | 'template'>('source');
+
   const {
     file,
     workbook,
@@ -32,6 +36,11 @@ export default function CsvExportTab() {
     setKeepOriginal,
     constantMapping,
     setConstantMapping,
+    presets,
+    activePresetId,
+    handleSelectPreset,
+    handleSavePreset,
+    handleDeletePreset,
     switchTab,
     processSheet,
     handleTemplateUpload,
@@ -43,12 +52,38 @@ export default function CsvExportTab() {
     exportData,
   } = useCsvExportState();
 
+  const handleLoadR2TemplateFile = (loadedFile: File, isTemplateAttached?: boolean) => {
+    const fakeEvent = {
+      target: { files: [loadedFile] }
+    } as unknown as React.ChangeEvent<HTMLInputElement>;
+
+    if (isTemplateAttached) {
+      handleTemplateUpload(fakeEvent);
+    } else {
+      handleFileUpload(fakeEvent);
+    }
+  };
+
+  const handleLoadR2TemplateMapping = (
+    newMapping: Record<string, string>,
+    newConstantMapping?: Record<string, string>,
+    newKeepOriginal?: Record<string, boolean>
+  ) => {
+    if (newMapping) setMapping(newMapping);
+    if (newConstantMapping) setConstantMapping(newConstantMapping);
+    if (newKeepOriginal) setKeepOriginal(newKeepOriginal);
+  };
+
   return (
     <div className="h-full bg-slate-50 dark:bg-[#1a1a1c] p-4 font-sans text-slate-800 dark:text-[#e3e3e3] overflow-y-auto w-full custom-scrollbar">
       <div className="max-w-[1400px] mx-auto space-y-6">
         <CsvExportHeaderTabs
           activeTab={activeTab}
           onTabChange={switchTab}
+          onOpenR2Modal={() => {
+            setR2ModalTarget('source');
+            setShowR2Modal(true);
+          }}
         />
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -71,6 +106,14 @@ export default function CsvExportTab() {
               }}
               activeTab={activeTab}
               error={error}
+              onOpenR2Modal={() => {
+                setR2ModalTarget('source');
+                setShowR2Modal(true);
+              }}
+              onOpenR2TemplateModal={() => {
+                setR2ModalTarget('template');
+                setShowR2Modal(true);
+              }}
             />
 
             <CsvExportMappingTable
@@ -83,6 +126,11 @@ export default function CsvExportTab() {
               constantMapping={constantMapping}
               setConstantMapping={setConstantMapping}
               excelHeaders={excelHeaders}
+              presets={presets}
+              activePresetId={activePresetId}
+              onSelectPreset={handleSelectPreset}
+              onSavePreset={handleSavePreset}
+              onDeletePreset={handleDeletePreset}
               onLockToggle={
                 isLocked ? () => setShowUnlockModal(true) : handleSaveMapping
               }
@@ -108,6 +156,20 @@ export default function CsvExportTab() {
           setPasswordInput={setPasswordInput}
           passwordError={passwordError}
           onUnlock={handleUnlock}
+        />
+
+        <CsvExportR2TemplateModal
+          isOpen={showR2Modal}
+          onClose={() => setShowR2Modal(false)}
+          activeTab={activeTab}
+          targetMode={r2ModalTarget}
+          file={file}
+          templateFile={templateFile}
+          mapping={mapping}
+          constantMapping={constantMapping}
+          keepOriginal={keepOriginal}
+          onLoadTemplateFile={handleLoadR2TemplateFile}
+          onLoadTemplateMapping={handleLoadR2TemplateMapping}
         />
       </div>
     </div>

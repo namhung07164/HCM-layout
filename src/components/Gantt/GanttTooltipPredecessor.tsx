@@ -14,8 +14,8 @@ import { useAppStore } from '../../store/useAppStore';
 import { doc } from 'firebase/firestore';
 import { writeBatch } from '../../lib/firestoreWrites';
 import { db, APP_ID } from '../../lib/firebase';
-import { Edit2, Check, X, Link, Plus } from 'lucide-react';
-import { cn } from '../../lib/utils';
+import { Edit2, Check, X, Link, Plus, RefreshCw } from 'lucide-react';
+import { cn, normalizeDashes } from '../../lib/utils';
 
 interface GanttTooltipPredecessorProps {
   task: Task;
@@ -81,15 +81,9 @@ export const GanttTooltipPredecessor = React.memo(function GanttTooltipPredecess
         projectLocation: task?.location,
       };
 
-      const resolved = resolvePredecessorString(rawVal, tasks, projects, task?.projectCode, context);
+      const normRawVal = normalizeDashes(rawVal);
+      const resolved = resolvePredecessorString(normRawVal, tasks, projects, task?.projectCode, context);
       setVal(resolved);
-
-      if (resolved === (task.predecessor || '')) {
-        setIsEditing(false);
-        onEditingChange?.(false);
-        setIsSaving(false);
-        return;
-      }
 
       let currentTasks = useAppStore.getState().tasks || tasks;
       const updatedTask: Task = {
@@ -107,10 +101,19 @@ export const GanttTooltipPredecessor = React.memo(function GanttTooltipPredecess
       if (resolved.trim() && (!parsed.length || parsed.some((p) => !p.task))) {
         const parts = splitPredecessors(resolved, Array.from(taskNoMap.keys()));
         for (const token of parts) {
-          const cleanToken = token.replace(/(fs|ss|ff|sf|[+-]\s*\d+|\s+\d+)$/i, '').trim();
-          const matchedProj = projects.find((p) => p.code && cleanToken.toLowerCase().startsWith(p.code.toLowerCase()));
-          if (matchedProj && matchedProj.code !== task.projectCode) {
-            const loaded = await ensureProjectTasksLoaded(matchedProj.code);
+          const cleanToken = normalizeDashes(token).replace(/(fs|ss|ff|sf|[+-]\s*\d+|\s+\d+)$/i, '').trim();
+          const cleanTokenLower = cleanToken.toLowerCase();
+          const matchedProj = projects.find(
+            (p) =>
+              p.code &&
+              cleanTokenLower.startsWith(normalizeDashes(p.code).toLowerCase())
+          );
+          if (matchedProj && (matchedProj.id !== task.projectId || matchedProj.code !== task.projectCode)) {
+            const loaded = await ensureProjectTasksLoaded(matchedProj.code, {
+              projectId: matchedProj.id,
+              store: matchedProj.store,
+              year: matchedProj.year,
+            });
             if (loaded.length > 0) {
               currentTasks = useAppStore.getState().tasks || currentTasks;
               taskNoMap = buildTaskNoMap(projects, currentTasks);
@@ -188,7 +191,7 @@ export const GanttTooltipPredecessor = React.memo(function GanttTooltipPredecess
         ref={containerRef} 
         onClick={(e) => e.stopPropagation()} 
         onMouseDown={(e) => e.stopPropagation()}
-        className="flex flex-col gap-1.5 p-2 rounded-xl bg-slate-900/95 dark:bg-slate-950/95 border border-blue-500/50 shadow-md my-1 w-full min-w-[240px] max-w-[320px] max-h-[360px] overflow-y-auto overscroll-contain"
+        className="flex flex-col gap-2 p-3 rounded-xl bg-slate-900/95 dark:bg-slate-950/95 border border-blue-500/50 shadow-md my-1 w-full min-w-[280px] sm:min-w-[380px] max-w-full max-h-[580px] overflow-visible"
       >
         <div className="flex items-center justify-between text-[11px] font-bold text-blue-300">
           <span className="flex items-center gap-1">

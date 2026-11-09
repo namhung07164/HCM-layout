@@ -1,5 +1,6 @@
 import React, { FC, Fragment, memo } from 'react';
 import { FastLayer, Layer, Image as KonvaImage, Rect, Circle, Path, Line, Text, Group } from 'react-konva';
+import { getHatchPatternCanvas } from './layoutPatternUtils';
 
 export interface LayoutKonvaLayersProps {
   bgImage: HTMLImageElement | null;
@@ -8,6 +9,7 @@ export interface LayoutKonvaLayersProps {
   layoutTooltipVisibility: any;
   focusedUnitId: string | null;
   selectedLegendGroupId: string | null;
+  activeGroups?: any[];
   getContrastStyle: (fillColor: string) => { text: string; shapeStroke: string };
   stageScale: number;
   aggregatedData: Record<string, any>;
@@ -15,8 +17,8 @@ export interface LayoutKonvaLayersProps {
   onMouseEnterUnit: (unit: any, e: any) => void;
   onMouseMoveUnit: (unit: any, e: any) => void;
   onMouseLeaveUnit: (unit: any, e: any) => void;
-  onClickUnit: (unit: any, e: any) => void;
-  onTapUnit: (unit: any, e: any) => void;
+  onClickUnit: (unit: any, e: any, quickImageMode?: boolean) => void;
+  onTapUnit: (unit: any, e: any, quickImageMode?: boolean) => void;
   hasStoredUnitImages: (codeOrName: string | undefined | null, store?: string) => boolean;
   storeFilter?: string;
 }
@@ -28,6 +30,7 @@ export const LayoutKonvaLayers: React.FC<LayoutKonvaLayersProps> = React.memo(({
   layoutTooltipVisibility,
   focusedUnitId,
   selectedLegendGroupId,
+  activeGroups,
   getContrastStyle,
   stageScale,
   aggregatedData,
@@ -42,7 +45,8 @@ export const LayoutKonvaLayers: React.FC<LayoutKonvaLayersProps> = React.memo(({
 }) => {
   const isDarkMode = typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
   const isLegendColorOn = layoutTooltipVisibility?.legendColor !== false;
-  const currentZoom = stageScale || 1;
+  // Quantize zoom into discrete 0.5x LOD buckets so minor zoom changes do not trigger Canvas2D text re-measurement across all units
+  const quantizedZoom = Math.max(0.5, Math.min(2.5, Math.round((stageScale || 1) * 2) / 2));
 
   return (
     <>
@@ -64,62 +68,141 @@ export const LayoutKonvaLayers: React.FC<LayoutKonvaLayersProps> = React.memo(({
 
       {/* Layer 2: Interactive unit shapes, text, and alert badges */}
       <Layer id="units-interactive-layer">
-        {visibleUnits.map((unit: any) => {
-          const hasColor = Boolean(unit.targetColor);
-          const fillColor = isLegendColorOn && hasColor ? unit.targetColor : "rgba(0, 0, 0, 0.001)";
-          const isFocused = focusedUnitId === unit.id;
-          const isDimmed = isLegendColorOn && hasColor && selectedLegendGroupId !== null && unit.targetGroupId !== selectedLegendGroupId;
-          const contrast = isLegendColorOn && hasColor 
-            ? getContrastStyle(fillColor) 
-            : { text: isDarkMode ? '#94a3b8' : '#64748b', shapeStroke: isDarkMode ? 'rgba(100, 116, 139, 0.35)' : 'rgba(148, 163, 184, 0.45)' };
-          
-          const displayOpacity = !isLegendColorOn || !hasColor
-            ? (isFocused ? 1.0 : 0.5)
-            : (isFocused 
-                ? 1.0 
-                : isDimmed 
-                ? 0.2 
-                : Math.max(0.82, unit.targetOpacity ?? 0.85));
-          
-          const commonProps = {
-            id: unit.id,
-            fill: fillColor,
-            opacity: displayOpacity,
-            stroke: isFocused ? '#f59e0b' : (isDimmed ? '#94a3b8' : contrast.shapeStroke),
-            strokeWidth: isFocused ? 3 : (hasColor ? 1.5 : 1),
-            strokeScaleEnabled: false,
-            perfectDrawEnabled: false,
-            x: unit.x || 0,
-            y: unit.y || 0,
-            rotation: unit.rotation || 0,
-            onMouseEnter: (e: any) => onMouseEnterUnit(unit, e),
-            onMouseMove: (e: any) => onMouseMoveUnit(unit, e),
-            onMouseLeave: (e: any) => onMouseLeaveUnit(unit, e),
-            onClick: (e: any) => onClickUnit(unit, e),
-            onTap: (e: any) => onTapUnit(unit, e),
+        {(() => {
+          const renderedImgBadgePositions: { x: number; y: number; normCode: string }[] = [];
+          const isLegendFiltered = selectedLegendGroupId !== null;
+          const selectedLegendIdLower = isLegendFiltered ? String(selectedLegendGroupId).toLowerCase() : '';
+          const selectedGroup = isLegendFiltered
+            ? activeGroups?.find(
+                (g: any) => g.id === selectedLegendGroupId || String(g.name).toLowerCase() === selectedLegendIdLower
+              )
+            : null;
+          const selectedGroupColorLower = selectedGroup?.color ? selectedGroup.color.toLowerCase() : '';
+          const defaultContrast = {
+            text: isDarkMode ? '#94a3b8' : '#64748b',
+            shapeStroke: isDarkMode ? 'rgba(100, 116, 139, 0.35)' : 'rgba(148, 163, 184, 0.45)',
           };
+          const sqrtZoom40 = Math.sqrt(Math.max(0.4, quantizedZoom));
+          const badgeRadius = Math.max(4.5, Math.min(8.5, 6.5 / sqrtZoom40));
+          const badgeFontSize = Math.max(6.5, Math.min(10.5, 8.5 / sqrtZoom40));
+          const imgBtnH = Math.max(11.5, Math.min(20, 14.5 / Math.sqrt(Math.max(0.45, quantizedZoom))));
+          const imgBtnW = imgBtnH * 1.26;
+          const imgIconScale = (imgBtnH * 0.78) / 24;
 
-          // Calculated font size for optimal legibility
-          const unitW = unit.textWidth || 100;
-          const unitH = unit.textHeight || 30;
-          const baseFont = Math.max(10, Math.min(18, Math.round(Math.min(unitW, unitH * 2.2) / 5.5)));
-          const dynamicFontSize = Math.max(9, Math.min(22, baseFont / Math.max(0.65, Math.min(currentZoom, 1.8))));
+          return visibleUnits.map((unit: any) => {
+            const hasColor = Boolean(unit.targetColor);
+            const fillColor = isLegendColorOn && hasColor ? unit.targetColor : "rgba(0, 0, 0, 0.001)";
+            const isFocused = focusedUnitId === unit.id;
 
-          // Badge placement coordinates
-          let badgeX = (unit.textX || unit.x || 0) + (unit.textWidth || unit.width || 100) - 8;
-          let badgeY = (unit.textY || unit.y || 0) + 8;
-          let imgBadgeX = (unit.textX || unit.x || 0) + 8;
-          let imgBadgeY = (unit.textY || unit.y || 0) + 8;
-          if (unit.type === 'circle') {
-            const r = unit.radius || 20;
-            badgeX = (unit.x || 0) + r * 0.6;
-            badgeY = (unit.y || 0) - r * 0.6;
-            imgBadgeX = (unit.x || 0) - r * 0.6;
-            imgBadgeY = (unit.y || 0) - r * 0.6;
-          }
-          const uCode = String(unit.name || unit.id || unit.code || '').toLowerCase();
-          const unitData = (uCode && aggregatedData[uCode]) ? aggregatedData[uCode] : null;
-          const hasAlert = Boolean(unitData?.alerts?.hasAlert);
+            const uCode = String(unit.name || unit.id || unit.code || '').toLowerCase().trim();
+            const uName = String(unit.name || '').toLowerCase().trim();
+            const uId = String(unit.id || '').toLowerCase().trim();
+            const unitData = (uName && aggregatedData[uName]) || (uId && aggregatedData[uId]) || (uCode && aggregatedData[uCode]) || null;
+
+            const isGroupMatched = isLegendFiltered && (
+              (unit.targetGroupId && unit.targetGroupId === selectedLegendGroupId) ||
+              (unit.targetGroupId && String(unit.targetGroupId).toLowerCase() === selectedLegendIdLower) ||
+              (selectedGroup && unit.targetGroupId === selectedGroup.id) ||
+              (selectedGroupColorLower && unit.targetColor && unit.targetColor.toLowerCase() === selectedGroupColorLower) ||
+              (unitData?.projectStatus && String(unitData.projectStatus).toLowerCase() === selectedLegendIdLower) ||
+              (unitData?.status && String(unitData.status).toLowerCase() === selectedLegendIdLower) ||
+              (unitData?.appProjectStatus && String(unitData.appProjectStatus).toLowerCase() === selectedLegendIdLower)
+            );
+            const isDimmed = isLegendColorOn && hasColor && isLegendFiltered && !isGroupMatched;
+
+            const contrast = isLegendColorOn && hasColor ? getContrastStyle(fillColor) : defaultContrast;
+
+            // Determine if unit or project has area
+            const areaVal = 
+              Number(unitData?.matchedProject?.sizeM2 ?? 0) ||
+              Number(unitData?.appProjectSizeM2 ?? 0) ||
+              Number(unitData?.sizeM2 ?? 0) ||
+              Number(unitData?.size ?? 0) ||
+              Number(unit?.sizeM2 ?? 0) ||
+              Number(unit?.size ?? 0) ||
+              0;
+            const hasArea = areaVal > 0;
+
+            const statusColor = selectedGroup?.color || unit.targetColor || fillColor;
+
+            let unitStroke: string | undefined = undefined;
+            let unitStrokeWidth = 0;
+
+            if (isFocused) {
+              unitStroke = '#f59e0b';
+              unitStrokeWidth = 3;
+            } else if (isLegendFiltered) {
+              if (isGroupMatched) {
+                if (hasArea) {
+                  unitStroke = statusColor;
+                  unitStrokeWidth = 3.5;
+                } else {
+                  unitStroke = undefined;
+                  unitStrokeWidth = 0;
+                }
+              } else {
+                unitStroke = isDarkMode ? 'rgba(100, 116, 139, 0.15)' : 'rgba(148, 163, 184, 0.2)';
+                unitStrokeWidth = 0.5;
+              }
+            } else {
+              unitStroke = isDimmed ? '#94a3b8' : contrast.shapeStroke;
+              unitStrokeWidth = hasColor ? 1.5 : 1;
+            }
+
+            const displayOpacity = !isLegendColorOn || !hasColor
+              ? (isFocused ? 1.0 : 0.5)
+              : (isFocused 
+                  ? 1.0 
+                  : isLegendFiltered
+                  ? (isGroupMatched ? (hasArea ? 1.0 : 0.75) : 0.18)
+                  : Math.max(0.82, unit.targetOpacity ?? 0.85));
+
+            const patternCanvas = (isLegendColorOn && hasColor && unit.targetHatchPattern && unit.targetHatchPattern !== 'none')
+              ? getHatchPatternCanvas(fillColor, unit.targetHatchPattern)
+              : null;
+
+            const commonProps = {
+              id: unit.id,
+              fill: patternCanvas ? undefined : fillColor,
+              fillPatternImage: (patternCanvas as any) || undefined,
+              fillPatternRepeat: patternCanvas ? 'repeat' : undefined,
+              fillPriority: patternCanvas ? 'pattern' : 'color',
+              opacity: displayOpacity,
+              stroke: unitStrokeWidth > 0 ? unitStroke : undefined,
+              strokeWidth: unitStrokeWidth,
+              shadowEnabled: false,
+              shadowForStrokeEnabled: false,
+              strokeScaleEnabled: false,
+              perfectDrawEnabled: false,
+              x: unit.x || 0,
+              y: unit.y || 0,
+              rotation: unit.rotation || 0,
+              onMouseEnter: (e: any) => onMouseEnterUnit(unit, e),
+              onMouseMove: (e: any) => onMouseMoveUnit(unit, e),
+              onMouseLeave: (e: any) => onMouseLeaveUnit(unit, e),
+              onClick: (e: any) => onClickUnit(unit, e, false),
+              onTap: (e: any) => onTapUnit(unit, e, false),
+            };
+
+            // Calculated font size for optimal legibility using quantized LOD zoom bucket
+            const unitW = unit.textWidth || 100;
+            const unitH = unit.textHeight || 30;
+            const baseFont = Math.max(10, Math.min(18, Math.round(Math.min(unitW, unitH * 2.2) / 5.5)));
+            const dynamicFontSize = Math.max(9, Math.min(22, Math.round(baseFont / Math.max(0.65, Math.min(quantizedZoom, 1.8)))));
+
+            // Badge placement coordinates
+            let badgeX = (unit.textX || unit.x || 0) + (unit.textWidth || unit.width || 100) - 8;
+            let badgeY = (unit.textY || unit.y || 0) + 8;
+            let imgBadgeX = (unit.textX || unit.x || 0) + Math.max(9, imgBtnW * 0.5 + 1.5);
+            let imgBadgeY = (unit.textY || unit.y || 0) + Math.max(8, imgBtnH * 0.5 + 1.5);
+            if (unit.type === 'circle') {
+              const r = unit.radius || 20;
+              badgeX = (unit.x || 0) + r * 0.6;
+              badgeY = (unit.y || 0) - r * 0.6;
+              imgBadgeX = (unit.x || 0) - r * 0.65;
+              imgBadgeY = (unit.y || 0) - r * 0.65;
+            }
+            const hasAlert = Boolean(unitData?.alerts?.hasAlert);
           const hasImage = Boolean(
             unitData?.hasImage || 
             unit.imageUrl || 
@@ -129,13 +212,26 @@ export const LayoutKonvaLayers: React.FC<LayoutKonvaLayersProps> = React.memo(({
             hasStoredUnitImages(unit.id, storeFilter) ||
             hasStoredUnitImages(unit.code, storeFilter)
           );
-          const badgeRadius = Math.max(4.5, Math.min(8.5, 6.5 / Math.sqrt(Math.max(0.4, stageScale || 1))));
-          const badgeFontSize = Math.max(6.5, Math.min(10.5, 8.5 / Math.sqrt(Math.max(0.4, stageScale || 1))));
-          const imgPathScale = (badgeRadius * 1.3) / 24;
 
           // Dynamic Level of Detail (LOD) threshold:
           // Only rasterize expensive text & alert badges when zoom level is legible (scale >= 0.22) or if focused
           const showTextAndBadge = isFocused || (stageScale || 1) >= 0.22;
+
+          const normUnitCode = String(unit.name || unit.id || unit.code || '')
+            .toLowerCase()
+            .replace(/^(l\d+|b\d+|md-[lb]\d+)[-_]/i, '')
+            .trim();
+
+          const isDuplicateImgBtn = Boolean(
+            hasImage && renderedImgBadgePositions.some(
+              pos => (pos.normCode && normUnitCode && pos.normCode === normUnitCode) ||
+                     Math.hypot(pos.x - imgBadgeX, pos.y - imgBadgeY) < 32
+            )
+          );
+
+          if (hasImage && !isDuplicateImgBtn && showTextAndBadge) {
+            renderedImgBadgePositions.push({ x: imgBadgeX, y: imgBadgeY, normCode: normUnitCode });
+          }
 
           return (
             <React.Fragment key={unit.id}>
@@ -155,7 +251,7 @@ export const LayoutKonvaLayers: React.FC<LayoutKonvaLayersProps> = React.memo(({
 
               {hasColor && unit.name && showTextAndBadge && (
                 <Text 
-                  text={unit.name}
+                  text={unit.targetSymbol ? `${unit.targetSymbol} ${unit.name}` : unit.name}
                   x={unit.textX}
                   y={unit.textY}
                   width={unit.textWidth}
@@ -175,6 +271,41 @@ export const LayoutKonvaLayers: React.FC<LayoutKonvaLayersProps> = React.memo(({
                 />
               )}
 
+              {/* Group Symbol Marker Badge */}
+              {hasColor && unit.targetSymbol && showTextAndBadge && (
+                <Group 
+                  x={unit.type === 'circle' ? (unit.x || 0) - (unit.radius || 20) * 0.55 : (unit.textX || unit.x || 0) + 7} 
+                  y={unit.type === 'circle' ? (unit.y || 0) + (unit.radius || 20) * 0.55 : (unit.textY || unit.y || 0) + (unit.textHeight || unit.height || 30) - 7} 
+                  listening={false}
+                >
+                  <Circle
+                    radius={badgeRadius}
+                    fill={contrast.shapeStroke || "#1e293b"}
+                    stroke="#ffffff"
+                    strokeWidth={Math.max(1, 1.2 / Math.sqrt(Math.max(0.4, stageScale || 1)))}
+                    strokeScaleEnabled={false}
+                    perfectDrawEnabled={false}
+                    listening={false}
+                  />
+                  <Text
+                    text={unit.targetSymbol}
+                    x={-badgeRadius}
+                    y={-badgeRadius + 0.5}
+                    width={badgeRadius * 2}
+                    height={badgeRadius * 2}
+                    align="center"
+                    verticalAlign="middle"
+                    fontSize={badgeFontSize * 0.95}
+                    fontStyle="bold"
+                    fill="#ffffff"
+                    fontFamily="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+                    strokeScaleEnabled={false}
+                    perfectDrawEnabled={false}
+                    listening={false}
+                  />
+                </Group>
+              )}
+
               {/* Smart Alert Badge (Rendered ONLY when unit is colored, has real alerts, and LOD permits) */}
               {hasColor && hasAlert && unitData?.alerts && showTextAndBadge && (
                 <Group x={badgeX} y={badgeY} listening={false}>
@@ -185,6 +316,7 @@ export const LayoutKonvaLayers: React.FC<LayoutKonvaLayersProps> = React.memo(({
                     strokeWidth={Math.max(1, 1.5 / Math.sqrt(Math.max(0.4, stageScale || 1)))}
                     strokeScaleEnabled={false}
                     perfectDrawEnabled={false}
+                    listening={false}
                   />
                   <Text
                     text={unitData.alerts.count > 1 ? String(unitData.alerts.count) : '!'}
@@ -200,36 +332,74 @@ export const LayoutKonvaLayers: React.FC<LayoutKonvaLayersProps> = React.memo(({
                     fontFamily="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
                     strokeScaleEnabled={false}
                     perfectDrawEnabled={false}
+                    listening={false}
                   />
                 </Group>
               )}
 
-              {/* Thumbnail / Image Indicator Badge (Rendered when project has attached photos/thumbnails) */}
-              {hasImage && showTextAndBadge && (
-                <Group x={imgBadgeX} y={imgBadgeY} listening={false}>
-                  <Circle
-                    radius={badgeRadius}
+              {/* Interactive Quick-Image Button Badge (Click/Tap opens Quick Image Tooltip directly) */}
+              {hasImage && !isDuplicateImgBtn && showTextAndBadge && (
+                <Group x={imgBadgeX} y={imgBadgeY}>
+                  <Rect
+                    x={-imgBtnW / 2}
+                    y={-imgBtnH / 2}
+                    width={imgBtnW}
+                    height={imgBtnH}
+                    cornerRadius={imgBtnH * 0.28}
                     fill="#2563eb"
                     stroke="#ffffff"
-                    strokeWidth={Math.max(1, 1.5 / Math.sqrt(Math.max(0.4, stageScale || 1)))}
+                    strokeWidth={Math.max(1.2, 1.6 / Math.sqrt(Math.max(0.4, stageScale || 1)))}
+                    hitStrokeWidth={10}
                     strokeScaleEnabled={false}
                     perfectDrawEnabled={false}
+                    onMouseEnter={(e: any) => {
+                      e.cancelBubble = true;
+                      const container = e.target.getStage()?.container();
+                      if (container) container.style.cursor = 'pointer';
+                    }}
+                    onMouseMove={(e: any) => {
+                      e.cancelBubble = true;
+                    }}
+                    onMouseLeave={(e: any) => {
+                      e.cancelBubble = true;
+                    }}
+                    onClick={(e: any) => {
+                      e.cancelBubble = true;
+                      onClickUnit(unit, e, true);
+                    }}
+                    onTap={(e: any) => {
+                      e.cancelBubble = true;
+                      onTapUnit(unit, e, true);
+                    }}
                   />
-                  <Path
-                    data="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V5h14v14zm-5.04-6.71l-2.75 3.54-1.96-2.36L6.5 17h11l-3.54-4.71z"
-                    fill="#ffffff"
-                    scaleX={imgPathScale}
-                    scaleY={imgPathScale}
-                    x={-badgeRadius * 0.65}
-                    y={-badgeRadius * 0.65}
+                  {/* Golden Sun inside Photo Button */}
+                  <Circle
+                    x={-imgBtnW * 0.18}
+                    y={-imgBtnH * 0.15}
+                    radius={imgBtnH * 0.12}
+                    fill="#fde047"
                     strokeScaleEnabled={false}
                     perfectDrawEnabled={false}
+                    listening={false}
+                  />
+                  {/* Crisp White Mountain Landscape inside Photo Button */}
+                  <Path
+                    data="M4 18l4-5 3 3.5L15 11l5 7H4z"
+                    fill="#ffffff"
+                    scaleX={imgIconScale}
+                    scaleY={imgIconScale}
+                    x={-12 * imgIconScale}
+                    y={-11.5 * imgIconScale}
+                    strokeScaleEnabled={false}
+                    perfectDrawEnabled={false}
+                    listening={false}
                   />
                 </Group>
               )}
             </React.Fragment>
           );
-        })}
+        });
+      })()}
       </Layer>
 
       {/* Layer 3: Dynamic Isolated Overlay Layer for Focused Unit Golden Ring */}

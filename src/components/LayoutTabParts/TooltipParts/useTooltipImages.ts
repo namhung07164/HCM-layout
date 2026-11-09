@@ -1,13 +1,22 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Project } from '../../../types';
 import { useAppStore } from '../../../store/useAppStore';
-import { doc, deleteField } from 'firebase/firestore';
+import { doc, getDoc } from 'firebase/firestore';
 import { setDoc } from '../../../lib/firestoreWrites';
 import { db, APP_ID } from '../../../lib/firebase';
 import { extractAllProjectCodes, projectMatchesUnitCode, extractProjectMetadata } from '../../../lib/utils';
 import { TooltipImageItem } from './tooltipTypes';
-import { deleteR2ImageCleanly } from '../../../lib/r2StorageUtils';
-import { recordDelta } from '../../../lib/deltaSyncService';
+import { removeUploadedImageEverywhere } from '../../../lib/projectImageSync';
+
+function normalizeStore(store?: string | null): string {
+  if (!store) return '';
+  const s = String(store).trim().toUpperCase();
+  if (s.includes('HN') || s.includes('HÀ NỘI') || s.includes('HA NOI') || s.includes('HANOI')) return 'HN';
+  if (s.includes('HCM') || s.includes('HỒ CHÍ MINH') || s.includes('HO CHI MINH') || s.includes('SAI GON') || s.includes('SG')) return 'HCM';
+  return s;
+}
+
+const unitImagesSessionCache = new Map<string, Array<{ id: string; url: string; title?: string; createdAt?: string; store?: string }>>();
 
 interface UseTooltipImagesParams {
   p?: Project;
@@ -16,102 +25,116 @@ interface UseTooltipImagesParams {
   tooltipRef: React.RefObject<HTMLDivElement>;
   positionTooltip: (forceRecalculate?: boolean) => void;
   storeFilter?: string;
+  quickImageMode?: boolean;
+  canWrite?: boolean;
 }
 
 export function useTooltipImages({
-  p,
-  data,
-  unitCode,
-  tooltipRef,
-  positionTooltip,
-  storeFilter,
+  p, data, unitCode, tooltipRef, positionTooltip, storeFilter, quickImageMode = false, canWrite = false,
 }: UseTooltipImagesParams) {
-  const [showImagePanel, setShowImagePanel] = useState(false);
+  const [showImagePanel, setShowImagePanel] = useState<boolean>(Boolean(quickImageMode));
   const [showAddLinkInput, setShowAddLinkInput] = useState(false);
   const [newLinkInput, setNewLinkInput] = useState('');
   const [copiedLink, setCopiedLink] = useState<string | null>(null);
   const [enlargedImage, setEnlargedImage] = useState<{ url: string; title?: string; initialScale?: number } | null>(null);
   const [customUnitImages, setCustomUnitImages] = useState<Array<{ id: string; url: string; title?: string; createdAt?: string; store?: string }>>([]);
 
-  const activeStore = (
+  const rawStore = (
     p?.store ||
     data?.store ||
     (p ? extractProjectMetadata(p).store : '') ||
     (storeFilter && storeFilter.toUpperCase() !== 'ALL' ? storeFilter : '') ||
     'HCM'
-  ).toUpperCase().trim();
+  );
+  const activeStore = normalizeStore(rawStore) || 'HCM';
 
-  const cleanCode = String(data?.code || unitCode || 'default').trim();
+  const cleanCode = String(data?.code || data?.unit || data?.name || unitCode || 'default').trim();
   const activeUnitStorageKey = `taka_unit_images_${activeStore}_${cleanCode}`;
+  const unitImagesDocKey = `${activeStore}_${cleanCode}`;
 
-  // Load custom images from localStorage with strict store separation
+  // 1. Instant 0ms load from session memory cache / localStorage
+  // 2. Smart Firestore sync on taka_unit_images: avoid hover read-storms by reusing session cache unless image panel is opened
   useEffect(() => {
-    try {
-      // 1. Primary: load store-partitioned key
-      const saved = localStorage.getItem(activeUnitStorageKey);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          const matching = parsed.filter(item => !item.store || item.store.toUpperCase() === activeStore);
-          setCustomUnitImages(matching);
-          return;
+    let localImages: any[] = [];
+    if (unitImagesSessionCache.has(unitImagesDocKey)) {
+      localImages = unitImagesSessionCache.get(unitImagesDocKey)!;
+      setCustomUnitImages(localImages);
+    } else {
+      try {
+        const saved = localStorage.getItem(activeUnitStorageKey);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) {
+            localImages = parsed.filter(item => !item.store || normalizeStore(item.store) === activeStore);
+            setCustomUnitImages(localImages);
+          } else {
+            setCustomUnitImages([]);
+          }
+        } else {
+          setCustomUnitImages([]);
+        }
+      } catch {
+        setCustomUnitImages([]);
+      }
+    }
+
+    // Zero-Read Hover Guard: Only fetch from Firestore when user explicitly opens the Image Panel, and at most once per unit per session
+    if ((!showImagePanel && !quickImageMode) || unitImagesSessionCache.has(unitImagesDocKey)) {
+      return;
+    }
+
+    let cancelled = false;
+    const docRef = doc(db, "artifacts", APP_ID, "public", "data", "taka_unit_images", unitImagesDocKey);
+    getDoc(docRef)
+      .then((snap) => {
+        if (cancelled) return;
+        if (snap.exists()) {
+          const cloudData = snap.data();
+          if (Array.isArray(cloudData?.images)) {
+            const cloudImages = cloudData.images.filter((item: any) => !item.store || normalizeStore(item.store) === activeStore);
+            unitImagesSessionCache.set(unitImagesDocKey, cloudImages);
+            setCustomUnitImages(cloudImages);
+            try {
+              localStorage.setItem(activeUnitStorageKey, JSON.stringify(cloudImages));
+            } catch {}
+            return;
+          }
+        }
+        unitImagesSessionCache.set(unitImagesDocKey, localImages);
+      })
+      .catch((err) => {
+        console.warn("[useTooltipImages] Cloud fetch:", err);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeUnitStorageKey, activeStore, cleanCode, unitImagesDocKey, showImagePanel, quickImageMode]);
+
+  useEffect(() => {
+    setShowImagePanel(Boolean(quickImageMode));
+    setShowAddLinkInput(false);
+  }, [data.code, data.unit, unitCode, quickImageMode]);
+
+  useEffect(() => {
+    if (!tooltipRef.current) return;
+    positionTooltip(true);
+    if (!showImagePanel) return;
+    const timer1 = setTimeout(() => {
+      if (tooltipRef.current) {
+        positionTooltip(true);
+        if (!quickImageMode) {
+          tooltipRef.current.scrollTo({ top: tooltipRef.current.scrollHeight, behavior: 'smooth' });
         }
       }
+    }, 50);
+    return () => clearTimeout(timer1);
+  }, [showImagePanel, quickImageMode, positionTooltip, tooltipRef]);
 
-      // 2. Legacy key check: only migrate to HN if currently in HN (never load into HCM!)
-      const legacyKey = `taka_unit_images_${cleanCode}`;
-      const legacySaved = localStorage.getItem(legacyKey);
-      if (legacySaved) {
-        try {
-          const parsedLegacy = JSON.parse(legacySaved);
-          if (Array.isArray(parsedLegacy) && parsedLegacy.length > 0) {
-            if (activeStore === 'HN') {
-              const tagged = parsedLegacy.map(item => ({ ...item, store: 'HN' }));
-              localStorage.setItem(activeUnitStorageKey, JSON.stringify(tagged));
-              localStorage.removeItem(legacyKey);
-              setCustomUnitImages(tagged);
-              return;
-            }
-          }
-        } catch {}
-      }
-
-      setCustomUnitImages([]);
-    } catch {
-      setCustomUnitImages([]);
-    }
-  }, [activeUnitStorageKey, activeStore, cleanCode]);
-
-  // Reset panel open state when unit changes
-  useEffect(() => {
-    setShowImagePanel(false);
-    setShowAddLinkInput(false);
-  }, [data.code, unitCode]);
-
-  // Re-evaluate position & smoothly scroll tooltip down to reveal image panel expanding below description box when image button is pressed
-  useEffect(() => {
-    if (tooltipRef.current) {
-      if (showImagePanel) {
-        positionTooltip(true);
-        setTimeout(() => {
-          if (tooltipRef.current) {
-            tooltipRef.current.scrollTo({
-              top: tooltipRef.current.scrollHeight,
-              behavior: 'smooth'
-            });
-          }
-        }, 50);
-      }
-    }
-  }, [showImagePanel, positionTooltip, tooltipRef]);
-
-  // Close enlarged image modal with Escape key
   useEffect(() => {
     if (!enlargedImage) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setEnlargedImage(null);
-      }
+      if (e.key === 'Escape') setEnlargedImage(null);
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
@@ -119,6 +142,7 @@ export function useTooltipImages({
 
   const handleAddCustomImage = (e?: React.FormEvent, customUrl?: string) => {
     if (e) e.preventDefault();
+    if (!canWrite) return;
     const targetUrl = customUrl || newLinkInput;
     const trimmed = targetUrl.trim();
     if (!trimmed) return;
@@ -131,6 +155,7 @@ export function useTooltipImages({
       store: activeStore,
     };
     const updated = [newEntry, ...customUnitImages];
+    unitImagesSessionCache.set(unitImagesDocKey, updated);
     setCustomUnitImages(updated);
     setNewLinkInput('');
     setShowAddLinkInput(false);
@@ -143,24 +168,30 @@ export function useTooltipImages({
       window.dispatchEvent(new CustomEvent('taka_unit_images_changed'));
     }
 
-    // Persist link to project ONLY IF project strictly belongs to activeStore
+    // 1. Direct Cloud Firestore persistence for taka_unit_images (Multi-device sync iOS <-> Desktop)
+    const unitImagesDocRef = doc(db, "artifacts", APP_ID, "public", "data", "taka_unit_images", unitImagesDocKey);
+    setDoc(unitImagesDocRef, {
+      unitCode: cleanCode,
+      store: activeStore,
+      images: updated,
+      updatedAt: new Date().toISOString(),
+    }, { merge: true }).catch(err => {
+      console.error("[useTooltipImages] Failed to save unit images to Firestore:", err);
+    });
+
+    // 2. Also persist link to matched project document
     try {
       const allProjects = useAppStore.getState().projects;
-      const targetProj = (p && extractProjectMetadata(p).store === activeStore ? p : null) || allProjects.find(item => {
-        if (item.id === p?.id && extractProjectMetadata(item).store === activeStore) return true;
-        const itemStore = extractProjectMetadata(item).store;
+      const targetProj = (p && normalizeStore(extractProjectMetadata(p).store) === activeStore ? p : null) || allProjects.find(item => {
+        if (item.id === p?.id && normalizeStore(extractProjectMetadata(item).store) === activeStore) return true;
+        const itemStore = normalizeStore(extractProjectMetadata(item).store);
         if (itemStore && itemStore !== activeStore) return false;
         const itemCodes = extractAllProjectCodes(item).map(c => c.toLowerCase());
-        const targetCode = String(data.code || unitCode || '').toLowerCase();
+        const targetCode = String(data?.code || data?.unit || data?.name || unitCode || '').toLowerCase();
         return itemCodes.includes(targetCode) || projectMatchesUnitCode(itemCodes, targetCode);
       });
 
-      if (targetProj && extractProjectMetadata(targetProj).store === activeStore) {
-        // Purge any legacy fake "Link / Photo:" tasks from taskSummaries to keep the task list & detail box clean
-        const cleanedSummaries = (targetProj.taskSummaries || []).filter(
-          ts => !ts.name?.startsWith('Link / Photo:') && !ts.name?.startsWith('http://') && !ts.name?.startsWith('https://')
-        );
-
+      if (targetProj && normalizeStore(extractProjectMetadata(targetProj).store) === activeStore) {
         const existingLinks: any[] = Array.isArray(targetProj.imageLinks) ? targetProj.imageLinks : [];
         const hasLinkAlready = existingLinks.some(l => (typeof l === 'string' ? l === trimmed : l?.url === trimmed));
         const newLinkObj = {
@@ -171,39 +202,31 @@ export function useTooltipImages({
           store: activeStore,
         };
         const updatedImageLinks = hasLinkAlready ? existingLinks : [newLinkObj, ...existingLinks];
+        const nowIso = new Date().toISOString();
 
         const updatedProject: Project = {
           ...targetProj,
-          taskSummaries: cleanedSummaries,
           imageUrl: targetProj.imageUrl || trimmed,
           thumbnail: targetProj.thumbnail || trimmed,
           imageLinks: updatedImageLinks,
+          updatedAt: nowIso,
         };
 
-        // 1. Instant Zustand 0ms optimistic update
         useAppStore.getState().setProjects(
           allProjects.map(proj => proj.id === targetProj.id ? updatedProject : proj)
         );
 
-        // 2. Cloud Firestore persistence for real-time multi-device sync (iOS <-> Desktop)
         if (targetProj.id) {
           const updateData = {
-            taskSummaries: cleanedSummaries,
             imageUrl: updatedProject.imageUrl,
             thumbnail: updatedProject.thumbnail,
             imageLinks: updatedImageLinks,
-            updatedAt: new Date().toISOString(),
+            updatedAt: nowIso,
           };
+          // setDoc from firestoreWrites.ts automatically queues and emits the delta via autoDeltaQueue
           setDoc(doc(db, "artifacts", APP_ID, "public", "data", "taka_projects", targetProj.id), updateData, { merge: true }).catch(err => {
             console.error("Failed to sync to Firestore:", err);
           });
-          recordDelta({
-            docId: targetProj.id,
-            collectionName: 'taka_projects',
-            action: 'update',
-            data: updateData,
-            year: String(targetProj.year || '')
-          }).catch(console.error);
         }
       }
     } catch (err) {
@@ -212,110 +235,30 @@ export function useTooltipImages({
   };
 
   const handleDeleteCustomImage = (id: string, urlToDelete?: string) => {
+    if (!canWrite) return;
+    const targetUrl = urlToDelete || customUnitImages.find(item => item.id === id)?.url;
+
+    // 1. Immediately remove from local component state & session cache
     const updated = customUnitImages.filter(item => item.id !== id && (urlToDelete ? item.url !== urlToDelete : true));
+    unitImagesSessionCache.set(unitImagesDocKey, updated);
     setCustomUnitImages(updated);
-    try {
-      if (updated.length === 0) {
-        localStorage.removeItem(activeUnitStorageKey);
-        localStorage.removeItem(`taka_unit_images_${activeStore}_${data.code || ''}`);
-        localStorage.removeItem(`taka_unit_images_${activeStore}_${unitCode || ''}`);
-        if (p?.code) localStorage.removeItem(`taka_unit_images_${activeStore}_${p.code}`);
-        // Also remove legacy keys if any
-        localStorage.removeItem(`taka_unit_images_${cleanCode}`);
-        localStorage.removeItem(`taka_unit_images_${data.code || ''}`);
-        localStorage.removeItem(`taka_unit_images_${unitCode || ''}`);
-        if (p?.code) localStorage.removeItem(`taka_unit_images_${p.code}`);
-      } else {
-        localStorage.setItem(activeUnitStorageKey, JSON.stringify(updated));
-      }
-    } catch {}
 
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('taka_unit_images_changed'));
-    }
+    // 2. Resolve matching project
+    const allProjects = useAppStore.getState().projects;
+    const targetProj = (p && normalizeStore(extractProjectMetadata(p).store) === activeStore ? p : null) || allProjects.find(item => {
+      if (item.id === p?.id && normalizeStore(extractProjectMetadata(item).store) === activeStore) return true;
+      const itemStore = normalizeStore(extractProjectMetadata(item).store);
+      if (itemStore && itemStore !== activeStore) return false;
+      const itemCodes = extractAllProjectCodes(item).map(c => c.toLowerCase());
+      const targetCode = String(data?.code || data?.unit || data?.name || unitCode || '').toLowerCase();
+      return itemCodes.includes(targetCode) || projectMatchesUnitCode(itemCodes, targetCode);
+    });
 
-    // Clean up from project.taskSummaries & project.imageLinks ONLY if project belongs to activeStore
-    try {
-      const targetUrl = urlToDelete || customUnitImages.find(item => item.id === id)?.url;
-      if (targetUrl) {
-        deleteR2ImageCleanly(targetUrl).catch(err => {
-          console.warn("[R2 Purge] Deep clean error:", err);
-        });
-      }
-
-      const allProjects = useAppStore.getState().projects;
-      const targetProj = (p && extractProjectMetadata(p).store === activeStore ? p : null) || allProjects.find(item => {
-        if (item.id === p?.id && extractProjectMetadata(item).store === activeStore) return true;
-        const itemStore = extractProjectMetadata(item).store;
-        if (itemStore && itemStore !== activeStore) return false;
-        const itemCodes = extractAllProjectCodes(item).map(c => c.toLowerCase());
-        const targetCode = String(data.code || unitCode || '').toLowerCase();
-        return itemCodes.includes(targetCode) || projectMatchesUnitCode(itemCodes, targetCode);
+    // 3. Purge image permanently from R2 Cloud, project comments, project imageLinks/thumbs, taka_unit_images, and delta sync
+    if (targetUrl) {
+      removeUploadedImageEverywhere(targetUrl, targetProj, cleanCode).catch(err => {
+        console.warn("[handleDeleteCustomImage] removeUploadedImageEverywhere error:", err);
       });
-
-      if (targetProj && extractProjectMetadata(targetProj).store === activeStore) {
-        const filteredSummaries = (targetProj.taskSummaries || []).filter(
-          ts => ts.link !== urlToDelete && ts.imageUrl !== urlToDelete && !ts.name?.includes(urlToDelete || '') && !ts.name?.startsWith('Link / Photo:')
-        );
-        const existingLinks: any[] = Array.isArray(targetProj.imageLinks) ? targetProj.imageLinks : [];
-        const updatedImageLinks = existingLinks.filter(l => {
-          const lUrl = typeof l === 'string' ? l : l?.url;
-          const lId = typeof l === 'object' ? l?.id : null;
-          if (id && lId === id) return false;
-          if (urlToDelete && lUrl === urlToDelete) return false;
-          return true;
-        });
-
-        const newImageUrl = targetProj.imageUrl === urlToDelete ? '' : targetProj.imageUrl;
-        const newThumbnail = targetProj.thumbnail === urlToDelete ? '' : targetProj.thumbnail;
-        const newPhoto = (targetProj as any).photo === urlToDelete ? '' : (targetProj as any).photo;
-        const newImage = (targetProj as any).image === urlToDelete ? '' : (targetProj as any).image;
-
-        const updatedProject: Project = {
-          ...targetProj,
-          taskSummaries: filteredSummaries,
-          imageUrl: newImageUrl,
-          thumbnail: newThumbnail,
-          photo: newPhoto,
-          image: newImage,
-          imageLinks: updatedImageLinks,
-        } as Project;
-
-        useAppStore.getState().setProjects(
-          allProjects.map(proj => proj.id === targetProj.id ? updatedProject : proj)
-        );
-
-        if (targetProj.id) {
-          const firestoreUpdate: Record<string, any> = {
-            taskSummaries: filteredSummaries,
-            imageLinks: updatedImageLinks,
-            updatedAt: new Date().toISOString(),
-          };
-          if (targetProj.imageUrl === urlToDelete) {
-            firestoreUpdate.imageUrl = deleteField();
-          }
-          if (targetProj.thumbnail === urlToDelete) {
-            firestoreUpdate.thumbnail = deleteField();
-          }
-          if ((targetProj as any).photo === urlToDelete) {
-            firestoreUpdate.photo = deleteField();
-          }
-          if ((targetProj as any).image === urlToDelete) {
-            firestoreUpdate.image = deleteField();
-          }
-
-          setDoc(doc(db, "artifacts", APP_ID, "public", "data", "taka_projects", targetProj.id), firestoreUpdate, { merge: true }).catch(console.error);
-          recordDelta({
-            docId: targetProj.id,
-            collectionName: 'taka_projects',
-            action: 'update',
-            data: firestoreUpdate,
-            year: String(targetProj.year || '')
-          }).catch(console.error);
-        }
-      }
-    } catch (err) {
-      console.error("Error removing from project taskSummaries:", err);
     }
   };
 
@@ -332,16 +275,26 @@ export function useTooltipImages({
     const list: TooltipImageItem[] = [];
     const seenUrls = new Set<string>();
 
-    const projStore = p ? extractProjectMetadata(p).store : '';
-    const isProjMatchingStore = !p || !projStore || !activeStore || projStore === activeStore;
+    const allProjects = useAppStore.getState().projects;
+    const resolvedProj = (p && normalizeStore(extractProjectMetadata(p).store) === activeStore ? p : null) || allProjects.find(item => {
+      const itemStore = normalizeStore(extractProjectMetadata(item).store);
+      if (itemStore && itemStore !== activeStore) return false;
+      const itemCodes = extractAllProjectCodes(item).map(c => c.toLowerCase());
+      const targetCode = String(data?.code || data?.unit || data?.name || unitCode || '').toLowerCase();
+      return itemCodes.includes(targetCode) || projectMatchesUnitCode(itemCodes, targetCode);
+    });
 
-    // 1. Cloud-backed project.imageLinks (Realtime synchronized across iOS, Android, and Desktop)
-    if (isProjMatchingStore && p?.imageLinks && Array.isArray(p.imageLinks)) {
-      p.imageLinks.forEach((imgItem: any, idx: number) => {
+    const targetP = resolvedProj || p;
+    const projStore = targetP ? normalizeStore(extractProjectMetadata(targetP).store) : '';
+    const isProjMatchingStore = !targetP || !projStore || !activeStore || projStore === activeStore;
+
+    // 1. Cloud-backed project.imageLinks
+    if (isProjMatchingStore && targetP?.imageLinks && Array.isArray(targetP.imageLinks)) {
+      targetP.imageLinks.forEach((imgItem: any, idx: number) => {
         const url = typeof imgItem === 'string' ? imgItem : imgItem?.url;
-        const itemStore = typeof imgItem === 'object' ? imgItem?.store : '';
+        const itemStore = typeof imgItem === 'object' ? normalizeStore(imgItem?.store) : '';
         if (url && typeof url === 'string' && !seenUrls.has(url)) {
-          if (!itemStore || itemStore.toUpperCase() === activeStore) {
+          if (!itemStore || itemStore === activeStore) {
             seenUrls.add(url);
             list.push({
               id: typeof imgItem === 'object' && imgItem.id ? imgItem.id : `img_cloud_${idx}`,
@@ -355,9 +308,9 @@ export function useTooltipImages({
       });
     }
 
-    // 2. Project taskSummaries links (Prioritized cloud-backed task summarize, strictly matching store)
-    if (isProjMatchingStore && p?.taskSummaries && Array.isArray(p.taskSummaries)) {
-      p.taskSummaries.forEach((ts, tsIdx) => {
+    // 2. Project taskSummaries links
+    if (isProjMatchingStore && targetP?.taskSummaries && Array.isArray(targetP.taskSummaries)) {
+      targetP.taskSummaries.forEach((ts, tsIdx) => {
         const url = ts.link || ts.imageUrl || ts.thumbnail || (typeof ts.name === 'string' ? ts.name.match(/https?:\/\/[^\s]+/)?.[0] : null);
         if (url && typeof url === 'string' && !seenUrls.has(url)) {
           seenUrls.add(url);
@@ -372,10 +325,10 @@ export function useTooltipImages({
       });
     }
 
-    // 3. Custom user-posted links from localStorage (fallback for offline/local cache, strictly filtered by activeStore)
+    // 3. Custom user-posted links (real-time Firestore sync & localStorage fallback)
     customUnitImages.forEach((c) => {
       if (c.url && !seenUrls.has(c.url)) {
-        if (!c.store || c.store.toUpperCase() === activeStore) {
+        if (!c.store || normalizeStore(c.store) === activeStore) {
           seenUrls.add(c.url);
           list.push({
             id: c.id,
@@ -388,86 +341,44 @@ export function useTooltipImages({
       }
     });
 
-    // 3. Project direct image / thumbnail fields (strictly matching activeStore)
-    if (isProjMatchingStore) {
-      if (p?.thumbnail && typeof p.thumbnail === 'string' && !seenUrls.has(p.thumbnail)) {
-        seenUrls.add(p.thumbnail);
-        list.push({
-          id: 'proj_thumb',
-          url: p.thumbnail,
-          title: 'Project Thumbnail',
-          source: 'Project Data',
-          isCustom: true,
-        });
-      }
-      if (p?.imageUrl && typeof p.imageUrl === 'string' && !seenUrls.has(p.imageUrl)) {
-        seenUrls.add(p.imageUrl);
-        list.push({
-          id: 'proj_image',
-          url: p.imageUrl,
-          title: 'Project Image',
-          source: 'Project Data',
-          isCustom: true,
-        });
-      }
-      if ((p as any)?.image && typeof (p as any).image === 'string' && !seenUrls.has((p as any).image)) {
-        seenUrls.add((p as any).image);
-        list.push({
-          id: 'proj_img',
-          url: (p as any).image,
-          title: 'Project Image',
-          source: 'Project Data',
-          isCustom: true,
-        });
-      }
-      if ((p as any)?.photo && typeof (p as any).photo === 'string' && !seenUrls.has((p as any).photo)) {
-        seenUrls.add((p as any).photo);
-        list.push({
-          id: 'proj_photo',
-          url: (p as any).photo,
-          title: 'Project Photo',
-          source: 'Project Data',
-          isCustom: true,
-        });
-      }
+    // 4. Project direct image / thumbnail fields
+    if (isProjMatchingStore && targetP) {
+      ['thumbnail', 'imageUrl', 'image', 'photo'].forEach((key) => {
+        const val = (targetP as any)[key];
+        if (val && typeof val === 'string' && !seenUrls.has(val)) {
+          seenUrls.add(val);
+          list.push({
+            id: `proj_${key}`,
+            url: val,
+            title: key === 'thumbnail' ? 'Project Thumbnail' : 'Project Image',
+            source: 'Project Data',
+            isCustom: true,
+          });
+        }
+      });
     }
 
-    // 4. Unit image from layout data (strictly matching activeStore)
-    const dataStore = (data.store || '').toUpperCase().trim();
+    // 5. Unit image from layout data
+    const dataStore = normalizeStore(data?.store || '');
     const isDataMatchingStore = !dataStore || !activeStore || dataStore === activeStore;
     if (isDataMatchingStore) {
-      if (data.imageUrl && typeof data.imageUrl === 'string' && !seenUrls.has(data.imageUrl)) {
-        seenUrls.add(data.imageUrl);
-        list.push({
-          id: 'data_image',
-          url: data.imageUrl,
-          title: 'Unit Layout Image',
-          source: 'Layout Data',
-        });
-      }
-      if (data.thumbnail && typeof data.thumbnail === 'string' && !seenUrls.has(data.thumbnail)) {
-        seenUrls.add(data.thumbnail);
-        list.push({
-          id: 'data_thumb',
-          url: data.thumbnail,
-          title: 'Unit Thumbnail',
-          source: 'Layout Data',
-        });
-      }
-      if (data.image && typeof data.image === 'string' && !seenUrls.has(data.image)) {
-        seenUrls.add(data.image);
-        list.push({
-          id: 'data_img',
-          url: data.image,
-          title: 'Floor Image',
-          source: 'Layout Data',
-        });
-      }
+      ['imageUrl', 'thumbnail', 'image'].forEach((key) => {
+        const val = data[key];
+        if (val && typeof val === 'string' && !seenUrls.has(val)) {
+          seenUrls.add(val);
+          list.push({
+            id: `data_${key}`,
+            url: val,
+            title: key === 'thumbnail' ? 'Unit Thumbnail' : 'Unit Layout Image',
+            source: 'Layout Data',
+          });
+        }
+      });
     }
 
-    // 5. Project comments attachments (strictly matching activeStore)
-    if (isProjMatchingStore && p?.comments && Array.isArray(p.comments)) {
-      p.comments.forEach((c, cIdx) => {
+    // 6. Project comments attachments & image URLs in comment text
+    if (isProjMatchingStore && targetP?.comments && Array.isArray(targetP.comments)) {
+      targetP.comments.forEach((c, cIdx) => {
         if (c.attachments && Array.isArray(c.attachments)) {
           c.attachments.forEach((att, aIdx) => {
             if (att.url && !seenUrls.has(att.url)) {
@@ -477,6 +388,27 @@ export function useTooltipImages({
                 url: att.url,
                 title: att.name || `Attachment ${list.length + 1}`,
                 source: `Comment by ${c.userName || 'User'}`,
+                isCustom: true,
+              });
+            }
+          });
+        }
+        if (c.text && typeof c.text === 'string') {
+          const matchedUrls = c.text.match(/(https?:\/\/[^\s]+)/g) || [];
+          matchedUrls.forEach((rawUrl, uIdx) => {
+            const url = rawUrl.trim();
+            const isImg = url.match(/\.(jpe?g|png|webp|gif|svg|bmp)(\?.*)?$/i) ||
+              url.includes('hcm.taka-pm.org') ||
+              url.includes('drive.google.com/file') ||
+              url.includes('firebasestorage.googleapis.com');
+            if (isImg && !seenUrls.has(url)) {
+              seenUrls.add(url);
+              list.push({
+                id: `comm_txt_${c.id || cIdx}_${uIdx}`,
+                url,
+                title: `Comment Photo (${c.userName || 'User'})`,
+                source: `Comment by ${c.userName || 'User'}`,
+                isCustom: true,
               });
             }
           });
@@ -485,7 +417,7 @@ export function useTooltipImages({
     }
 
     return list;
-  }, [customUnitImages, activeStore, data.store, data.imageUrl, data.thumbnail, data.image, p, p?.comments, p?.taskSummaries, p?.thumbnail, p?.imageUrl, (p as any)?.image, (p as any)?.photo]);
+  }, [customUnitImages, activeStore, data, p, unitCode]);
 
   return {
     showImagePanel,

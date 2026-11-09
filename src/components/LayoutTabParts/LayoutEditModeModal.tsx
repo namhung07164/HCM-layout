@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { DebouncedSearchInput } from '../DebouncedSearchInput';
+import { LayoutPaintCategoriesSection } from './LayoutPaintCategoriesSection';
 
 export interface LayoutEditModeModalProps {
   showMenu: boolean;
@@ -34,6 +35,8 @@ export interface LayoutEditModeModalProps {
   isPrintPreview: boolean;
   handleExport: () => void;
   onOpenR2Config: () => void;
+  version?: any;
+  storeFilter?: string;
 }
 
 export const LayoutEditModeModal: React.FC<LayoutEditModeModalProps> = ({
@@ -54,11 +57,16 @@ export const LayoutEditModeModal: React.FC<LayoutEditModeModalProps> = ({
   isPrintPreview,
   handleExport,
   onOpenR2Config,
+  version,
+  storeFilter,
 }) => {
   if (!showMenu) return null;
 
   const content = (
-    <div className="fixed inset-0 z-[150000] bg-black/50 backdrop-blur-sm flex items-end sm:items-center justify-center p-3 animate-in fade-in duration-150 hide-on-actual-print print:hidden">
+    <div 
+      className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-end sm:items-center justify-center p-3 animate-in fade-in duration-150 hide-on-actual-print print:hidden"
+      style={{ zIndex: 150000 }}
+    >
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-md p-5 text-slate-800 dark:text-slate-200 shadow-2xl space-y-4 max-h-[85vh] overflow-y-auto">
         <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
           <div className="flex items-center gap-2 font-bold text-base text-slate-800 dark:text-slate-100">
@@ -84,6 +92,13 @@ export const LayoutEditModeModal: React.FC<LayoutEditModeModalProps> = ({
             className="w-full pl-9 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium outline-none focus:ring-2 focus:ring-purple-500"
           />
         </div>
+
+        {/* Paint Categories Mapping Section */}
+        <LayoutPaintCategoriesSection
+          version={version}
+          storeFilter={storeFilter}
+          canWrite={canWrite}
+        />
 
         {/* Smart Notifications & Alerts Config (Collapsible Accordion) */}
         <div className="space-y-2 p-3 bg-red-50/50 dark:bg-red-950/20 border border-red-100 dark:border-red-900/40 rounded-2xl">
@@ -210,6 +225,7 @@ export const LayoutEditModeModal: React.FC<LayoutEditModeModalProps> = ({
                     detail: true,
                     description: true,
                     progressBars: true,
+                    shopType: true,
                     area: true,
                   });
                 }}
@@ -242,6 +258,7 @@ export const LayoutEditModeModal: React.FC<LayoutEditModeModalProps> = ({
               { key: 'detail', label: 'Detail', desc: 'Work breakdown summary' },
               { key: 'description', label: 'Description', desc: 'Notes & Descriptions' },
               { key: 'progressBars', label: 'Progress Bars', desc: 'Plan & Actual progress' },
+              { key: 'shopType', label: 'Shop Type', desc: 'Store layout & format' },
               { key: 'area', label: 'Area (m²)', desc: 'Floor surface area' },
             ].map((item) => {
               const isActive = (layoutTooltipVisibility as any)?.[item.key] !== false;

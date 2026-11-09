@@ -3,6 +3,7 @@ import { Project, Task } from '../../types';
 import { cn, formatDisplayDateTime, calculateDays } from '../../lib/utils';
 import { ChevronRight, ChevronDown, Plus, Trash2, Edit3, ArrowDownUp, GripVertical } from 'lucide-react';
 import { DetailTableRow } from './detailTypes';
+import { buildProjectParentHierarchyIndex } from './useDetailFlatRows';
 import { EditableCell } from './EditableCell';
 import { FastToggle } from './FastToggle';
 import { QuickNavButton } from '../QuickNavButton';
@@ -22,6 +23,9 @@ interface DetailProjectRowProps {
   onEditProject: (p: Project) => void;
   onAddTask: (p: Project) => void;
   onDeleteProject: (p: Project) => void;
+  expandedModularTasks?: Set<string>;
+  onToggleModularParent?: (parentTaskId: string) => void;
+  onToggleProjectModularTasks?: (parentTaskIds: string[], expand: boolean) => void;
 }
 
 export const DetailProjectRow = React.memo(function DetailProjectRow({
@@ -38,11 +42,47 @@ export const DetailProjectRow = React.memo(function DetailProjectRow({
   onEditProject,
   onAddTask,
   onDeleteProject,
+  expandedModularTasks,
+  onToggleModularParent,
+  onToggleProjectModularTasks,
 }: DetailProjectRowProps) {
   const p = item.project;
   const isExpanded = item.isExpanded;
   const groupTasks = item.groupTasks;
   const effectiveTaskCount = item.effectiveTaskCount;
+
+  const { projectModularParentIds, projectChildTasksCount } = React.useMemo(
+    () => buildProjectParentHierarchyIndex(groupTasks || []),
+    [groupTasks]
+  );
+
+  const hasModularTasks = projectModularParentIds.length > 0;
+  const isProjectModularExpanded =
+    hasModularTasks &&
+    projectModularParentIds.some((id) => 
+      expandedModularTasks?.has(id) || 
+      expandedModularTasks?.has(id.toLowerCase())
+    );
+
+  const handleToggleProjectModular = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!hasModularTasks) return;
+    if (!isExpanded) {
+      onToggleGroup(String(p.id || p.code || p.no || ''));
+    }
+    if (onToggleProjectModularTasks) {
+      onToggleProjectModularTasks(projectModularParentIds, !isProjectModularExpanded);
+    } else if (onToggleModularParent) {
+      projectModularParentIds.forEach((id) => {
+        const isExp = expandedModularTasks?.has(id) || expandedModularTasks?.has(id.toLowerCase());
+        if (isProjectModularExpanded) {
+          if (isExp) onToggleModularParent(id);
+        } else {
+          if (!isExp) onToggleModularParent(id);
+        }
+      });
+    }
+  };
   const isProjDelegationOn = item.isProjDelegationOn;
   const planProgressPercent = item.planProgressPercent;
   const actProgressPercent = item.actProgressPercent;
@@ -85,7 +125,7 @@ export const DetailProjectRow = React.memo(function DetailProjectRow({
       data-project-year={p.year || ''}
       data-project-store={p.store || ''}
       className={cn(
-        "table-row-optimized border-b-2 border-slate-200 dark:border-[#444446] transition-all duration-700",
+        "table-row-optimized h-[46px] border-b-2 border-slate-200 dark:border-[#444446] transition-colors duration-500",
         item.projectIndex % 2 === 0 ? "bg-slate-100/80 dark:bg-[#1e1e20]/80" : "bg-blue-50/50 dark:bg-[#28282a]",
         isFlashed && "ring-2 ring-emerald-500/80 bg-emerald-50/90 dark:bg-emerald-950/70 z-10 shadow-sm"
       )}
@@ -110,7 +150,7 @@ export const DetailProjectRow = React.memo(function DetailProjectRow({
       )}
       {visibleColumns.includes('no') && (
         <td className="px-3 py-2 font-bold text-slate-800 dark:text-[#f5f5f7]">
-          <div className="flex items-center gap-1.5">
+          <div className="flex flex-col items-center justify-center gap-1">
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -129,6 +169,26 @@ export const DetailProjectRow = React.memo(function DetailProjectRow({
               {isExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
               <span className="text-[10px]">({effectiveTaskCount})</span>
             </button>
+            {hasModularTasks && (
+              <button
+                type="button"
+                onClick={handleToggleProjectModular}
+                className={cn(
+                  "flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold transition-all active:scale-95 touch-manipulation cursor-pointer border shadow-2xs select-none",
+                  isProjectModularExpanded
+                    ? "bg-purple-600 hover:bg-purple-700 text-white border-purple-500 shadow-purple-500/20"
+                    : "bg-purple-100 hover:bg-purple-200 text-purple-700 dark:bg-purple-950/80 dark:hover:bg-purple-900 dark:text-purple-200 border-purple-300 dark:border-purple-700"
+                )}
+                title={isProjectModularExpanded ? "Collapse modular tasks of this project" : `Expand modular tasks (${projectChildTasksCount})`}
+              >
+                {isProjectModularExpanded ? (
+                  <ChevronDown className="w-3 h-3 text-current pointer-events-none" />
+                ) : (
+                  <ChevronRight className="w-3 h-3 text-current pointer-events-none" />
+                )}
+                <span>({projectChildTasksCount})</span>
+              </button>
+            )}
           </div>
         </td>
       )}
@@ -189,6 +249,16 @@ export const DetailProjectRow = React.memo(function DetailProjectRow({
               onSave={(val) => onUpdateProject(p, 'name', val)}
               canWrite={canWrite}
             />
+            {p.shopType && (
+              <span className="text-[10px] font-medium text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-200 dark:border-amber-800 shrink-0 select-none">
+                {p.shopType}
+              </span>
+            )}
+            {Boolean(p.sizeM2 && p.sizeM2 > 0) && (
+              <span className="text-[10px] font-medium text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 px-1.5 py-0.5 rounded border border-indigo-200 dark:border-indigo-800 shrink-0 select-none">
+                {p.sizeM2} m²
+              </span>
+            )}
           </div>
         </td>
       )}

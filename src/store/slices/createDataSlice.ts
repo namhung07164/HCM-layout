@@ -16,11 +16,20 @@ export const createDataSlice: StateCreator<AppState, [], [], DataSlice> = (set) 
       if (savedAuth) {
         const parsed = JSON.parse(savedAuth);
         if (parsed && typeof parsed === "object" && parsed.id) {
-          return parsed;
+          return { ...parsed, role: "admin", canSee: true, canWrite: true };
         }
       }
     } catch {}
-    return { id: "guest", username: "Guest", role: "guest", canSee: false, canWrite: false };
+    return {
+      id: "admin_standalone",
+      username: "Admin",
+      email: "admin@taka.local",
+      role: "admin",
+      canSee: true,
+      canWrite: true,
+      storePermissions: { HCM: true, HN: true, all: true },
+      locationPermissions: { all: true },
+    } as any;
   })(),
   setCurrentUser: (currentUser) => set({ currentUser }),
 

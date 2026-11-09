@@ -4,9 +4,18 @@ import App from './App.tsx';
 import './index.css';
 import { LanguageProvider } from './lib/LanguageContext';
 import { checkAndCleanStorageQuota, cleanupBloatedStorage } from './lib/storage';
+import { bootstrapLocalStore } from './lib/backgroundSyncWorker';
 
-// Proactively verify & clean localStorage quota before React and Firebase mount
+// Proactively verify & clean localStorage quota and kick off Local-First IndexedDB hydration before React mounts
+try {
+  if (typeof window !== 'undefined' && window.location.search.includes('v=')) {
+    const cleanUrl = new URL(window.location.href);
+    cleanUrl.searchParams.delete('v');
+    window.history.replaceState({}, document.title, cleanUrl.pathname + cleanUrl.search + cleanUrl.hash);
+  }
+} catch {}
 checkAndCleanStorageQuota();
+bootstrapLocalStore().catch(() => {});
 
 class ErrorBoundary extends React.Component<{children: React.ReactNode}, {hasError: boolean, error: any, errorInfo: any}> {
   constructor(props: {children: React.ReactNode}) {
@@ -128,13 +137,19 @@ class ErrorBoundary extends React.Component<{children: React.ReactNode}, {hasErr
 const originalConsoleError = console.error;
 const originalConsoleWarn = console.warn;
 
-const shouldSuppress = (args) => {
-  return args.some(arg => 
-    typeof arg === 'string' && 
-    (arg.includes("Could not reach Cloud Firestore backend") || 
-     arg.includes("c050") ||
-     arg.includes("INTERNAL ASSERTION FAILED: Unexpected state"))
-  );
+const shouldSuppress = (args: any[]) => {
+  return args.some(arg => {
+    const text = typeof arg === 'string' ? arg : String(arg?.stack || arg?.message || arg || '');
+    return (
+      text.includes("Could not reach Cloud Firestore backend") || 
+      text.includes("c050") ||
+      text.includes("INTERNAL ASSERTION FAILED: Unexpected state") ||
+      text.includes("@vite/client") ||
+      text.includes("WebSocket closed without opened") ||
+      text.includes("vite-hmr") ||
+      text.includes("vite:ws:disconnect")
+    );
+  });
 };
 
 console.error = (...args) => {

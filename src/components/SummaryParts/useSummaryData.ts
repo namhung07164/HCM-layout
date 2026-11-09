@@ -14,7 +14,7 @@ export function useSummaryData() {
   const years = useMemo(() => {
     const yearsSet = new Set<string>();
     projects.forEach((p) => {
-      const year = p.year ? String(p.year) : (p.computedTakStart ? String(p.computedTakStart).substring(0, 4) : null);
+      const year = p.year ? String(p.year) : null;
       if (year) yearsSet.add(year);
     });
     yearsSet.add('2026');
@@ -41,7 +41,7 @@ export function useSummaryData() {
 
   const filteredProjects = useMemo(() => {
     return projects.filter((p) => {
-      const pYear = p.year ? String(p.year) : (p.computedTakStart ? String(p.computedTakStart).substring(0, 4) : null);
+      const pYear = p.year ? String(p.year) : null;
       const matchesYear = globalYearFilter === 'all' || pYear === globalYearFilter;
       const matchesStore = effectiveStore === 'all' || p.store === effectiveStore;
       const matchesLocation = globalLocationFilter.length === 0 || (p.location && globalLocationFilter.includes(p.location));
@@ -86,6 +86,8 @@ export function useSummaryData() {
   const totalActual = useMemo(() => filteredProjects.reduce((acc, curr) => acc + (curr.actual || 0), 0), [filteredProjects]);
   const periodBudget = useMemo(() => projectsInPeriod.reduce((acc, curr) => acc + (curr.budget || 0), 0), [projectsInPeriod]);
   const periodActual = useMemo(() => projectsInPeriod.reduce((acc, curr) => acc + (curr.actual || 0), 0), [projectsInPeriod]);
+  const totalSizeM2 = useMemo(() => filteredProjects.reduce((acc, curr) => acc + (Number(curr.sizeM2) || 0), 0), [filteredProjects]);
+  const periodSizeM2 = useMemo(() => projectsInPeriod.reduce((acc, curr) => acc + (Number(curr.sizeM2) || 0), 0), [projectsInPeriod]);
 
   return {
     activeSubTab,
@@ -111,5 +113,7 @@ export function useSummaryData() {
     totalActual,
     periodBudget,
     periodActual,
+    totalSizeM2,
+    periodSizeM2,
   };
 }

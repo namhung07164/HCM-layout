@@ -4,9 +4,7 @@ import { TabId } from "../../types";
 import { AppState, UISlice } from "../storeTypes";
 
 const getInitialActiveTab = (): TabId => {
-  // Safe Boot (#2): Always start on 'general' tab to prevent heavy query read storms
-  // from Gantt/Detail tabs on initial cold start.
-  return "general";
+  return "layout";
 };
 
 export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get) => ({
@@ -94,22 +92,33 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
 
   expandedProjectIds: [],
   toggleProjectExpansion: (projectId) => set((state) => {
-    const strId = String(projectId).trim();
-    const proj = state.projects?.find(p => 
-      String(p.id || '') === strId ||
-      String(p.code || '').trim().toLowerCase() === strId.toLowerCase() ||
-      (p.no !== undefined && String(p.no) === strId)
-    );
-    const idAliases = new Set<string>([strId]);
-    if (proj) {
-      if (proj.id) idAliases.add(String(proj.id));
-      if (proj.code) idAliases.add(String(proj.code));
-      if (proj.no !== undefined) idAliases.add(String(proj.no));
+    const strId = String(projectId || '').trim();
+    if (!strId) return state;
+    const projectsList = state.projects || [];
+    const proj =
+      projectsList.find((p) => String(p.id || '').trim() === strId) ||
+      projectsList.find(
+        (p) =>
+          String(p.code || '').trim().toLowerCase() === strId.toLowerCase() &&
+          (state.globalYearFilter === 'all' || String(p.year || '').trim() === String(state.globalYearFilter).trim())
+      ) ||
+      projectsList.find((p) => String(p.code || '').trim().toLowerCase() === strId.toLowerCase());
+    const canonicalId = proj?.id ? String(proj.id).trim() : strId;
+    const idAliases = new Set<string>([strId, canonicalId]);
+    if (proj?.code) {
+      const c = String(proj.code).trim();
+      idAliases.add(c);
+      idAliases.add(c.toLowerCase());
+      idAliases.add(c.toUpperCase());
+      idAliases.add(c.replace(/[\u2010-\u2015\u2212\uFE58\uFE63\uFF0D]/g, '-'));
+      idAliases.add(c.replace(/-/g, '–'));
     }
-    const isCurrentlyExpanded = state.expandedProjectIds.some(id => idAliases.has(id));
-    const next = isCurrentlyExpanded
-      ? state.expandedProjectIds.filter(id => !idAliases.has(id))
-      : [...state.expandedProjectIds, proj?.id ? String(proj.id) : strId];
+    if (proj?.id) {
+      idAliases.add(String(proj.id).trim());
+    }
+    const isCurrentlyExpanded = state.expandedProjectIds.some((id) => idAliases.has(String(id).trim()));
+    const remaining = state.expandedProjectIds.filter((id) => !idAliases.has(String(id).trim()));
+    const next = isCurrentlyExpanded ? remaining : [...remaining, canonicalId];
     return { expandedProjectIds: next };
   }),
   setExpandedProjectIds: (ids) => {
@@ -146,6 +155,12 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
   setPrintFilterHeader: (val) => {
     safeSetItemLocal("taka_print_filter_header", String(val));
     set({ printFilterHeader: val });
+  },
+
+  printShowColorLegend: safeGetItemLocal("taka_print_show_color_legend") !== "false",
+  setPrintShowColorLegend: (val) => {
+    safeSetItemLocal("taka_print_show_color_legend", String(val));
+    set({ printShowColorLegend: val });
   },
   
   printScaleMode: (safeGetItemLocal("taka_print_scale_mode") as any) || "default",
@@ -237,6 +252,8 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
   setPrefillProjectYear: (prefillProjectYear) => set({ prefillProjectYear }),
   prefillProjectStore: null,
   setPrefillProjectStore: (prefillProjectStore) => set({ prefillProjectStore }),
+  prefillProjectId: null,
+  setPrefillProjectId: (prefillProjectId) => set({ prefillProjectId }),
 
   costTabSearchTerm: "",
   setCostTabSearchTerm: (costTabSearchTerm) => set({ costTabSearchTerm }),
@@ -348,6 +365,8 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
     safeSetItemLocal("taka_pinned_projects", JSON.stringify(pinned));
     set({ pinnedProjects: pinned });
   },
+  fixedProjectCode: "",
+  setFixedProjectCode: (fixedProjectCode) => set({ fixedProjectCode }),
   setDetailTabStoreFilter: (globalStoreFilter) => set({ globalStoreFilter }),
   detailTabFocusTaskId: "",
   setDetailTabFocusTaskId: (detailTabFocusTaskId) => set({ detailTabFocusTaskId }),
@@ -377,6 +396,7 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
       detail: true,
       description: true,
       progressBars: true,
+      shopType: true,
       area: true,
       notifications: true,
       alertOverdue: true,
@@ -411,6 +431,7 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
       detail: true,
       description: true,
       progressBars: true,
+      shopType: true,
       area: true,
       notifications: true,
       alertOverdue: true,
@@ -422,6 +443,10 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
     safeSetItemLocal("taka_layout_tooltip_visibility", JSON.stringify(defaultVal));
     return { layoutTooltipVisibility: defaultVal };
   }),
+  layoutPaintCategory: "all",
+  setLayoutPaintCategory: (layoutPaintCategory) => set({ layoutPaintCategory }),
   zoomableImageSrc: null,
   setZoomableImageSrc: (zoomableImageSrc) => set({ zoomableImageSrc }),
+  isDetailEditMode: false,
+  setIsDetailEditMode: (isDetailEditMode) => set({ isDetailEditMode }),
 });

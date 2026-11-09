@@ -3,7 +3,8 @@ import { useAppStore } from '../store/useAppStore';
 import { AppUser } from '../types';
 import { useLanguage } from "../lib/LanguageContext";
 import { Plus, Search } from 'lucide-react';
-import { doc, setDoc, deleteDoc } from 'firebase/firestore';
+import { doc } from 'firebase/firestore';
+import { setDoc, deleteDoc } from '../lib/firestoreWrites';
 import { db, APP_ID } from "../lib/firebase";
 import { matchesAdvancedSearch } from '../lib/utils';
 import { DebouncedSearchInput } from './DebouncedSearchInput';
@@ -150,7 +151,7 @@ export function AccControlTab({ users, locationVisibility = {}, onEditUser, onAd
 
       <div className="px-5 py-4 border-b border-slate-100 dark:border-[#333336] bg-slate-50 dark:bg-[#1e1e20]/50 flex justify-between items-center shrink-0">
         <h2 className="text-lg font-bold text-slate-800 dark:text-[#e3e3e3]">{isAdmin ? 'User Account Control' : 'My Account'}</h2>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 print:hidden hide-on-actual-print">
           <div className="relative">
             <DebouncedSearchInput
               placeholder="Search users..."

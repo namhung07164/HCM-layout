@@ -4,45 +4,20 @@ import { useAppStore } from '../../store/useAppStore';
 import { HoverInfo } from './layoutViewerTypes';
 import { useLayoutGestures } from './useLayoutGestures';
 import { useLayoutWindowListeners } from './useLayoutWindowListeners';
-import { 
-  calculateUnitFocalPoint, 
-  computeTooltipPosition, 
-  exportStageHighRes, 
-  triggerStageDownload, 
-  findUnitInOtherFloorVersions,
-  hasAggregatedDataChanged
-} from './layoutStageUtils';
+import { calculateUnitFocalPoint, computeTooltipPosition, triggerStageDownload, findUnitInOtherFloorVersions, hasAggregatedDataChanged } from './layoutStageUtils';
 
 interface UseLayoutStageInteractionsProps {
-  bgImage: any;
-  version: any;
-  units: any[];
-  targetUnitSearch?: string | null;
-  onUnitSelected?: (unit: any) => void;
-  onClearFocus?: () => void;
-  availableStoreVersions: any[];
-  selectedVersionId: string | null;
+  bgImage: any; version: any; units: any[]; targetUnitSearch?: string | null;
+  onUnitSelected?: (unit: any) => void; onClearFocus?: () => void;
+  availableStoreVersions: any[]; selectedVersionId: string | null;
   setSelectedVersionId: (id: string | null) => void;
-  storeFilter: string;
-  targetLoc: string;
-  isProjectModalOpen: boolean;
-  miniGanttProject: any;
+  storeFilter: string; targetLoc: string; isProjectModalOpen: boolean; miniGanttProject: any;
 }
 
 export function useLayoutStageInteractions({
-  bgImage,
-  version,
-  units,
-  targetUnitSearch,
-  onUnitSelected,
-  onClearFocus,
-  availableStoreVersions,
-  selectedVersionId,
-  setSelectedVersionId,
-  storeFilter,
-  targetLoc,
-  isProjectModalOpen,
-  miniGanttProject,
+  bgImage, version, units, targetUnitSearch, onUnitSelected, onClearFocus,
+  availableStoreVersions, selectedVersionId, setSelectedVersionId,
+  storeFilter, targetLoc, isProjectModalOpen, miniGanttProject,
 }: UseLayoutStageInteractionsProps) {
   const isPrintPreview = useAppStore(state => state.isPrintPreview);
 
@@ -58,33 +33,19 @@ export function useLayoutStageInteractions({
   const focusedTimerRef = useRef<NodeJS.Timeout | null>(null);
   const lastHandledSearchRef = useRef<string | null>(null);
 
-  // Mutable refs for data aggregates to eliminate circular dependencies and prevent infinite loops
   const aggregatedDataRef = useRef<Record<string, any>>({});
   const restrictedProjectCodesRef = useRef<Set<string>>(new Set());
 
   // Zoom & Pan smoothly to target unit and highlight it
   const zoomAndPanToUnit = useCallback((targetUnitOrName: string | any) => {
-    const focalPoint = calculateUnitFocalPoint(
-      targetUnitOrName,
-      units,
-      aggregatedDataRef.current,
-      restrictedProjectCodesRef.current
-    );
+    const focalPoint = calculateUnitFocalPoint(targetUnitOrName, units, aggregatedDataRef.current, restrictedProjectCodesRef.current);
     if (!focalPoint) return false;
-
     const { targetUnit, cx, cy } = focalPoint;
-
     const containerW = containerRef.current?.offsetWidth || dimensions.width || 800;
     const containerH = containerRef.current?.offsetHeight || dimensions.height || 600;
-
     const targetScale = 0.7;
-
-    // Center unit perfectly at exact 50% width and 50% height of viewport
-    const targetScreenCenterX = containerW * 0.50;
-    const targetScreenCenterY = containerH * 0.50;
-
-    const posX = targetScreenCenterX - cx * targetScale;
-    const posY = targetScreenCenterY - cy * targetScale;
+    const posX = containerW * 0.50 - cx * targetScale;
+    const posY = containerH * 0.50 - cy * targetScale;
     const newPos = { x: posX, y: posY };
 
     setStageScale(targetScale);
@@ -137,6 +98,7 @@ export function useLayoutStageInteractions({
     stageRef,
     containerRef,
     dimensions,
+    setDimensions,
     stageScale,
     setStageScale,
     stagePos,
@@ -159,21 +121,6 @@ export function useLayoutStageInteractions({
 
   // Export handlers
   const handleExport = useCallback(() => triggerStageDownload(stageRef.current), []);
-
-  // Global window references for export
-  useEffect(() => {
-    (window as any).__taka_layout_stage = stageRef.current;
-    (window as any).__taka_layout_export = (dpi: number = 200) => {
-      return exportStageHighRes(stageRef.current, bgImage, version, units, dpi);
-    };
-
-    return () => {
-      if ((window as any).__taka_layout_stage === stageRef.current) {
-        (window as any).__taka_layout_stage = null;
-        (window as any).__taka_layout_export = null;
-      }
-    };
-  }, [bgImage, version, units]);
 
   const fitToScreenRef = useRef(fitToScreen);
   fitToScreenRef.current = fitToScreen;
@@ -221,16 +168,8 @@ export function useLayoutStageInteractions({
       };
 
       tryZoom();
-      // Multi-stage retry so that when tab switches and container DOM dimensions mount / re-measure, centering happens cleanly
-      const t1 = setTimeout(tryZoom, 60);
-      const t2 = setTimeout(tryZoom, 220);
-      const t3 = setTimeout(tryZoom, 500);
-
-      return () => {
-        clearTimeout(t1);
-        clearTimeout(t2);
-        clearTimeout(t3);
-      };
+      const timers = [60, 220, 500].map(ms => setTimeout(tryZoom, ms));
+      return () => timers.forEach(clearTimeout);
     } else if (targetUnitSearch === null || targetUnitSearch === '') {
       if (lastHandledSearchRef.current !== null || focusedUnitId !== null) {
         lastHandledSearchRef.current = null;
@@ -272,24 +211,19 @@ export function useLayoutStageInteractions({
   }, [units, targetUnitSearch, zoomAndPanToUnit, focusedUnitId]);
 
   const activeTab = useAppStore(state => state.activeTab);
+  const hoverTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Auto-close tooltip and clear pinned state when navigating to another tab
+  // Auto-close tooltip, unpin, and cleanup timers when navigating away or unmounting
   useEffect(() => {
-    if (activeTab !== 'layout') {
-      setHoverInfo(null);
-      isPinnedRef.current = false;
-      if (focusedTimerRef.current) clearTimeout(focusedTimerRef.current);
-    }
-  }, [activeTab]);
-
-  // Clean up tooltip state on unmount
-  useEffect(() => {
-    return () => {
+    const cleanup = () => {
+      if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
       setHoverInfo(null);
       isPinnedRef.current = false;
       if (focusedTimerRef.current) clearTimeout(focusedTimerRef.current);
     };
-  }, []);
+    if (activeTab !== 'layout') cleanup();
+    return cleanup;
+  }, [activeTab]);
 
   // Window listeners: resize observer, print preview, export, visibility wake-up
   useLayoutWindowListeners({
@@ -300,6 +234,12 @@ export function useLayoutStageInteractions({
     stageRef,
     containerRef,
     setDimensions,
+    versionId: version?.id,
+    activeTab,
+    focusedUnitId,
+    bgImage,
+    version,
+    units,
   });
 
   // Handle position tooltip directly via DOM with RAF throttle and 2D collision clamping
@@ -366,46 +306,62 @@ export function useLayoutStageInteractions({
   }, [hoverInfo?.visible, hoverInfo?.unitName, hoverInfo?.data]);
 
   const handleMouseEnterUnit = useCallback((unit: any, e: any) => {
-    if (gestures.isInteractingRef.current || (e?.evt && e.evt.buttons > 0) || isPinnedRef.current || Boolean(miniGanttProject) || Boolean(isProjectModalOpen)) return;
+    if (hoverTimerRef.current) {
+      clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = null;
+    }
+    if (!gestures.canTriggerUnitInteraction() || (e?.evt && e.evt.buttons > 0) || isPinnedRef.current || Boolean(miniGanttProject) || Boolean(isProjectModalOpen)) return;
     try {
       const container = e.target.getStage()?.container();
       if (container) container.style.cursor = 'pointer';
+      const clientX = e.evt.clientX;
+      const clientY = e.evt.clientY;
       const uName = (unit.name || '').toLowerCase();
-      const aggregatedData = aggregatedDataRef.current;
-      setHoverInfo({
-        visible: true,
-        data: (uName && aggregatedData[uName]) ? aggregatedData[uName] : {},
-        unitName: unit.name || 'Unknown',
-        clientX: e.evt.clientX,
-        clientY: e.evt.clientY
-      });
-      setTimeout(() => updateTooltipPos(e.evt.clientX, e.evt.clientY), 0);
+
+      // Intentional hover debounce (120ms): prevents flashing tooltips when zooming, panning, or sweeping across units
+      hoverTimerRef.current = setTimeout(() => {
+        hoverTimerRef.current = null;
+        if (!gestures.canTriggerUnitInteraction() || isPinnedRef.current || Boolean(miniGanttProject) || Boolean(isProjectModalOpen)) return;
+        const aggregatedData = aggregatedDataRef.current;
+        setHoverInfo({
+          visible: true,
+          data: (uName && aggregatedData[uName]) ? aggregatedData[uName] : {},
+          unitName: unit.name || 'Unknown',
+          clientX,
+          clientY
+        });
+        setTimeout(() => updateTooltipPos(clientX, clientY), 0);
+      }, 120);
     } catch (err) {
       console.error("Defensive Check: Error onMouseEnter unit in LiveLayoutViewer:", err, unit);
     }
-  }, [gestures.isInteractingRef, miniGanttProject, isProjectModalOpen, updateTooltipPos]);
+  }, [gestures.canTriggerUnitInteraction, miniGanttProject, isProjectModalOpen, updateTooltipPos]);
 
   const handleMouseMoveUnit = useCallback((_unit: any, e: any) => {
-    if (gestures.isInteractingRef.current || (e?.evt && e.evt.buttons > 0) || isPinnedRef.current || Boolean(miniGanttProject) || Boolean(isProjectModalOpen)) return;
+    if (!gestures.canTriggerUnitInteraction() || (e?.evt && e.evt.buttons > 0) || isPinnedRef.current || Boolean(miniGanttProject) || Boolean(isProjectModalOpen)) return;
     try {
       updateTooltipPos(e.evt.clientX, e.evt.clientY);
     } catch (err) {
       console.error("Defensive Check: Error onMouseMove unit in LiveLayoutViewer:", err);
     }
-  }, [gestures.isInteractingRef, miniGanttProject, isProjectModalOpen, updateTooltipPos]);
+  }, [gestures.canTriggerUnitInteraction, miniGanttProject, isProjectModalOpen, updateTooltipPos]);
 
   const handleMouseLeaveUnit = useCallback((unit: any, e: any) => {
+    if (hoverTimerRef.current) {
+      clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = null;
+    }
     try {
       const container = e.target.getStage()?.container();
       if (container && !gestures.isInteractingRef.current) container.style.cursor = 'grab';
-      if (gestures.isInteractingRef.current || (e?.evt && e.evt.buttons > 0) || isPinnedRef.current || Boolean(miniGanttProject) || Boolean(isProjectModalOpen)) return;
+      if (gestures.isInteractingRef.current || isPinnedRef.current || Boolean(miniGanttProject) || Boolean(isProjectModalOpen)) return;
       setHoverInfo(current => (current ? null : current));
     } catch (err) {
       console.error("Defensive Check: Error onMouseLeave unit in LiveLayoutViewer:", err, unit);
     }
   }, [gestures.isInteractingRef, miniGanttProject, isProjectModalOpen]);
 
-  const pinAndShowTooltip = useCallback((unit: any, clientX: number, clientY: number) => {
+  const pinAndShowTooltip = useCallback((unit: any, clientX: number, clientY: number, quickImageMode = false) => {
     isPinnedRef.current = true;
     const uName = (unit?.name || '').toLowerCase();
     const agg = aggregatedDataRef.current;
@@ -414,32 +370,41 @@ export function useLayoutStageInteractions({
       data: (uName && agg[uName]) ? agg[uName] : {},
       unitName: unit?.name || 'Unknown',
       clientX,
-      clientY
+      clientY,
+      quickImageMode,
     });
     setTimeout(() => updateTooltipPos(clientX, clientY), 0);
   }, [updateTooltipPos]);
 
-  const handleClickUnit = useCallback((unit: any, e: any) => {
-    if (gestures.isInteractingRef.current || Boolean(miniGanttProject)) return;
+  const handleClickUnit = useCallback((unit: any, e: any, quickImageMode = false) => {
+    if (hoverTimerRef.current) {
+      clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = null;
+    }
+    if (!gestures.canTriggerUnitInteraction() || Boolean(miniGanttProject)) return;
     try {
-      pinAndShowTooltip(unit, e.evt.clientX, e.evt.clientY);
+      pinAndShowTooltip(unit, e.evt.clientX, e.evt.clientY, quickImageMode);
       onUnitSelected?.(unit);
     } catch (err) {
       console.error("Defensive Check: Error onClick unit in LiveLayoutViewer:", err, unit);
     }
-  }, [gestures.isInteractingRef, miniGanttProject, pinAndShowTooltip, onUnitSelected]);
+  }, [gestures.canTriggerUnitInteraction, miniGanttProject, pinAndShowTooltip, onUnitSelected]);
 
-  const handleTapUnit = useCallback((unit: any, e: any) => {
-    if (gestures.isInteractingRef.current || Boolean(miniGanttProject)) return;
+  const handleTapUnit = useCallback((unit: any, e: any, quickImageMode = false) => {
+    if (hoverTimerRef.current) {
+      clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = null;
+    }
+    if (!gestures.canTriggerUnitInteraction() || Boolean(miniGanttProject)) return;
     try {
       const clientX = e.evt.changedTouches ? e.evt.changedTouches[0].clientX : e.evt.clientX;
       const clientY = e.evt.changedTouches ? e.evt.changedTouches[0].clientY : e.evt.clientY;
-      pinAndShowTooltip(unit, clientX, clientY);
+      pinAndShowTooltip(unit, clientX, clientY, quickImageMode);
       onUnitSelected?.(unit);
     } catch (err) {
       console.error("Defensive Check: Error onTap unit in LiveLayoutViewer:", err, unit);
     }
-  }, [gestures.isInteractingRef, miniGanttProject, pinAndShowTooltip, onUnitSelected]);
+  }, [gestures.canTriggerUnitInteraction, miniGanttProject, pinAndShowTooltip, onUnitSelected]);
 
   return {
     stageRef,
@@ -461,6 +426,11 @@ export function useLayoutStageInteractions({
     pendingTouchRef: gestures.pendingTouchRef,
     rafTouchIdRef: gestures.rafTouchIdRef,
     isInteractingRef: gestures.isInteractingRef,
+    isPinchingRef: gestures.isPinchingRef,
+    lastPinchEndTimeRef: gestures.lastPinchEndTimeRef,
+    lastWheelTimeRef: gestures.lastWheelTimeRef,
+    lastZoomTimeRef: gestures.lastZoomTimeRef,
+    canTriggerUnitInteraction: gestures.canTriggerUnitInteraction,
     wheelTimeoutRef: gestures.wheelTimeoutRef,
     pendingWheelDeltaRef: gestures.pendingWheelDeltaRef,
     rafWheelIdRef: gestures.rafWheelIdRef,

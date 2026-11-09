@@ -1,56 +1,49 @@
-import { extractR2Key, resolveR2UrlToHttp } from '../components/PictureMapping/lib/r2Upload';
+import {
+  extractR2Key,
+  resolveR2UrlToHttp,
+} from '../components/PictureMapping/lib/r2Upload';
 
 /**
- * IndexedDB & Memory Cache Manager for CAD Floorplan Images.
- * Provides instant 0ms switching between floors/versions during and across sessions.
- * 
- * Features:
- * 1. Normalized persistent Cache Keys (immune to signed URL expiration / query param changes).
- * 2. Two-tier caching: In-Memory LRU (0ms) + IndexedDB Persistent Blob Store (<30ms).
- * 3. Background Preloader Queue for all floor plans across HCM / HN.
- * 4. Automatic offscreen bitmap decoding via createImageBitmap() with ObjectURL fallback.
+ * Persistent Disk Cache (Browser CacheStorage API + IndexedDB) & Memory Cache Manager
+ * for CAD Floorplan Background Images & Maps (<500 lines per AGENTS.md Rule 12).
  */
 
 const DB_NAME = 'taka_cad_images_db';
 const DB_VERSION = 1;
 const STORE_NAME = 'cad_blobs';
-const MAX_MEMORY_CACHE = 20; // Safe in-memory cache limit for active floorplan images
+const CACHE_STORAGE_NAME = 'taka-cad-floorplans-v1';
 
-// In-Memory LRU Cache for decoded ImageBitmap / HTMLImageElement
+const IS_CONSTRAINED_DEVICE =
+  typeof window !== 'undefined' &&
+  (/iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (typeof navigator !== 'undefined' && navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) ||
+    (typeof navigator !== 'undefined' && typeof (navigator as any).deviceMemory === 'number' && (navigator as any).deviceMemory <= 4));
+
+const MAX_MEMORY_CACHE = IS_CONSTRAINED_DEVICE ? 6 : 12;
+
 const memoryCache = new Map<string, ImageBitmap | HTMLImageElement>();
-// In-Flight fetch promises to deduplicate network / IDB requests
+const memoryObjectUrls = new Map<string, string>();
 const inFlightRequests = new Map<string, Promise<Blob | null>>();
+const verifiedOnDiskKeys = new Set<string>();
 
-/**
- * Normalizes an image URL into a persistent cache key.
- * Strips volatile S3/R2 signed query parameters (e.g. ?X-Amz-Signature, ?Expires)
- * so that fresh signed URLs reuse already-cached image blobs across sessions.
- */
 export function normalizeImageCacheKey(url: string | undefined | null): string {
   if (!url || typeof url !== 'string') return '';
   const trimmed = url.trim();
   if (!trimmed) return '';
-  
-  // Data URLs and Blob URLs use their direct string/prefix
-  if (trimmed.startsWith('data:') || trimmed.startsWith('blob:')) {
-    return trimmed;
-  }
+  if (trimmed.startsWith('data:') || trimmed.startsWith('blob:')) return trimmed;
 
-  // Unified persistent key for Cloudflare R2 objects across r2:// links, keys, and signed URLs
   const r2Key = extractR2Key(trimmed);
-  if (r2Key) {
-    return `r2_object_${r2Key}`;
-  }
+  if (r2Key) return `r2_object_${r2Key}`;
 
   try {
     const parsed = new URL(trimmed, typeof window !== 'undefined' ? window.location.href : 'http://localhost');
-    // If it contains AWS/R2 signed params, strip the search params for persistent storage key
     if (
       parsed.searchParams.has('X-Amz-Signature') ||
       parsed.searchParams.has('X-Amz-Credential') ||
       parsed.searchParams.has('x-amz-signature') ||
       parsed.searchParams.has('token') ||
-      parsed.searchParams.has('expires')
+      parsed.searchParams.has('expires') ||
+      parsed.searchParams.has('t')
     ) {
       return `${parsed.origin}${parsed.pathname}`;
     }
@@ -60,16 +53,37 @@ export function normalizeImageCacheKey(url: string | undefined | null): string {
   }
 }
 
-function updateMemoryCache(cacheKey: string, img: ImageBitmap | HTMLImageElement) {
+function toSyntheticCacheUrl(cacheKey: string): string {
+  return `https://cache.taka.local/cad-image/${encodeURIComponent(cacheKey)}`;
+}
+
+function cleanupEvictedEntry(cacheKey: string, img: ImageBitmap | HTMLImageElement | undefined, nextImg?: ImageBitmap | HTMLImageElement) {
+  if (img && img !== nextImg && 'close' in img && typeof (img as ImageBitmap).close === 'function') {
+    try { (img as ImageBitmap).close(); } catch (_) {}
+  }
+  const prevObjUrl = memoryObjectUrls.get(cacheKey);
+  if (prevObjUrl && (!nextImg || !('src' in nextImg) || nextImg.src !== prevObjUrl)) {
+    memoryObjectUrls.delete(cacheKey);
+    try { URL.revokeObjectURL(prevObjUrl); } catch (_) {}
+  }
+}
+
+function updateMemoryCache(cacheKey: string, img: ImageBitmap | HTMLImageElement, objectUrl?: string) {
   if (!cacheKey) return;
   if (memoryCache.has(cacheKey)) {
+    const prev = memoryCache.get(cacheKey);
     memoryCache.delete(cacheKey);
+    cleanupEvictedEntry(cacheKey, prev, img);
   } else if (memoryCache.size >= MAX_MEMORY_CACHE) {
-    // Evict oldest item
     const firstKey = memoryCache.keys().next().value;
     if (firstKey) {
+      const evicted = memoryCache.get(firstKey);
       memoryCache.delete(firstKey);
+      cleanupEvictedEntry(firstKey, evicted);
     }
+  }
+  if (objectUrl) {
+    memoryObjectUrls.set(cacheKey, objectUrl);
   }
   memoryCache.set(cacheKey, img);
 }
@@ -79,12 +93,10 @@ export function getMemoryCachedImage(url: string): ImageBitmap | HTMLImageElemen
   if (!key) return null;
   const img = memoryCache.get(key);
   if (img) {
-    // Cold freeze / GPU context loss protection: check if ImageBitmap was detached or image broken
-    if ('width' in img && img.width === 0) {
+    if ('width' in img && img.width === 0 && (!('naturalWidth' in img) || img.naturalWidth === 0)) {
       memoryCache.delete(key);
       return null;
     }
-    // Move to end (most recently used)
     memoryCache.delete(key);
     memoryCache.set(key, img);
     return img;
@@ -92,47 +104,35 @@ export function getMemoryCachedImage(url: string): ImageBitmap | HTMLImageElemen
   return null;
 }
 
-export function setMemoryCachedImage(url: string, img: ImageBitmap | HTMLImageElement) {
+export function setMemoryCachedImage(url: string, img: ImageBitmap | HTMLImageElement, objectUrl?: string) {
   const key = normalizeImageCacheKey(url);
-  if (!key) return;
-  updateMemoryCache(key, img);
+  if (key) updateMemoryCache(key, img, objectUrl);
 }
 
-// IndexedDB Database Promise
 let dbPromise: Promise<IDBDatabase> | null = null;
 
 function getDB(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise;
-
   dbPromise = new Promise((resolve, reject) => {
     if (typeof window === 'undefined' || !window.indexedDB) {
-      reject(new Error('IndexedDB not supported in current environment'));
+      reject(new Error('IndexedDB unavailable'));
       return;
     }
-
     try {
       const request = indexedDB.open(DB_NAME, DB_VERSION);
-
       request.onupgradeneeded = (event) => {
         const db = (event.target as IDBOpenDBRequest).result;
-        if (!db.objectStoreNames.contains(STORE_NAME)) {
-          db.createObjectStore(STORE_NAME);
-        }
+        if (!db.objectStoreNames.contains(STORE_NAME)) db.createObjectStore(STORE_NAME);
       };
-
       request.onsuccess = () => {
         const db = request.result;
-        // Clean up connection promise when closed by browser sleep / discard
-        db.onclose = () => {
-          dbPromise = null;
-        };
+        db.onclose = () => { dbPromise = null; };
         db.onversionchange = () => {
           try { db.close(); } catch (_) {}
           dbPromise = null;
         };
         resolve(db);
       };
-
       request.onerror = () => {
         dbPromise = null;
         reject(request.error);
@@ -142,108 +142,201 @@ function getDB(): Promise<IDBDatabase> {
       reject(err);
     }
   });
-
   return dbPromise;
 }
 
 function queryIDB(db: IDBDatabase, key: string): Promise<Blob | null> {
   return new Promise((resolve) => {
     const tx = db.transaction(STORE_NAME, 'readonly');
-    const store = tx.objectStore(STORE_NAME);
-    const req = store.get(key);
-    req.onsuccess = () => resolve(req.result || null);
+    const req = tx.objectStore(STORE_NAME).get(key);
+    req.onsuccess = () => {
+      const res = req.result;
+      if (res instanceof Blob && res.size > 0) resolve(res);
+      else if (res instanceof ArrayBuffer && res.byteLength > 0) resolve(new Blob([res], { type: 'image/jpeg' }));
+      else resolve(null);
+    };
     req.onerror = () => resolve(null);
   });
+}
+
+async function getBlobFromCacheStorage(key: string): Promise<Blob | null> {
+  if (typeof window === 'undefined' || !('caches' in window) || !key) return null;
+  try {
+    const cache = await window.caches.open(CACHE_STORAGE_NAME);
+    const res = await cache.match(toSyntheticCacheUrl(key));
+    if (res && res.ok) {
+      const blob = await res.blob();
+      if (blob && blob.size > 0) {
+        verifiedOnDiskKeys.add(key);
+        return blob;
+      }
+    }
+  } catch (_e) {}
+  return null;
+}
+
+async function putBlobToCacheStorage(key: string, blob: Blob): Promise<boolean> {
+  if (typeof window === 'undefined' || !('caches' in window) || !key || !blob || blob.size === 0) return false;
+  try {
+    const cache = await window.caches.open(CACHE_STORAGE_NAME);
+    await cache.put(
+      toSyntheticCacheUrl(key),
+      new Response(blob, {
+        headers: {
+          'Content-Type': blob.type || 'image/jpeg',
+          'Content-Length': String(blob.size),
+          'Cache-Control': 'public, max-age=31536000, immutable',
+        },
+      })
+    );
+    verifiedOnDiskKeys.add(key);
+    return true;
+  } catch (_e) {
+    return false;
+  }
 }
 
 export async function getCachedBlobFromIDB(url: string): Promise<Blob | null> {
   const key = normalizeImageCacheKey(url);
   if (!key) return null;
 
+  const cacheStorageHit = await getBlobFromCacheStorage(key);
+  if (cacheStorageHit) return cacheStorageHit;
+
   try {
     let db = await getDB();
+    let blob: Blob | null = null;
     try {
-      return await queryIDB(db, key);
+      blob = await queryIDB(db, key);
     } catch (_txErr) {
-      // Reconnect if database connection was invalidated during cold freeze / long sleep
       dbPromise = null;
       db = await getDB();
-      return await queryIDB(db, key);
+      blob = await queryIDB(db, key);
+    }
+    if (blob && blob.size > 0) {
+      verifiedOnDiskKeys.add(key);
+      putBlobToCacheStorage(key, blob).catch(() => {});
+      return blob;
     }
   } catch (_e) {
     dbPromise = null;
-    return null;
   }
+  return null;
 }
 
 export async function setCachedBlobToIDB(url: string, blob: Blob): Promise<void> {
   const key = normalizeImageCacheKey(url);
-  if (!key || !blob) return;
+  if (!key || !blob || blob.size === 0) return;
+
+  verifiedOnDiskKeys.add(key);
+  const storedInCacheApi = await putBlobToCacheStorage(key, blob);
+
+  // On iOS/iPadOS (IS_CONSTRAINED_DEVICE), if CacheStorage succeeded, skip duplicating the raw Blob into
+  // IndexedDB to strictly preserve the 40MB WebKit IndexedDB budget for TakaLocalDB & Firestore cache (Rule 3).
+  if (IS_CONSTRAINED_DEVICE && storedInCacheApi) {
+    return;
+  }
 
   try {
     let db = await getDB();
     try {
-      const tx = db.transaction(STORE_NAME, 'readwrite');
-      const store = tx.objectStore(STORE_NAME);
-      store.put(blob, key);
+      db.transaction(STORE_NAME, 'readwrite').objectStore(STORE_NAME).put(blob, key);
     } catch (_txErr) {
       dbPromise = null;
       db = await getDB();
-      const tx = db.transaction(STORE_NAME, 'readwrite');
-      const store = tx.objectStore(STORE_NAME);
-      store.put(blob, key);
+      db.transaction(STORE_NAME, 'readwrite').objectStore(STORE_NAME).put(blob, key);
     }
   } catch (_e) {
     dbPromise = null;
-    // Ignore IndexedDB write failures (e.g. quota exceeded or private browsing restrictions)
   }
 }
 
 /**
- * Fetches an image blob with deduplication, storing it in IndexedDB for subsequent visits.
+ * Lightweight background downloader that stores the compressed floorplan binary Blob into
+ * CacheStorage + IndexedDB without decoding into RAM or blocking the main UI thread.
  */
 export async function fetchAndCacheImageBlob(url: string): Promise<Blob | null> {
   if (!url) return null;
   const trimmed = url.trim();
-  if (!trimmed) return null;
+  if (!trimmed || trimmed.startsWith('data:') || trimmed.startsWith('blob:')) return null;
 
   const key = normalizeImageCacheKey(trimmed);
+  if (!key) return null;
+  if (verifiedOnDiskKeys.has(key)) {
+    const hit = await getCachedBlobFromIDB(trimmed);
+    if (hit) return hit;
+  }
 
-  // Check IDB first (normalized key matches across r2://, key, and signed URL)
   const existingBlob = await getCachedBlobFromIDB(trimmed);
   if (existingBlob) return existingBlob;
 
-  // Deduplicate concurrent fetch requests for the same URL/key
-  if (inFlightRequests.has(key)) {
-    return inFlightRequests.get(key)!;
-  }
+  if (inFlightRequests.has(key)) return inFlightRequests.get(key)!;
 
   const fetchPromise = (async () => {
     try {
+      let blob: Blob | null = null;
       let activeFetchUrl = trimmed;
 
-      // If it is an r2:// link or raw key, resolve to a presigned HTTP URL
-      if (activeFetchUrl.startsWith('r2://') || (!activeFetchUrl.startsWith('http://') && !activeFetchUrl.startsWith('https://') && !activeFetchUrl.startsWith('blob:') && !activeFetchUrl.startsWith('data:'))) {
+      // Always resolve r2:// or R2 keys to a fresh presigned URL
+      if (
+        activeFetchUrl.startsWith('r2://') ||
+        (!activeFetchUrl.startsWith('http://') && !activeFetchUrl.startsWith('https://'))
+      ) {
         const resolved = await resolveR2UrlToHttp(activeFetchUrl);
-        if (!resolved) return null;
-        activeFetchUrl = resolved;
+        if (resolved) activeFetchUrl = resolved;
       }
 
-      let res = await fetch(activeFetchUrl, { mode: 'cors' }).catch(() => null);
+      if (!/^https?:\/\//i.test(activeFetchUrl)) return null;
 
-      // If fetch failed with 401/403 (expired signed URL), refresh signed URL from R2 and retry once
-      if ((!res || !res.ok) && extractR2Key(trimmed)) {
-        const refreshedUrl = await resolveR2UrlToHttp(trimmed);
-        if (refreshedUrl && refreshedUrl !== activeFetchUrl) {
-          res = await fetch(refreshedUrl, { mode: 'cors' }).catch(() => null);
+      const isR2StorageUrl = activeFetchUrl.includes('.r2.cloudflarestorage.com');
+
+      // For Cloudflare R2 storage URLs, use the same-origin server proxy first to avoid CORS preflight failures
+      if (isR2StorageUrl) {
+        const proxyRes = await fetch(`/api/pdf-proxy?url=${encodeURIComponent(activeFetchUrl)}`).catch(() => null);
+        if (proxyRes && proxyRes.ok) {
+          const candidate = await proxyRes.blob().catch(() => null);
+          if (candidate && candidate.size > 0 && !candidate.type.includes('text/html')) {
+            blob = candidate;
+          }
+        }
+        // If presigned URL expired, re-sign once and retry proxy
+        if (!blob && extractR2Key(trimmed)) {
+          const refreshedUrl = await resolveR2UrlToHttp(`r2://${extractR2Key(trimmed)}`);
+          if (refreshedUrl && refreshedUrl !== activeFetchUrl) {
+            activeFetchUrl = refreshedUrl;
+            const retryRes = await fetch(`/api/pdf-proxy?url=${encodeURIComponent(refreshedUrl)}`).catch(() => null);
+            if (retryRes && retryRes.ok) {
+              const candidate = await retryRes.blob().catch(() => null);
+              if (candidate && candidate.size > 0 && !candidate.type.includes('text/html')) {
+                blob = candidate;
+              }
+            }
+          }
         }
       }
 
-      if (!res || !res.ok) {
-        return null;
+      // Fallback or non-R2 direct CORS fetch
+      if (!blob) {
+        const directRes = await fetch(activeFetchUrl, { mode: 'cors' }).catch(() => null);
+        if (directRes && directRes.ok) {
+          const candidate = await directRes.blob().catch(() => null);
+          if (candidate && candidate.size > 0 && !candidate.type.includes('text/html')) {
+            blob = candidate;
+          }
+        }
       }
 
-      const blob = await res.blob();
+      // Final proxy fallback for non-R2 URLs if direct CORS failed
+      if (!blob && !isR2StorageUrl) {
+        const proxyRes = await fetch(`/api/pdf-proxy?url=${encodeURIComponent(activeFetchUrl)}`).catch(() => null);
+        if (proxyRes && proxyRes.ok) {
+          const candidate = await proxyRes.blob().catch(() => null);
+          if (candidate && candidate.size > 0 && !candidate.type.includes('text/html')) {
+            blob = candidate;
+          }
+        }
+      }
+
       if (blob && blob.size > 0) {
         await setCachedBlobToIDB(trimmed, blob);
         return blob;
@@ -260,46 +353,58 @@ export async function fetchAndCacheImageBlob(url: string): Promise<Blob | null> 
   return fetchPromise;
 }
 
+let preloadTimer: any = null;
+
 /**
- * Background Preloader: Silently pre-fetches and pre-caches floorplan images in IndexedDB & RAM.
- * Ensures that when users switch floors (B1, L1, L2, L3, L4, L5), the switch is instant (0ms).
+ * Gently caches floorplan Blobs for the current store in the background after the active
+ * floor is already rendered. On iOS, skips bulk preloading to protect the 40MB origin quota.
  */
-export function preloadFloorImages(urls: (string | undefined | null)[]): void {
-  if (typeof window === 'undefined') return;
+export function preloadFloorImages(urls: (string | undefined | null)[], excludeUrl?: string | null): void {
+  if (typeof window === 'undefined' || IS_CONSTRAINED_DEVICE) return;
+  const excludeKey = excludeUrl ? normalizeImageCacheKey(excludeUrl) : '';
 
-  const validUrls = Array.from(new Set(urls.filter((u): u is string => !!u && typeof u === 'string' && !u.startsWith('data:'))));
-  if (validUrls.length === 0) return;
+  const seenKeys = new Set<string>();
+  const targetUrls: string[] = [];
 
-  const runPreload = async () => {
-    for (const url of validUrls) {
+  for (const raw of urls) {
+    if (!raw || typeof raw !== 'string') continue;
+    const trimmed = raw.trim();
+    if (!trimmed || trimmed.startsWith('data:') || trimmed.startsWith('blob:')) continue;
+    const k = normalizeImageCacheKey(trimmed);
+    if (!k || k === excludeKey || seenKeys.has(k) || verifiedOnDiskKeys.has(k)) continue;
+    seenKeys.add(k);
+    targetUrls.push(trimmed);
+    if (targetUrls.length >= 4) break;
+  }
+
+  if (targetUrls.length === 0) return;
+
+  if (preloadTimer) clearTimeout(preloadTimer);
+  preloadTimer = setTimeout(async () => {
+    for (const u of targetUrls) {
       try {
-        await fetchAndCacheImageBlob(url);
+        const k = normalizeImageCacheKey(u);
+        if (!verifiedOnDiskKeys.has(k)) {
+          await fetchAndCacheImageBlob(u);
+          await new Promise((r) => setTimeout(r, 400));
+        }
       } catch (_e) {}
     }
-  };
-
-  if ('requestIdleCallback' in window) {
-    (window as any).requestIdleCallback(() => runPreload(), { timeout: 3000 });
-  } else {
-    setTimeout(runPreload, 200);
-  }
+  }, 1800);
 }
 
-/**
- * Clears the IndexedDB CAD image cache and in-memory cache.
- */
 export async function clearCadImageCache(): Promise<void> {
-  memoryCache.forEach((img) => {
-    if (img && 'close' in img && typeof (img as ImageBitmap).close === 'function') {
-      try { (img as ImageBitmap).close(); } catch (_) {}
-    }
+  memoryCache.forEach((img, key) => {
+    cleanupEvictedEntry(key, img);
   });
   memoryCache.clear();
-
+  memoryObjectUrls.clear();
+  verifiedOnDiskKeys.clear();
+  if (typeof window !== 'undefined' && 'caches' in window) {
+    try { await window.caches.delete(CACHE_STORAGE_NAME); } catch (_e) {}
+  }
   try {
     const db = await getDB();
-    const tx = db.transaction(STORE_NAME, 'readwrite');
-    const store = tx.objectStore(STORE_NAME);
-    store.clear();
+    db.transaction(STORE_NAME, 'readwrite').objectStore(STORE_NAME).clear();
   } catch (_e) {}
 }

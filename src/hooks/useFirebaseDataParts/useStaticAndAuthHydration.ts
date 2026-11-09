@@ -1,23 +1,24 @@
 import { useEffect, useRef } from "react";
 import { onAuthStateChanged, signInAnonymously } from "firebase/auth";
-import { doc } from "firebase/firestore";
-import { writeBatch } from "../../lib/firestoreWrites";
 import { useAppStore } from "../../store/useAppStore";
 import { usePerformanceStore } from "../../store/usePerformanceStore";
-import { auth, db } from "../../lib/firebase";
+import { auth } from "../../lib/firebase";
 import { safeGetItemLocal, safeSetItemLocal } from "../../lib/storage";
-import { getPendingUpdates, clearPendingUpdates, processPendingSync } from "../../lib/syncQueue";
-import { recordBatchDeltas } from "../../lib/deltaSyncService";
+import { processPendingSync } from "../../lib/syncQueue";
 import { setupStaticConfigSync } from "../../lib/configCacheService";
 import { enforceStorageBudget } from "../../lib/storageBudgetService";
 import {
-  hydrateProjectsFromLocal,
   hydrateTasksFromLocal,
+  hydrateTasksForProjects,
   hydrateCostsFromLocal,
   hydrateDelegationsFromLocal,
   hydrateDelegationsForProjects,
 } from "../../lib/backgroundSyncWorker";
 import { deduplicateTasksInMemory } from "../../lib/taskDeduplicationService";
+import {
+  loadLocalMyWorkStates,
+  mergeMyWorkStates,
+} from "../../components/MyWorkTabParts/myWorkAccountSync";
 import { AppUser, TabId } from "../../types";
 
 let isArchiveLoaded = false;
@@ -43,35 +44,22 @@ export function useStaticAndAuthHydration() {
 
   const lastActiveTimestampRef = useRef<number>(Date.now());
 
-  // 1. Sleep / Wake Guard
+  // 1. Sleep / Wake Guard & 20s Heartbeat Gap Detection (Rule 16.2)
   useEffect(() => {
-    const handleSleepWake = () => {
-      const isVisible = typeof document !== "undefined" && document.visibilityState === "visible";
-      if (!isVisible) {
-        lastActiveTimestampRef.current = Date.now();
-        return;
-      }
+    const triggerOvernightRecovery = (elapsedSleepMs: number) => {
+      import("../../lib/deltaOrchestratorService")
+        .then((m) => m.triggerImmediateDeltaSync())
+        .catch(() => {});
 
-      const now = Date.now();
-      const elapsedSleepMs = now - lastActiveTimestampRef.current;
-      lastActiveTimestampRef.current = now;
-
-      if (elapsedSleepMs > 30 * 1000) {
-        import("../../lib/deltaOrchestratorService").then(m => {
-          m.triggerImmediateDeltaSync().catch(() => {});
-        });
-      }
-
-      const IS_LONG_SLEEP = elapsedSleepMs > 10 * 60 * 1000; // > 10 min
-      if (IS_LONG_SLEEP) {
-        // Dispatch recovery event to sub-hooks
+      if (elapsedSleepMs > 60 * 1000) {
+        // Dispatch recovery event to sub-hooks (>60s sleep/freeze gap per Rule 16.2)
         window.dispatchEvent(
           new CustomEvent("taka_sleep_wake_recovery", { detail: { elapsedSleepMs } })
         );
 
         // Check iOS 40MB storage budget and log audit
         enforceStorageBudget().catch(() => {});
-        const sleepMinutes = Math.round(elapsedSleepMs / 60000);
+        const sleepMinutes = Math.max(1, Math.round(elapsedSleepMs / 60000));
         usePerformanceStore
           .getState()
           .trackGetDoc(
@@ -83,75 +71,116 @@ export function useStaticAndAuthHydration() {
       }
     };
 
+    const handleSleepWake = () => {
+      const isVisible =
+        typeof document !== "undefined" && document.visibilityState === "visible";
+      if (!isVisible) {
+        lastActiveTimestampRef.current = Date.now();
+        return;
+      }
+
+      const now = Date.now();
+      const elapsedSleepMs = now - lastActiveTimestampRef.current;
+      lastActiveTimestampRef.current = now;
+
+      if (elapsedSleepMs > 60 * 1000) {
+        triggerOvernightRecovery(elapsedSleepMs);
+      }
+    };
+
+    // Heartbeat Gap Detection every 20s (catches OS sleep when tab remained visible)
+    let lastHeartbeat = Date.now();
+    const heartbeatTimer = setInterval(() => {
+      const now = Date.now();
+      const gapMs = now - lastHeartbeat;
+      lastHeartbeat = now;
+      lastActiveTimestampRef.current = now;
+      if (
+        gapMs > 60 * 1000 &&
+        typeof document !== "undefined" &&
+        document.visibilityState === "visible"
+      ) {
+        triggerOvernightRecovery(gapMs);
+      }
+    }, 20 * 1000);
+
     document.addEventListener("visibilitychange", handleSleepWake);
     window.addEventListener("pageshow", handleSleepWake);
+    window.addEventListener("online", handleSleepWake);
     window.addEventListener("focus", handleSleepWake);
 
     return () => {
+      clearInterval(heartbeatTimer);
       document.removeEventListener("visibilitychange", handleSleepWake);
       window.removeEventListener("pageshow", handleSleepWake);
+      window.removeEventListener("online", handleSleepWake);
       window.removeEventListener("focus", handleSleepWake);
     };
   }, []);
 
   // 2. Tri-Gate Lazy trigger & Visibility Tracker
   useEffect(() => {
-    const evaluate = () => {
-      const tabsRequiringTasks: TabId[] = [
-        "gantt",
-        "detail",
-        "calendar",
-        "taskDelegation",
-        "taskDelegationCalendar",
-      ];
-      const isChatOnly = isProjectModalOpen && modalInitialTab === "chat";
-      const isLayoutTab = activeTab === "layout";
-      const needsTasks =
-        tabsRequiringTasks.includes(activeTab) ||
-        isTaskModalOpen ||
-        (isProjectModalOpen && !isChatOnly && !isLayoutTab);
+    const tabsRequiringTasks: TabId[] = [
+      "gantt",
+      "detail",
+      "calendar",
+      "taskDelegation",
+      "taskDelegationCalendar",
+    ];
+    const isChatOnly = isProjectModalOpen && modalInitialTab === "chat";
+    const isLayoutTab = activeTab === "layout";
+    const needsTasks = tabsRequiringTasks.includes(activeTab);
 
-      const tabsRequiringCosts: TabId[] = ["cost", "budget"];
-      const needsCosts =
-        tabsRequiringCosts.includes(activeTab) ||
-        (isProjectModalOpen && !isChatOnly && !isLayoutTab);
+    const tabsRequiringCosts: TabId[] = ["cost", "budget"];
+    const needsCosts = tabsRequiringCosts.includes(activeTab);
 
-      const tabsRequiringDelegations: TabId[] = ["taskDelegation", "taskDelegationCalendar"];
-      const needsDelegations = tabsRequiringDelegations.includes(activeTab);
+    const tabsRequiringDelegations: TabId[] = ["taskDelegation", "taskDelegationCalendar"];
+    const needsDelegations = tabsRequiringDelegations.includes(activeTab);
 
-      if (needsTasks) {
-        setIsTasksRequested(true);
-        hydrateTasksFromLocal(useAppStore.getState().globalYearFilter).catch(() => {});
-      }
-      if (needsCosts) {
-        setIsCostsRequested(true);
-        hydrateCostsFromLocal(useAppStore.getState().globalYearFilter).catch(() => {});
-      }
-      if (needsDelegations) {
-        setIsDelegationsRequested(true);
-        hydrateDelegationsFromLocal(useAppStore.getState().globalYearFilter).catch(() => {});
-      } else {
-        const store = useAppStore.getState();
-        const openProjectKeys: string[] = [];
-        if (store.editingProject?.id) openProjectKeys.push(store.editingProject.id);
-        if (store.editingProject?.code) openProjectKeys.push(store.editingProject.code);
-        if (store.editingTask?.projectId) openProjectKeys.push(store.editingTask.projectId);
-        if (store.editingTask?.projectCode) openProjectKeys.push(store.editingTask.projectCode);
-        if (openProjectKeys.length > 0) {
-          hydrateDelegationsForProjects(openProjectKeys).catch(() => {});
-        }
-      }
+    const flushGateInvalidations = (coll: "taka_tasks" | "taka_costs" | "taka_delegations") => {
+      Promise.all([
+        import("../../lib/deltaInvalidateService"),
+        import("../../lib/deltaApplyService"),
+      ])
+        .then(([{ flushDeferredInvalidations }, { applyIncomingDeltas }]) =>
+          flushDeferredInvalidations(coll).then((synthetic) => {
+            if (synthetic.length > 0) applyIncomingDeltas(synthetic);
+          })
+        )
+        .catch(() => {});
     };
 
-    evaluate();
-    document.addEventListener("visibilitychange", evaluate);
-    window.addEventListener("pageshow", evaluate);
-    window.addEventListener("focus", evaluate);
-    return () => {
-      document.removeEventListener("visibilitychange", evaluate);
-      window.removeEventListener("pageshow", evaluate);
-      window.removeEventListener("focus", evaluate);
-    };
+    const store = useAppStore.getState();
+    const openProjectKeys: string[] = [];
+    if (store.editingProject?.id) openProjectKeys.push(store.editingProject.id);
+    if (store.editingProject?.code) openProjectKeys.push(store.editingProject.code);
+    if (store.editingTask?.projectId) openProjectKeys.push(store.editingTask.projectId);
+    if (store.editingTask?.projectCode) openProjectKeys.push(store.editingTask.projectCode);
+    const targetYr = store.editingProject?.year ?? store.editingTask?.projectYear ?? store.globalYearFilter;
+    const targetSt = store.editingProject?.store ?? store.editingTask?.projectStore ?? store.globalStoreFilter;
+
+    if (needsTasks) {
+      setIsTasksRequested(true);
+      hydrateTasksFromLocal(store.globalYearFilter).catch(() => {});
+      flushGateInvalidations("taka_tasks");
+    } else if ((isTaskModalOpen || (isProjectModalOpen && !isChatOnly && !isLayoutTab)) && openProjectKeys.length > 0) {
+      // Rule 3 & Rule 8: Zero-Query for Modals — hydrate only the target project's tasks from Dexie
+      hydrateTasksForProjects(openProjectKeys, targetYr, targetSt).catch(() => {});
+    }
+
+    if (needsCosts) {
+      setIsCostsRequested(true);
+      hydrateCostsFromLocal(store.globalYearFilter).catch(() => {});
+      flushGateInvalidations("taka_costs");
+    }
+
+    if (needsDelegations) {
+      setIsDelegationsRequested(true);
+      hydrateDelegationsFromLocal(store.globalYearFilter).catch(() => {});
+      flushGateInvalidations("taka_delegations");
+    } else if (openProjectKeys.length > 0) {
+      hydrateDelegationsForProjects(openProjectKeys, targetYr, targetSt).catch(() => {});
+    }
   }, [
     activeTab,
     isTaskModalOpen,
@@ -177,20 +206,29 @@ export function useStaticAndAuthHydration() {
             );
           }
         }
+        const localWorkStates = loadLocalMyWorkStates(parsedUser.id);
+        parsedUser.myWorkStates = mergeMyWorkStates(parsedUser.myWorkStates, localWorkStates);
         setCurrentUser(parsedUser);
       } catch (e) {
         console.error("Error parsing savedAuth", e);
       }
     } else {
       const guestReadNotifsStr = safeGetItemLocal("taka_read_notifs_guest");
-      if (guestReadNotifsStr) {
-        try {
-          const guestRead = JSON.parse(guestReadNotifsStr);
-          const cur = useAppStore.getState().currentUser;
-          if (cur && cur.id === "guest" && Array.isArray(guestRead)) {
-            setCurrentUser({ ...cur, readNotifs: guestRead });
-          }
-        } catch (e) {}
+      const guestWorkStates = loadLocalMyWorkStates("guest");
+      const cur = useAppStore.getState().currentUser;
+      if (cur && cur.id === "guest") {
+        let guestRead: string[] = cur.readNotifs || [];
+        if (guestReadNotifsStr) {
+          try {
+            const parsed = JSON.parse(guestReadNotifsStr);
+            if (Array.isArray(parsed)) guestRead = parsed;
+          } catch (e) {}
+        }
+        setCurrentUser({
+          ...cur,
+          readNotifs: guestRead,
+          myWorkStates: mergeMyWorkStates(cur.myWorkStates, guestWorkStates),
+        });
       }
     }
 
@@ -227,7 +265,7 @@ export function useStaticAndAuthHydration() {
         if (synced > 0) {
           setToast({
             title: "Sync Complete",
-            message: `Đã đồng bộ ${synced} thay đổi offline lên server.`,
+            message: `Successfully synced ${synced} offline change(s) to server.`,
           });
         }
         if (failed > 0) setCloudStatus("offline");
@@ -252,7 +290,7 @@ export function useStaticAndAuthHydration() {
     };
   }, [user?.uid, setCloudStatus, setToast]);
 
-  // 5. Sync Profile Effect
+  // 5. Sync Profile & MyWorkStates Effect from appUsers list + taka_deltas (0 extra Firestore listeners)
   useEffect(() => {
     if (!appUsers || appUsers.length === 0) return;
     const cur = useAppStore.getState().currentUser;
@@ -270,6 +308,12 @@ export function useStaticAndAuthHydration() {
           new Set([...(found.readNotifs || []), ...(cur.readNotifs || []), ...localReadNotifs])
         );
 
+        const localWorkStates = loadLocalMyWorkStates(cur.id);
+        const mergedMyWorkStates = mergeMyWorkStates(
+          mergeMyWorkStates(localWorkStates, cur.myWorkStates),
+          found.myWorkStates
+        );
+
         const hasChanged =
           cur.role !== found.role ||
           cur.username !== found.username ||
@@ -279,15 +323,19 @@ export function useStaticAndAuthHydration() {
           JSON.stringify(cur.storePermissions) !== JSON.stringify(found.storePermissions) ||
           JSON.stringify(cur.locationPermissions) !== JSON.stringify(found.locationPermissions) ||
           JSON.stringify(cur.partyPermissions) !== JSON.stringify(found.partyPermissions) ||
-          JSON.stringify(cur.preferences) !== JSON.stringify(found.preferences);
+          JSON.stringify(cur.preferences) !== JSON.stringify(found.preferences) ||
+          JSON.stringify(cur.readNotifs || []) !== JSON.stringify(mergedReadNotifs) ||
+          JSON.stringify(cur.myWorkStates || {}) !== JSON.stringify(mergedMyWorkStates);
 
         if (hasChanged) {
           const updated: AppUser = {
             ...cur,
             ...found,
             readNotifs: mergedReadNotifs,
+            myWorkStates: mergedMyWorkStates,
           };
           setCurrentUser(updated);
+          safeSetItemLocal(`taka_mywork_states_${cur.id}`, JSON.stringify(mergedMyWorkStates));
           safeSetItemLocal("taka_auth_v1", JSON.stringify(updated));
 
           if (

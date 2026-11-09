@@ -1,10 +1,8 @@
 {
-  "name": "Remix Taka-pm",
-  "description": "Imported from GitHub: namhung07164/Taka-pm",
-  "requestFramePermissions": [
-    "camera"
-  ],
-  "majorCapabilities": [
+  "name": "Takashimaya Project Management",
+  "description": "Enterprise Project Management & Floorplan System for Takashimaya",
+  "permissions": [],
+  "capabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
   ]
 }

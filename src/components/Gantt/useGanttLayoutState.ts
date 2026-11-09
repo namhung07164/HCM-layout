@@ -2,25 +2,46 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   safeGetDeviceItemLocal,
   safeSetDeviceItemLocal,
+  safeGetItemSession,
+  safeSetItemSession,
   getDeviceScreenType,
 } from '../../lib/storage';
 
 export function useGanttLayoutState(currentUserId?: string) {
-  const [filterStartDate, setFilterStartDate] = useState('');
-  const [filterEndDate, setFilterEndDate] = useState('');
-  const [tempStartDate, setTempStartDate] = useState('');
-  const [tempEndDate, setTempEndDate] = useState('');
+  const [filterStartDate, setFilterStartDateState] = useState(
+    () => safeGetItemSession('taka_gantt_filter_date_start') || ''
+  );
+  const [filterEndDate, setFilterEndDateState] = useState(
+    () => safeGetItemSession('taka_gantt_filter_date_end') || ''
+  );
+  const [tempStartDate, setTempStartDate] = useState(
+    () => safeGetItemSession('taka_gantt_filter_date_start') || ''
+  );
+  const [tempEndDate, setTempEndDate] = useState(
+    () => safeGetItemSession('taka_gantt_filter_date_end') || ''
+  );
+
+  const setFilterStartDate = React.useCallback((val: string) => {
+    setFilterStartDateState(val);
+    safeSetItemSession('taka_gantt_filter_date_start', val || '');
+  }, []);
+
+  const setFilterEndDate = React.useCallback((val: string) => {
+    setFilterEndDateState(val);
+    safeSetItemSession('taka_gantt_filter_date_end', val || '');
+  }, []);
 
   const [sideWidth, setSideWidth] = useState<number>(() => {
-    const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
-    if (isMobile) {
+    const w = typeof window !== 'undefined' ? window.innerWidth : 1440;
+    if (w < 768) {
       const savedMobile = safeGetDeviceItemLocal('taka_gantt_side_width', currentUserId);
       return savedMobile
-        ? Math.max(140, Math.min(260, Number(savedMobile)))
-        : Math.max(160, Math.min(220, Math.floor(window.innerWidth * 0.52)));
+        ? Math.max(150, Math.min(240, Number(savedMobile)))
+        : Math.max(165, Math.min(210, Math.floor(w * 0.48)));
     }
     const saved = safeGetDeviceItemLocal('taka_gantt_side_width', currentUserId);
-    return saved ? Math.max(180, Math.min(600, Number(saved))) : 360;
+    if (saved) return Math.max(240, Math.min(680, Number(saved)));
+    return w < 1024 ? 380 : 500;
   });
 
   const [visibleColumns, setVisibleColumns] = useState<string[]>(() => {
@@ -30,8 +51,10 @@ export function useGanttLayoutState(currentUserId?: string) {
         return JSON.parse(saved);
       } catch (e) {}
     }
-    const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
-    return isMobile ? ['start', 'finish'] : ['start', 'finish', 'party', 'duration'];
+    const w = typeof window !== 'undefined' ? window.innerWidth : 1440;
+    if (w < 768) return [];
+    if (w < 1024) return ['start', 'finish'];
+    return ['start', 'finish', 'party', 'duration'];
   });
 
   const prevScreenTypeRef = useRef(getDeviceScreenType());
@@ -41,7 +64,7 @@ export function useGanttLayoutState(currentUserId?: string) {
       const currentScreenType = getDeviceScreenType();
       if (window.innerWidth < 768) {
         const maxMobileWidth = Math.max(
-          160,
+          165,
           Math.min(220, Math.floor(window.innerWidth * 0.52))
         );
         setSideWidth((prev) => Math.min(prev, maxMobileWidth));

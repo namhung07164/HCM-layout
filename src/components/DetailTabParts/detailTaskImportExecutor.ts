@@ -1,19 +1,19 @@
 import { Task, Project, AppUser } from '../../types';
 import { useAppStore } from '../../store/useAppStore';
-import { doc } from 'firebase/firestore';
-import { writeBatch } from '../../lib/firestoreWrites';
-import { db, APP_ID } from '../../lib/firebase';
 import { undoManager } from '../../lib/undoManager';
 import { formatToDatetimeLocal, getDefaultDatetimeLocal } from '../../lib/utils';
-import { getTasksForProject, calculateProjectComputedDates, syncProjectDatesToFirestore } from '../../lib/projectDatesService';
-import { 
-  calculateDatesFromPredecessorsAndDuration, 
-  rollupParentTaskDates, 
-  batchSaveTasksToFirestore 
+import { getTasksForProject, calculateProjectComputedDates, matchProjectCode } from '../../lib/projectDatesService';
+import {
+  calculateDatesFromPredecessorsAndDuration, rollupParentTaskDates,
+  prepareMissingDelegationsForTasks, batchSaveTasksToFirestore
 } from '../../lib/taskImportService';
 import { healAllTasksPredecessors } from '../../lib/ganttUtils';
+import { extractExplicitSubtaskNumber, extractSubtaskIndex } from '../../lib/ganttUtilsParts/taskSortingAndCodes';
 import { findAffectedProjects } from '../../lib/taskStateService';
 import { buildCanonicalProjectKey, normalizeTaskNameForComparison } from '../../lib/taskDeduplicationService';
+import { resolveParentChildHierarchy } from './detailTaskImportHierarchy';
+import { buildAffectedProjectsSyncOps, hasImportedTaskMeaningfullyChanged, commitImportedStateToStoreAndLocal } from './detailTaskImportProjectSync';
+import { hydrateImportContextTasks, lockExistingProjectTasksOrder } from './detailTaskImportHydrator';
 
 interface ExecuteImportTasksParams {
   rawParsedRowsByProject: Map<string, Array<{ rowData: any; originalCsvIndex: number }>>;
@@ -23,52 +23,113 @@ interface ExecuteImportTasksParams {
   currentUser: AppUser;
 }
 
-export async function executeImportTasks({
-  rawParsedRowsByProject,
-  projects,
-  tasks,
-  appUsers,
-  currentUser
-}: ExecuteImportTasksParams): Promise<{ count: number }> {
-  // Build fast multi-index maps for existing tasks
+export async function executeImportTasks({ rawParsedRowsByProject, projects, tasks, appUsers, currentUser }: ExecuteImportTasksParams): Promise<{ count: number; projectCount?: number }> {
+  // 1. Gather in-memory tasks in O(N) Map (no full-DB localDb.tasks.toArray() O(N^2) scan on main thread)
+  const candidatesById = new Map<string, Task>();
+  for (const t of useAppStore.getState().tasks || []) {
+    if (t?.id) candidatesById.set(t.id, t);
+  }
+  for (const t of tasks || []) {
+    if (t?.id && !candidatesById.has(t.id)) candidatesById.set(t.id, t);
+  }
+
+  // Hydrate only target & predecessor-referenced projects' tasks from Dexie/Firestore
+  const allInitialTasks = await hydrateImportContextTasks(
+    rawParsedRowsByProject,
+    projects,
+    Array.from(candidatesById.values())
+  );
+
+  // Hydrate delegations from Dexie only for the target projects
+  try {
+    const { getLocalDelegationsForProjects } = await import('../../lib/localDb');
+    const targetCodes = Array.from(rawParsedRowsByProject.values())
+      .map((g) => String(g[0]?.rowData?.projectCode || '').trim())
+      .filter(Boolean);
+    if (targetCodes.length > 0) {
+      const dbDels = await getLocalDelegationsForProjects(targetCodes);
+      if (dbDels && dbDels.length > 0) {
+        const curDels = useAppStore.getState().delegationGroups || [];
+        const delMap = new Map(curDels.map((d) => [d.id, d]));
+        let addedDel = false;
+        dbDels.forEach((d) => {
+          if (d?.id && !delMap.has(d.id)) {
+            delMap.set(d.id, d);
+            addedDel = true;
+          }
+        });
+        if (addedDel) useAppStore.getState().setDelegationGroups(Array.from(delMap.values()));
+      }
+    }
+  } catch { /* localDb fallback */ }
+
+  // Yield 1 microtask so the browser UI stays responsive at 60 FPS before heavy predecessor/rollup math
+  await new Promise((r) => setTimeout(r, 0));
+
+  // 2. Build multi-index maps for existing tasks in scoped projects
   const existingTasksById = new Map<string, Task>();
   const existingTasksByName = new Map<string, Task>();
   const existingTasksByNorm = new Map<string, Task>();
   const existingTasksByCode = new Map<string, Task>();
 
-  tasks.forEach(tsk => {
+  allInitialTasks.forEach(tsk => {
+    if (!tsk || !tsk.id) return;
     existingTasksById.set(tsk.id, tsk);
     const prjKey = buildCanonicalProjectKey(tsk.projectCode, tsk.projectYear, tsk.projectStore, projects);
-    const pCode = String(tsk.projectCode || '').trim().toLowerCase();
     if (tsk.name) {
-      const nameKey = `${prjKey}:::${String(tsk.name).trim().toLowerCase()}`;
-      existingTasksByName.set(nameKey, tsk);
-      const norm = normalizeTaskNameForComparison(tsk.name, tsk.projectCode);
-      if (norm) {
-        existingTasksByNorm.set(`${pCode}:::norm:::${norm}`, tsk);
+      const nameK = `${prjKey}:::${String(tsk.name).trim().toLowerCase()}`;
+      if (!existingTasksByName.has(nameK)) existingTasksByName.set(nameK, tsk);
+      const norm = normalizeTaskNameForComparison(tsk.name);
+      if (norm && !existingTasksByNorm.has(`${prjKey}:::norm:::${norm}`)) {
+        existingTasksByNorm.set(`${prjKey}:::norm:::${norm}`, tsk);
       }
     }
-    if (tsk.taskCodePhu) {
-      const codeKey = `${pCode}:::code:::${String(tsk.taskCodePhu).trim().toLowerCase()}`;
-      existingTasksByCode.set(codeKey, tsk);
-    }
+    if (tsk.taskCodePhu) existingTasksByCode.set(`${prjKey}:::code:::${String(tsk.taskCodePhu).trim().toLowerCase()}`, tsk);
   });
 
   const previousStates = new Map<string, any>();
   const newIds = new Set<string>();
   const tasksToImport: Task[] = [];
   const processedImportTasksMap = new Map<string, Task>();
+  const lockedExistingTasksToSave = new Map<string, Task>();
 
-  // Process rows project by project
+  // 3. Process rows project by project
   rawParsedRowsByProject.forEach((items, prjKey) => {
+    const sample = items[0]?.rowData;
+    const targetProject = projects.find(p => {
+      const codeMatch = matchProjectCode(p.code, sample?.projectCode);
+      const storeMatch = !sample?.projectStore || !p.store || String(p.store).trim().toLowerCase() === String(sample.projectStore).trim().toLowerCase();
+      const yearMatch = !sample?.projectYear || p.year === undefined || p.year === null || String(p.year).trim() === String(sample.projectYear).trim();
+      return codeMatch && storeMatch && yearMatch;
+    });
+
+    const exactProjCodeForGroup = String(sample?.projectCode || targetProject?.code || '').trim();
+    const canonicalGroupKey = buildCanonicalProjectKey(sample?.projectCode, sample?.projectYear, sample?.projectStore, projects);
+    const projectExistingTasks = targetProject
+      ? getTasksForProject(targetProject, allInitialTasks)
+      : allInitialTasks.filter(t => buildCanonicalProjectKey(t.projectCode, t.projectYear, t.projectStore, projects) === prjKey);
+
+    const { maxExistingSubtaskNum, maxExistingOrderIndex } = lockExistingProjectTasksOrder(
+      projectExistingTasks,
+      targetProject,
+      exactProjCodeForGroup,
+      canonicalGroupKey,
+      allInitialTasks,
+      existingTasksById,
+      existingTasksByName,
+      existingTasksByNorm,
+      existingTasksByCode,
+      lockedExistingTasksToSave,
+      previousStates
+    );
+    let nextAutoNumber = Math.max(maxExistingSubtaskNum, maxExistingOrderIndex + 1);
+
     const sortedItems = [...items].sort((a, b) => {
       const codeA = String(a.rowData.taskCodePhu || '').trim();
       const codeB = String(b.rowData.taskCodePhu || '').trim();
-      const numMatchA = codeA.match(/-(\d+)$/);
-      const numMatchB = codeB.match(/-(\d+)$/);
-      if (numMatchA && numMatchB) {
-        const numA = parseInt(numMatchA[1], 10);
-        const numB = parseInt(numMatchB[1], 10);
+      const numA = extractExplicitSubtaskNumber(codeA, exactProjCodeForGroup) ?? extractSubtaskIndex(codeA, exactProjCodeForGroup);
+      const numB = extractExplicitSubtaskNumber(codeB, exactProjCodeForGroup) ?? extractSubtaskIndex(codeB, exactProjCodeForGroup);
+      if (numA !== null && numB !== null) {
         if (numA !== numB) return numA - numB;
       } else if (codeA && codeB) {
         const comp = codeA.localeCompare(codeB, undefined, { numeric: true });
@@ -87,48 +148,65 @@ export async function executeImportTasks({
       return a.originalCsvIndex - b.originalCsvIndex;
     });
 
-    sortedItems.forEach((item, index) => {
+    sortedItems.forEach((item) => {
       const t = item.rowData;
-      // Dùng index thực tế của dòng trong file CSV để đánh số lại, đảm bảo không nhảy cóc
-      const taskOrderIndex = index; 
-      const exactProjectCode = String(t.projectCode || '').trim();
-      
-      // Ép buộc tạo Subtask code: Lấy tuyệt đối Project Code + # + (Thứ tự dòng + 1)
-      const taskCodePhu = `${exactProjectCode}#${taskOrderIndex + 1}`;
-
+      const exactProjectCode = String(t.projectCode || targetProject?.code || '').trim();
       const canonicalPrjKey = buildCanonicalProjectKey(t.projectCode, t.projectYear, t.projectStore, projects);
-      const pCode = exactProjectCode.toLowerCase();
+
+      const rawCode = String(t.taskCodePhu || '').trim();
+      const explicitNum = extractExplicitSubtaskNumber(rawCode, exactProjectCode) ?? extractSubtaskIndex(rawCode, exactProjectCode);
+      const hasExplicitSubtaskNumber = explicitNum !== null;
+
+      let taskCodePhu: string;
+      let taskOrderIndex: number;
+
+      if (explicitNum !== null) {
+        taskCodePhu = `${exactProjectCode}#${explicitNum}`;
+        nextAutoNumber = Math.max(nextAutoNumber, explicitNum);
+        taskOrderIndex = explicitNum - 1;
+      } else if (rawCode) {
+        taskCodePhu = rawCode.startsWith(exactProjectCode) ? rawCode : `${exactProjectCode}#${rawCode}`;
+        nextAutoNumber += 1;
+        taskOrderIndex = t.orderIndex !== undefined && t.orderIndex !== '' && !isNaN(Number(t.orderIndex))
+          ? Number(t.orderIndex)
+          : nextAutoNumber - 1;
+      } else {
+        nextAutoNumber += 1;
+        taskCodePhu = `${exactProjectCode}#${nextAutoNumber}`;
+        taskOrderIndex = t.orderIndex !== undefined && t.orderIndex !== '' && !isNaN(Number(t.orderIndex))
+          ? Number(t.orderIndex)
+          : nextAutoNumber - 1;
+      }
+
       const rawName = String(t.name || '').trim().toLowerCase();
-      const normName = normalizeTaskNameForComparison(t.name, t.projectCode);
+      const normName = normalizeTaskNameForComparison(t.name);
       const nameKey = `${canonicalPrjKey}:::${rawName}`;
-      const normKey = `${pCode}:::norm:::${normName}`;
-      const codeKey = `${pCode}:::code:::${String(taskCodePhu).trim().toLowerCase()}`;
+      const normKey = `${canonicalPrjKey}:::norm:::${normName}`;
+      const codeKey = `${canonicalPrjKey}:::code:::${taskCodePhu.toLowerCase()}`;
 
-      // Match against existing tasks in priority:
-      // 1. Matched in current import batch (by exact name, norm name, or code)
-      // 2. By ID
-      // 3. By exact project + name
-      // 4. By normalized project + name
-      // 5. By project + taskCodePhu
-      let existing: Task | undefined = processedImportTasksMap.get(nameKey) ||
-                                       (normName ? processedImportTasksMap.get(normKey) : undefined) ||
-                                       (taskCodePhu ? processedImportTasksMap.get(codeKey) : undefined);
-      if (!existing && t.id) {
-        existing = existingTasksById.get(t.id);
-      }
-      if (!existing && nameKey) {
-        existing = existingTasksByName.get(nameKey);
-      }
-      if (!existing && normKey) {
-        existing = existingTasksByNorm.get(normKey);
-      }
-      if (!existing && taskCodePhu) {
-        existing = existingTasksByCode.get(codeKey);
+      let existing: Task | undefined = undefined;
+
+      if (hasExplicitSubtaskNumber) {
+        existing =
+          processedImportTasksMap.get(codeKey) ||
+          (t.id ? existingTasksById.get(t.id) : undefined) ||
+          existingTasksByCode.get(codeKey);
+      } else {
+        existing =
+          processedImportTasksMap.get(codeKey) ||
+          processedImportTasksMap.get(nameKey) ||
+          (normName ? processedImportTasksMap.get(normKey) : undefined) ||
+          (t.id ? existingTasksById.get(t.id) : undefined) ||
+          (nameKey ? existingTasksByName.get(nameKey) : undefined) ||
+          (normKey ? existingTasksByNorm.get(normKey) : undefined) ||
+          (codeKey ? existingTasksByCode.get(codeKey) : undefined);
       }
 
-      const id = existing ? existing.id : `t_${Date.now()}_${Math.random().toString(36).substr(2, 9)}_${tasksToImport.length}`;
+      const hasRealExistingId = Boolean(existing?.id && !String(existing.id).startsWith('ts_'));
+      const id = hasRealExistingId ? existing!.id : `t_${Date.now()}_${Math.random().toString(36).substr(2, 9)}_${tasksToImport.length}`;
+      lockedExistingTasksToSave.delete(id);
 
-      if (existing) {
+      if (existing && hasRealExistingId) {
         if (!previousStates.has(id)) {
           previousStates.set(id, existing);
         }
@@ -187,41 +265,61 @@ export async function executeImportTasks({
       }
       delete t.importComment;
 
+      const defaultToday = getDefaultDatetimeLocal();
+      const csvPred = t.predecessor !== undefined ? String(t.predecessor || '').trim().replace(/^[,;\s]+|[,;\s]+$/g, '').trim() : undefined;
+      const csvBaselineStart = t.baselineStart ? String(t.baselineStart).trim() : '';
+      const csvBaselineFinish = t.baselineFinish ? String(t.baselineFinish).trim() : '';
       if (!existing) {
-        const defaultToday = getDefaultDatetimeLocal();
         if (!t.start) t.start = defaultToday;
         if (!t.finish) t.finish = t.start || defaultToday;
-        if (!t.baselineStart) t.baselineStart = t.start || defaultToday;
-        if (!t.baselineFinish) t.baselineFinish = t.finish || defaultToday;
-        if (t.duration === undefined || t.duration === null || String(t.duration).trim() === '') {
-          t.duration = "0";
-        }
+        if (t.duration === undefined || t.duration === null || String(t.duration).trim() === '') t.duration = "0";
+      } else {
+        if (!t.start) t.start = existing.start || defaultToday;
+        if (!t.finish) t.finish = existing.finish || t.start || defaultToday;
       }
+      if (csvPred !== undefined) t.predecessor = csvPred;
 
+      const resolvedDelegation =
+        t.delegation !== undefined
+          ? Boolean(t.delegation)
+          : existing?.delegation !== undefined
+          ? Boolean(existing.delegation)
+          : true;
+      const hasImportedParentRef = Boolean(t.parentTaskId || t.parentTaskCode || t.parentTaskName);
       const finalTask: Task = existing
         ? {
-            ...existing,
-            ...t,
-            id: existing.id,
-            comments: updatedComments,
-            orderIndex: taskOrderIndex,
-            taskCodePhu,
-            durationManual: true,
-            finishManual: false,
-            startManual: false,
-            updatedAt: new Date().toISOString()
+            ...existing, ...t, id, delegation: resolvedDelegation,
+            predecessor: csvPred !== undefined ? (csvPred || existing.predecessor || '') : (existing.predecessor || ''),
+            parentTaskId: hasImportedParentRef ? (t.parentTaskId || existing.parentTaskId) : undefined,
+            predecessorTaskIds: undefined, predecessors: undefined, isModularParent: false,
+            comments: updatedComments, orderIndex: taskOrderIndex, taskCodePhu,
+            durationManual: true, finishManual: false, startManual: false, updatedAt: new Date().toISOString()
           }
         : {
-            ...t,
-            id,
-            comments: updatedComments,
-            orderIndex: taskOrderIndex,
-            taskCodePhu,
-            durationManual: true,
-            finishManual: false,
-            startManual: false,
-            updatedAt: new Date().toISOString()
+            ...t, id, delegation: resolvedDelegation, predecessor: csvPred || '',
+            comments: updatedComments, orderIndex: taskOrderIndex, taskCodePhu,
+            durationManual: true, finishManual: false, startManual: false, updatedAt: new Date().toISOString()
           };
+      delete (finalTask as any)._isVirtualSummary;
+
+      if ((!finalTask.projectId || !finalTask.projectStore || finalTask.projectYear === undefined) && projects && projects.length > 0) {
+        const pCode = String(finalTask.projectCode || '').trim().toLowerCase();
+        const pStore = String(finalTask.projectStore || '').trim().toLowerCase();
+        const pYear = String(finalTask.projectYear ?? '').trim();
+        const matched = projects.find(p => {
+          if (finalTask.projectId && String(p.id) === String(finalTask.projectId)) return true;
+          const matchCode = matchProjectCode(p.code, pCode) || String(p.no || '').trim().toLowerCase() === pCode;
+          const matchStore = !pStore || !p.store || String(p.store).trim().toLowerCase() === pStore;
+          const matchYear = !pYear || p.year === undefined || p.year === null || String(p.year).trim() === pYear;
+          return matchCode && matchStore && matchYear;
+        });
+        if (matched) {
+          finalTask.projectId = matched.id;
+          if (matched.code) finalTask.projectCode = matched.code;
+          if (!finalTask.projectStore && matched.store) finalTask.projectStore = matched.store;
+          if (finalTask.projectYear === undefined && matched.year !== undefined) finalTask.projectYear = matched.year;
+        }
+      }
 
       if (finalTask.start && finalTask.duration !== undefined && finalTask.duration !== '') {
         const s = new Date(finalTask.start);
@@ -245,147 +343,142 @@ export async function executeImportTasks({
         finalTask.durationManual = true;
       }
 
-      // Register immediately into lookup maps to prevent duplicate tasks within same import
+      finalTask.baselineStart = csvBaselineStart || existing?.baselineStart || finalTask.start || defaultToday;
+      finalTask.baselineFinish = csvBaselineFinish || existing?.baselineFinish || finalTask.finish || defaultToday;
+
       processedImportTasksMap.set(nameKey, finalTask);
       if (normKey) processedImportTasksMap.set(normKey, finalTask);
       if (codeKey) processedImportTasksMap.set(codeKey, finalTask);
-      existingTasksByName.set(nameKey, finalTask);
-      if (normKey) existingTasksByNorm.set(normKey, finalTask);
+      if (!hasExplicitSubtaskNumber || !existingTasksByName.has(nameKey)) {
+        existingTasksByName.set(nameKey, finalTask);
+      }
+      if (normKey && (!hasExplicitSubtaskNumber || !existingTasksByNorm.has(normKey))) {
+        existingTasksByNorm.set(normKey, finalTask);
+      }
       existingTasksByCode.set(codeKey, finalTask);
       existingTasksById.set(finalTask.id, finalTask);
 
       const existingIndex = tasksToImport.findIndex(tk => tk.id === finalTask.id);
-      if (existingIndex >= 0) {
-        tasksToImport[existingIndex] = finalTask;
-      } else {
-        tasksToImport.push(finalTask);
-      }
+      if (existingIndex >= 0) tasksToImport[existingIndex] = finalTask;
+      else tasksToImport.push(finalTask);
     });
   });
 
-  // Resolve parent-child hierarchy across imported tasks and existing tasks
-  const lookupTaskMap = new Map<string, Task>();
-  tasks.forEach(t => lookupTaskMap.set(t.id, t));
-  tasksToImport.forEach(t => lookupTaskMap.set(t.id, t));
-
+  // 4. Resolve parent-child hierarchy across imported tasks and scoped existing tasks
+  resolveParentChildHierarchy(tasksToImport, allInitialTasks);
+  const importedPredById = new Map<string, string>();
   tasksToImport.forEach(t => {
-    let resolvedParentId: string | undefined = undefined;
-
-    if (t.parentTaskId && lookupTaskMap.has(t.parentTaskId)) {
-      resolvedParentId = t.parentTaskId;
-    } else if ((t as any).parentTaskCode) {
-      const pCode = String((t as any).parentTaskCode).trim().toLowerCase();
-      const cleanNumMatch = pCode.match(/^#?(\d+)$/);
-      const targetIndex = cleanNumMatch ? parseInt(cleanNumMatch[1], 10) - 1 : -1;
-
-      const matchedParent = Array.from(lookupTaskMap.values()).find(
-        pt => pt.projectCode === t.projectCode &&
-              (pt.projectYear == t.projectYear || (!pt.projectYear && !t.projectYear)) &&
-              (pt.projectStore == t.projectStore || (!pt.projectStore && !t.projectStore)) &&
-              (
-                String(pt.taskCodePhu || '').trim().toLowerCase() === pCode ||
-                String(pt.id).toLowerCase() === pCode ||
-                (cleanNumMatch && String(pt.taskCodePhu || '').trim().toLowerCase().endsWith(`#${cleanNumMatch[1]}`)) ||
-                (targetIndex >= 0 && pt.orderIndex === targetIndex)
-              )
-      );
-      if (matchedParent && matchedParent.id !== t.id) {
-        resolvedParentId = matchedParent.id;
-      }
-    } else if ((t as any).parentTaskName) {
-      const pName = String((t as any).parentTaskName).trim().toLowerCase();
-      const matchedParent = Array.from(lookupTaskMap.values()).find(
-        pt => pt.projectCode === t.projectCode &&
-              (pt.projectYear == t.projectYear || (!pt.projectYear && !t.projectYear)) &&
-              (pt.projectStore == t.projectStore || (!pt.projectStore && !t.projectStore)) &&
-              String(pt.name || '').trim().toLowerCase() === pName
-      );
-      if (matchedParent && matchedParent.id !== t.id) {
-        resolvedParentId = matchedParent.id;
-      }
-    }
-
-    if (resolvedParentId && resolvedParentId !== t.id) {
-      t.parentTaskId = resolvedParentId;
-      (t as any).parentId = resolvedParentId;
-    } else if (resolvedParentId === t.id) {
-      delete t.parentTaskId;
-      delete (t as any).parentId;
-    }
-
-    delete (t as any).parentTaskCode;
-    delete (t as any).parentTaskName;
-    delete (t as any).isParent;
-    delete (t as any).level;
+    if (t.predecessor && String(t.predecessor).trim()) importedPredById.set(t.id, String(t.predecessor).trim());
   });
 
-  // Calculate dates from predecessors and duration
-  useAppStore.getState().optimisticUpdateTasks(tasksToImport);
-
-  const allCurrentTasks = useAppStore.getState().tasks;
-  const calculatedTasks = calculateDatesFromPredecessorsAndDuration(
-    tasksToImport,
-    allCurrentTasks,
-    projects
-  );
-
-  const tasksMapAfterCalc = new Map<string, Task>();
-  allCurrentTasks.forEach(t => tasksMapAfterCalc.set(t.id, t));
-  calculatedTasks.forEach(t => tasksMapAfterCalc.set(t.id, t));
-  const allTasksWithCalc = Array.from(tasksMapAfterCalc.values());
-  const { updatedParents, allTasksMap } = rollupParentTaskDates(allTasksWithCalc);
-
-  const tasksToSaveMap = new Map<string, Task>();
-  calculatedTasks.forEach(t => tasksToSaveMap.set(t.id, t));
-  updatedParents.forEach(p => tasksToSaveMap.set(p.id, p));
-  const rawTasksToSave = Array.from(tasksToSaveMap.values());
-
-  // Auto-heal predecessor string codes on imported CSV/Excel tasks
-  const healed = healAllTasksPredecessors(rawTasksToSave, projects);
-  const finalTasksToSave = healed.updatedTasks;
-
-  // Optimistic update
-  useAppStore.getState().optimisticUpdateTasks(finalTasksToSave);
-
-  // Sync project summaries
-  const finalFullTasksList = Array.from(allTasksMap.values());
-  const affectedProjects = findAffectedProjects(finalTasksToSave, projects);
-  const delegationGroups = useAppStore.getState().delegationGroups;
-  const currentProjects = useAppStore.getState().projects;
-  const updatedProjects = currentProjects.map(proj => {
-    const isAffected = affectedProjects.some(ap => ap.id === proj.id);
-    if (!isAffected) return proj;
-    const pTasks = getTasksForProject(proj, finalFullTasksList);
-    const computed = calculateProjectComputedDates(proj, pTasks, delegationGroups);
-    return { ...proj, ...computed };
-  });
-  useAppStore.getState().setProjects(updatedProjects);
-
-  // Save to Firestore
+  const commitNowIso = new Date().toISOString();
   const activeUser = useAppStore.getState().currentUser || currentUser;
-  await batchSaveTasksToFirestore(finalTasksToSave, activeUser);
 
-  for (const p of affectedProjects) {
-    const pTasks = getTasksForProject(p, finalFullTasksList);
-    const computed = calculateProjectComputedDates(p, pTasks, delegationGroups);
-    await syncProjectDatesToFirestore(p.id, computed);
-  }
+  // 5. Compute predecessors, healing, and parent rollups purely in-memory on the scoped project tasks
+  const tasksMapAfterCalc = new Map<string, Task>();
+  allInitialTasks.forEach(t => tasksMapAfterCalc.set(t.id, t));
+  tasksToImport.forEach(t => tasksMapAfterCalc.set(t.id, t));
+
+  const affectedProjects = findAffectedProjects([...allInitialTasks, ...tasksToImport], projects);
+  const scopedProjects = affectedProjects.length > 0 ? affectedProjects : projects;
+  const targetImportedProjects = findAffectedProjects(tasksToImport, projects);
+  const targetProjectIdSet = new Set(targetImportedProjects.map(p => String(p.id || '')).filter(Boolean));
+  const targetProjectCodeSet = new Set(targetImportedProjects.map(p => String(p.code || '').trim().toLowerCase()).filter(Boolean));
+  const isInTargetImportedProject = (tk?: Task): boolean =>
+    Boolean(tk && ((tk.projectId && targetProjectIdSet.has(String(tk.projectId))) || (tk.projectCode && targetProjectCodeSet.has(String(tk.projectCode).trim().toLowerCase()))));
+
+  const calculatedTasks = calculateDatesFromPredecessorsAndDuration(tasksToImport, Array.from(tasksMapAfterCalc.values()), scopedProjects);
+  calculatedTasks.forEach(t => tasksMapAfterCalc.set(t.id, t));
+  const healedAll = healAllTasksPredecessors(Array.from(tasksMapAfterCalc.values()), scopedProjects);
+  const { updatedParents, allTasksMap } = rollupParentTaskDates(healedAll.updatedTasks, undefined, scopedProjects);
+
+  const importedRowIdSet = new Set<string>(tasksToImport.map(t => t.id));
+  const tasksToSaveIds = new Set<string>();
+  lockedExistingTasksToSave.forEach((_, tid) => tasksToSaveIds.add(tid));
+  calculatedTasks.forEach(t => tasksToSaveIds.add(t.id));
+  healedAll.updatesToSave.forEach(ct => {
+    if (ct.id && !String(ct.id).startsWith('ts_') && isInTargetImportedProject(allTasksMap.get(ct.id))) tasksToSaveIds.add(ct.id);
+  });
+  updatedParents.forEach(p => {
+    if (p.id && !String(p.id).startsWith('ts_') && isInTargetImportedProject(p)) tasksToSaveIds.add(p.id);
+  });
+  const finalTasksToSave: Task[] = [];
+  tasksToSaveIds.forEach(tid => {
+    if (String(tid).startsWith('ts_')) return;
+    const tk = allTasksMap.get(tid);
+    if (tk) {
+      const explicitPred = importedPredById.get(tid);
+      const prevExisting = previousStates.get(tid);
+      const hadValidPrevBaseline = Boolean(
+        prevExisting?.baselineStart &&
+        prevExisting?.baselineFinish &&
+        !(prevExisting.baselineStart === prevExisting.baselineFinish && tk.start !== tk.finish)
+      );
+      const stamped: Task = {
+        ...tk,
+        baselineStart: hadValidPrevBaseline ? prevExisting!.baselineStart : (tk.start || tk.baselineStart),
+        baselineFinish: hadValidPrevBaseline ? prevExisting!.baselineFinish : (tk.finish || tk.baselineFinish),
+        ...(!tk.isModularParent && explicitPred && (!tk.predecessor || !String(tk.predecessor).trim()) ? { predecessor: explicitPred } : {}),
+        updatedAt: commitNowIso,
+      };
+      delete (stamped as any)._isVirtualSummary;
+      const isTaskDirty =
+        importedRowIdSet.has(tid) ||
+        lockedExistingTasksToSave.has(tid) ||
+        hasImportedTaskMeaningfullyChanged(prevExisting, stamped, newIds.has(tid));
+      if (isTaskDirty) {
+        allTasksMap.set(tid, stamped);
+        finalTasksToSave.push(stamped);
+      } else if (prevExisting) {
+        allTasksMap.set(tid, prevExisting);
+      }
+    }
+  });
+
+  // 6. Prepare missing delegations ONLY for new tasks, newly delegated tasks, or tasks with loaded delegation groups
+  const loadedDelSet = new Set((useAppStore.getState().delegationGroups || []).flatMap(d => [d?.id, d?.parentTaskId].filter(Boolean)));
+  const tasksNeedingDelegationCheck = finalTasksToSave.filter(
+    t => newIds.has(t.id) || !previousStates.get(t.id)?.delegation || loadedDelSet.has(`del_${t.id}`) || loadedDelSet.has(t.id)
+  );
+  const precomputedDelegations = prepareMissingDelegationsForTasks(tasksNeedingDelegationCheck, activeUser, commitNowIso);
+
+  // Compute project summaries in memory and perform ONE unified Zustand + LocalDB update
+  const finalFullTasksList = Array.from(allTasksMap.values());
+  const finalAffectedProjects = findAffectedProjects(finalTasksToSave.length > 0 ? finalTasksToSave : tasksToImport, projects);
+  const delegationGroups = useAppStore.getState().delegationGroups;
+  const currentProjects = projects && projects.length > 0 ? projects : useAppStore.getState().projects;
+  const computedByProjectId = new Map<string, ReturnType<typeof calculateProjectComputedDates>>();
+  const touchedProjectsForPersistence: Project[] = [];
+
+  currentProjects.forEach(proj => {
+    if (!finalAffectedProjects.some(ap => String(ap.id) === String(proj.id))) return;
+    const pTasks = getTasksForProject(proj, finalFullTasksList, { realTasksOnly: true });
+    const computed = calculateProjectComputedDates(proj, pTasks, delegationGroups);
+    computedByProjectId.set(String(proj.id), computed);
+    touchedProjectsForPersistence.push({ ...proj, ...computed, updatedAt: commitNowIso });
+  });
+
+  const hydratedRealTasks = finalFullTasksList.filter(t => t?.id && !String(t.id).startsWith('ts_') && !(t as any)._isVirtualSummary);
+  await commitImportedStateToStoreAndLocal(hydratedRealTasks, finalTasksToSave, touchedProjectsForPersistence, finalAffectedProjects);
+
+  const { writeOps: projectWriteOps, projDeltaItems } = buildAffectedProjectsSyncOps(finalAffectedProjects, computedByProjectId, commitNowIso);
+  await batchSaveTasksToFirestore(finalTasksToSave, activeUser, { precomputedDelegations, projectWriteOps, projectDeltaItems: projDeltaItems });
 
   if (finalTasksToSave.length > 0) {
+    const prevTasksList = Array.from(previousStates.values());
+    const createdIdsList = Array.from(newIds);
+    const createdDelegations = precomputedDelegations?.newDelegations || [];
     undoManager.push({
-      description: 'Import Tasks',
+      description: `Import Tasks (${finalTasksToSave.length} items)`,
       revert: async () => {
-        const batch = writeBatch(db);
-        previousStates.forEach((oldData, id) => {
-          batch.set(doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_tasks', id), oldData);
-        });
-        newIds.forEach(id => {
-          batch.delete(doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_tasks', id));
-        });
-        await batch.commit();
-      }
+        const { restoreTasksSnapshot } = await import('../../lib/undoStateHelpers');
+        await restoreTasksSnapshot({ tasksToRestore: prevTasksList, taskIdsToDelete: createdIdsList, delegationIdsToDelete: createdDelegations.map(d => d.id) });
+      },
+      redo: async () => {
+        const { restoreTasksSnapshot } = await import('../../lib/undoStateHelpers');
+        await restoreTasksSnapshot({ tasksToRestore: finalTasksToSave, delegationsToRestore: createdDelegations });
+      },
     });
   }
-
-  return { count: tasksToImport.length };
+  return { count: tasksToImport.length, projectCount: finalAffectedProjects.length };
 }

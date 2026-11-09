@@ -22,6 +22,19 @@ export interface TaskSummaryItem {
   name: string;
   start: string;
   finish: string;
+  orderIndex?: number;
+  duration?: string | number;
+  parentTaskId?: string;
+  isModularParent?: boolean;
+  taskCodePhu?: string;
+  runningStatus?: 'On process' | 'Delayed' | 'Completed' | 'Upcoming' | string;
+  approval?: 'Approved' | 'Rejected' | 'Pending' | string;
+  party?: string;
+  delegation?: boolean;
+  predecessor?: string;
+  predecessorTaskIds?: string[];
+  baselineStart?: string;
+  baselineFinish?: string;
   link?: string;
   imageUrl?: string;
   thumbnail?: string;
@@ -49,6 +62,8 @@ export interface Project {
   openingMode?: 'auto' | 'manual';
   budget?: number;
   actual?: number;
+  shopType?: ShopType | string;
+  sizeM2?: number;
   location?: string;
   type?: string;
   note?: string;
@@ -78,6 +93,16 @@ export interface Project {
   thumbnail?: string;
   imageLinks?: any[];
 }
+
+export const SHOP_TYPE_OPTIONS = [
+  'Open Counter',
+  'Semi-A',
+  'Semi-B',
+  'Semi-C',
+  'Skeleton',
+] as const;
+
+export type ShopType = typeof SHOP_TYPE_OPTIONS[number];
 
 export const MD_STATUS_OPTIONS = [
   'approached',
@@ -137,6 +162,7 @@ export interface Task {
   textColor?: string;
   taskCodePhu?: string;
   parentTaskId?: string;
+  isModularParent?: boolean;
   isDeleted?: boolean;
   predecessors?: TaskPredecessor[]; // Lưu trữ danh sách Hard Link dưới dạng mảng Object
   predecessorTaskIds?: string[]; // IDs of tasks mentioned in the predecessor string
@@ -147,10 +173,12 @@ export type PredecessorType = 'FS' | 'SS' | 'FF' | 'SF';
 export interface TaskPredecessor {
   taskId: string;
   type: PredecessorType;
+  lagDays?: number;
 }
 
 export interface Cost {
   id: string;
+  projectId?: string;
   projectCode: string;
   projectYear?: number | string;
   projectStore?: string;
@@ -226,6 +254,8 @@ export interface AppUser {
   byPartyAccess?: boolean;
   partyPermissions?: Record<string, boolean>;
   readNotifs?: string[];
+  myWorkStates?: Record<string, string>;
+  myWorkUpdatedAt?: string;
   preferences?: {
     defaultStore?: string;
     defaultYear?: string;
@@ -248,6 +278,8 @@ export interface NotificationRule {
 
 export type NotificationPriority = 'critical' | 'urgent' | 'action_required' | 'info';
 
+export type NotificationCategory = 'overdue' | 'due_soon' | 'mention' | 'delegation' | 'rollover' | 'milestone';
+
 export interface ActiveNotification {
   id: string;
   title: string;
@@ -259,14 +291,22 @@ export interface ActiveNotification {
   targetType: 'project' | 'task' | 'task_delegation';
   targetId: string | number;
   count?: number;
+  projectId?: string;
   projectCode?: string;
+  projectName?: string;
+  taskName?: string;
   projectStore?: string;
   projectYear?: string | number;
+  location?: string;
+  category?: NotificationCategory;
+  ruleId?: string;
+  ruleField?: string;
   action?: 'cross_year_rollover' | 'complete_task' | 'approve_delegation';
   actionData?: any;
   priority?: NotificationPriority;
   isAssignedToMe?: boolean;
   party?: string;
+  subItems?: ActiveNotification[];
 }
 
 export interface DelegationSubTask {
@@ -297,9 +337,9 @@ export interface DelegationSubTask {
 
 export interface DelegationGroup {
   id: string;
+  projectId?: string;
   parentTaskId?: string; // ID of the taka_task if linked
   name: string; // Custom name if not linked, or task name if linked
-  projectId?: string;
   projectCode?: string; // If linked
   projectStore?: string;
   projectYear?: number | string;
@@ -311,7 +351,7 @@ export interface DelegationGroup {
   isDeleted?: boolean;
 }
 
-export type TabId = 'general' | 'detail' | 'budget' | 'cost' | 'accControl' | 'notification' | 'notificationRule' | 'calendar' | 'gantt' | 'summary' | 'taskDelegation' | 'taskDelegationCalendar' | 'setting' | 'layout' | 'manual' | 'csv_export' | 'picture_mapping' | 'audit';
+export type TabId = 'general' | 'myWork' | 'detail' | 'budget' | 'cost' | 'accControl' | 'notification' | 'notificationRule' | 'calendar' | 'gantt' | 'summary' | 'taskDelegation' | 'taskDelegationCalendar' | 'setting' | 'layout' | 'manual' | 'csv_export' | 'picture_mapping' | 'audit';
 
 
 export interface AuditLog {
@@ -332,6 +372,9 @@ export interface TakaDeltaItem {
   collectionName: 'taka_projects' | 'taka_tasks' | 'taka_costs' | 'taka_delegations';
   action: 'create' | 'update' | 'delete';
   year?: string;
+  projectId?: string;
+  projectCode?: string;
+  projectStore?: string;
   data?: Record<string, any>;
   isPatch?: boolean;
   /** Signal-only item: receivers re-read this doc from the server (used for writes that carry no patch). */
@@ -344,6 +387,9 @@ export interface TakaDelta {
   collectionName?: 'taka_projects' | 'taka_tasks' | 'taka_costs' | 'taka_delegations';
   action: 'create' | 'update' | 'delete' | 'batch_update';
   year?: string;
+  projectId?: string;
+  projectCode?: string;
+  projectStore?: string;
   data?: Record<string, any>;
   isPatch?: boolean;
   batchItems?: TakaDeltaItem[];

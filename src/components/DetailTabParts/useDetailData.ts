@@ -1,92 +1,69 @@
-import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { Project, Task, DelegationGroup, AppUser } from '../../types';
-import { useAppStore } from '../../store/useAppStore';
 import { 
   getTaskStatus, 
   parseDateTime, 
-  formatDisplayDateMain, 
-  formatDisplayDateTime, 
   resolveActualStatus, 
   matchesAdvancedSearch 
 } from '../../lib/utils';
-import { computeTaskCode, computeAllTaskCodes } from '../../lib/ganttUtils';
+import { computeAllTaskCodes } from '../../lib/ganttUtils';
 import { safeGetItemSession, safeSetItemSession } from '../../lib/storage';
+import { useAppStore } from '../../store/useAppStore';
 import { SortConfig } from './detailTypes';
 import { useDetailProjectInfo } from './useDetailProjectInfo';
-import { useDetailFlatRows } from './useDetailFlatRows';
+import { useDetailFlatRows, buildProjectParentHierarchyIndex } from './useDetailFlatRows';
 import { useDetailFocusTracking } from './useDetailFocusTracking';
+import { useDetailFilterSync, doesTaskMatchSearchTerm } from './useDetailFilterSync';
 
 interface UseDetailDataParams {
-  projects: Project[];
-  tasks: Task[];
-  delegationGroups: DelegationGroup[];
-  currentUser: AppUser;
-  effectiveStore: string;
-  globalYearFilter: string;
-  setGlobalYearFilter: (year: string) => void;
-  globalStoreFilter: string;
-  setGlobalStoreFilter: (store: string) => void;
-  globalLocationFilter: string[];
-  setGlobalLocationFilter: (locs: string[]) => void;
-  initialFilterCode?: string;
-  initialFocusTaskId?: string;
-  returnScrollId?: string;
-  onClearFocus?: () => void;
-  onBackToGantt?: () => void;
-  sortConfig: SortConfig | null;
-  expandedCodes: string[];
-  setExpandedCodes: (codes: string[]) => void;
-  setVisibleActiveProjectIds: (ids: string[]) => void;
-  canWrite: boolean;
+  projects: Project[]; tasks: Task[]; delegationGroups: DelegationGroup[]; currentUser: AppUser;
+  effectiveStore: string; globalYearFilter: string; setGlobalYearFilter: (year: string) => void;
+  globalStoreFilter: string; setGlobalStoreFilter: (store: string) => void;
+  globalLocationFilter: string[]; setGlobalLocationFilter: (locs: string[]) => void;
+  initialFilterCode?: string; initialFocusTaskId?: string; returnScrollId?: string;
+  onClearFocus?: () => void; onBackToGantt?: () => void; sortConfig: SortConfig | null;
+  expandedCodes: string[]; setExpandedCodes: (codes: string[]) => void;
+  setVisibleActiveProjectIds: (ids: string[]) => void; canWrite: boolean;
+}
+
+function collectTaskAliases(pId: string, tasks: Task[], projectInfoMap: Map<string, any>): { targetTask?: Task; aliases: Set<string> } {
+  const pIdStr = String(pId).trim();
+  const pIdLower = pIdStr.toLowerCase();
+  let targetTask = tasks.find((t) => String(t.id) === pIdStr || (t.taskCodePhu && String(t.taskCodePhu).trim().toLowerCase() === pIdLower));
+  if (!targetTask) {
+    for (const info of projectInfoMap.values()) {
+      const found = info.sortedTasks?.find((t: Task) => String(t.id) === pIdStr || (t.taskCodePhu && String(t.taskCodePhu).trim().toLowerCase() === pIdLower));
+      if (found) { targetTask = found; break; }
+    }
+  }
+  const aliases = new Set<string>([pIdStr, pIdLower]);
+  if (targetTask) {
+    if (targetTask.id) {
+      aliases.add(String(targetTask.id).trim());
+      aliases.add(String(targetTask.id).trim().toLowerCase());
+    }
+    if (targetTask.taskCodePhu) {
+      aliases.add(String(targetTask.taskCodePhu).trim());
+      aliases.add(String(targetTask.taskCodePhu).trim().toLowerCase());
+    }
+  }
+  return { targetTask, aliases };
 }
 
 export function useDetailData({
-  projects,
-  tasks,
-  delegationGroups,
-  currentUser: _currentUser,
-  effectiveStore,
-  globalYearFilter,
-  setGlobalYearFilter,
-  globalStoreFilter,
-  setGlobalStoreFilter,
-  globalLocationFilter,
-  setGlobalLocationFilter,
-  initialFilterCode,
-  initialFocusTaskId,
-  returnScrollId: _returnScrollId,
-  onClearFocus,
-  onBackToGantt,
-  sortConfig,
-  expandedCodes,
-  setExpandedCodes,
-  setVisibleActiveProjectIds,
+  projects, tasks, delegationGroups, currentUser: _currentUser, effectiveStore,
+  globalYearFilter, setGlobalYearFilter, globalStoreFilter, setGlobalStoreFilter,
+  globalLocationFilter, setGlobalLocationFilter, initialFilterCode, initialFocusTaskId,
+  returnScrollId: _returnScrollId, onClearFocus, onBackToGantt, sortConfig,
+  expandedCodes, setExpandedCodes, setVisibleActiveProjectIds,
 }: UseDetailDataParams) {
   const [searchTerm, setSearchTerm] = useState('');
   const deferredSearchTerm = useDeferredValue(searchTerm);
   const [visibleCount, setVisibleCount] = useState(30);
-  const [statusFilter, setStatusFilter] = useState(() => safeGetItemSession("taka_detail_status_filter") || 'On process + Upcoming 3 days');
-  const lastSelectedStatusFilterRef = useRef<string>(safeGetItemSession("taka_detail_status_filter") || 'On process + Upcoming 3 days');
-  const lastSelectedLocationFilterRef = useRef<string[]>(globalLocationFilter);
-  const wasSearchingRef = useRef<boolean>(false);
-
-  useEffect(() => {
-    const isSearching = !!deferredSearchTerm.trim();
-    if (!wasSearchingRef.current && isSearching) {
-      if (statusFilter !== 'all') {
-        lastSelectedStatusFilterRef.current = statusFilter;
-        safeSetItemSession("taka_detail_status_filter", statusFilter);
-      }
-      lastSelectedLocationFilterRef.current = globalLocationFilter;
-      setStatusFilter('all');
-      wasSearchingRef.current = true;
-    } else if (wasSearchingRef.current && !isSearching) {
-      const restored = lastSelectedStatusFilterRef.current || safeGetItemSession("taka_detail_status_filter") || 'On process + Upcoming 3 days';
-      setStatusFilter(restored);
-      setGlobalLocationFilter(lastSelectedLocationFilterRef.current || []);
-      wasSearchingRef.current = false;
-    }
-  }, [deferredSearchTerm]);
+  const initialStatus = safeGetItemSession("taka_detail_status_filter");
+  const defaultStatus = initialStatus && initialStatus !== 'all' ? initialStatus : 'On process + Upcoming 3 days';
+  const [statusFilter, setStatusFilter] = useState(defaultStatus);
+  const lastSelectedStatusFilterRef = useRef<string>(defaultStatus);
 
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
   const lastCheckedTaskIdRef = useRef<string | null>(null);
@@ -122,65 +99,6 @@ export function useDetailData({
     getProjectInfo,
   } = useDetailProjectInfo({ projects, tasks });
 
-  // Auto-jump to matched project location(s) when searching (Debounced)
-  useEffect(() => {
-    const term = deferredSearchTerm.trim();
-    if (!term) return;
-
-    const timer = setTimeout(() => {
-      const matchedProjects = projects.filter(p => {
-        const pYear = p.year ? String(p.year) : (p.start ? String(p.start).substring(0, 4) : null);
-        if (globalYearFilter !== 'all' && pYear !== globalYearFilter) return false;
-        if (effectiveStore !== 'all' && p.store !== effectiveStore) return false;
-
-        const groupTasks = tasksByProjectKey.get(`${p.code || ''}-${p.year || ''}-${p.store || ''}`) || [];
-        const isMatch = matchesAdvancedSearch(
-          term,
-          [p.store, p.location, p.year, p.code, p.linkCodes, p.name, p.detail, (p as any).description, p.note, p.party],
-          [],
-          (tLower) => {
-            const summariesMatch = p.taskSummaries?.some(ts =>
-              String(ts.name || "").toLowerCase().includes(tLower)
-            ) || false;
-            const taskMatches = groupTasks.some((t, idx) => {
-              const taskFields = [
-                t.taskCodePhu,
-                `${p.code}#${(t.orderIndex !== undefined ? t.orderIndex : idx) + 1}`,
-                t.name,
-                t.duration,
-                t.start,
-                t.finish,
-                t.party,
-                formatDisplayDateMain(t.start),
-                formatDisplayDateTime(t.start),
-                formatDisplayDateMain(t.finish),
-                formatDisplayDateTime(t.finish)
-              ];
-              const fieldMatch = taskFields.some(val => String(val || "").toLowerCase().includes(tLower));
-              const notesMatch = t.notes?.some(n => String(n.content || '').toLowerCase().includes(tLower)) || false;
-              return fieldMatch || notesMatch;
-            });
-            return summariesMatch || taskMatches;
-          }
-        );
-        return isMatch;
-      });
-
-      const matchedLocations = Array.from(
-        new Set(matchedProjects.map(p => p.location).filter((loc): loc is string => !!loc && loc.trim() !== ''))
-      );
-      if (matchedLocations.length > 0) {
-        const currentLocs = globalLocationFilter || [];
-        const isSame = currentLocs.length === matchedLocations.length && currentLocs.every(l => matchedLocations.includes(l));
-        if (!isSame) {
-          setGlobalLocationFilter(matchedLocations);
-        }
-      }
-    }, 350);
-
-    return () => clearTimeout(timer);
-  }, [deferredSearchTerm, projects, tasksByProjectKey, globalYearFilter, effectiveStore, globalLocationFilter, setGlobalLocationFilter]);
-
   const delegationGroupByParentKey = useMemo(() => {
     const map = new Map<string, DelegationGroup>();
     delegationGroups.forEach(g => {
@@ -195,7 +113,28 @@ export function useDetailData({
     return map;
   }, [delegationGroups]);
 
-  useEffect(() => { setVisibleCount(20); }, [searchTerm, globalStoreFilter, globalYearFilter, globalLocationFilter, statusFilter]);
+  const isFirstMountVisibleCountRef = useRef(true);
+  useEffect(() => {
+    if (isFirstMountVisibleCountRef.current) {
+      isFirstMountVisibleCountRef.current = false;
+      return;
+    }
+    setVisibleCount(30);
+  }, [searchTerm, globalStoreFilter, globalYearFilter, globalLocationFilter, statusFilter]);
+
+  const effectiveLocationFilter = useMemo(() => {
+    if (globalLocationFilter.length === 0) return globalLocationFilter;
+    const available = new Set<string>();
+    projects.forEach((p) => {
+      const pYear = p.year ? String(p.year).trim() : '';
+      if (globalYearFilter !== 'all' && pYear !== String(globalYearFilter).trim()) return;
+      if (effectiveStore !== 'all' && (!p.store || String(p.store).toUpperCase().trim() !== effectiveStore.toUpperCase().trim())) return;
+      if (p.location) available.add(p.location);
+    });
+    return globalLocationFilter.filter((loc) => available.has(loc));
+  }, [projects, globalYearFilter, effectiveStore, globalLocationFilter]);
+
+  const fixedProjectCode = useAppStore(state => state.fixedProjectCode);
 
   const filteredProjects = useMemo(() => {
     const today = new Date();
@@ -203,12 +142,22 @@ export function useDetailData({
     const todayTime = today.getTime();
 
     return projects.filter(p => {
+      if (fixedProjectCode && fixedProjectCode.trim()) {
+        const fix = fixedProjectCode.trim().toLowerCase();
+        const pCode = (p.code || '').trim().toLowerCase();
+        const rawLink = Array.isArray(p.linkCodes) ? p.linkCodes : typeof p.linkCodes === 'string' ? [p.linkCodes] : [];
+        const pLinkCodes = rawLink.map((c: any) => String(c).trim().toLowerCase());
+        const pName = (p.name || '').trim().toLowerCase();
+        const matchesFix = pCode === fix || pCode.includes(fix) || pName.includes(fix) || pLinkCodes.includes(fix) || String(p.id).toLowerCase() === fix;
+        if (!matchesFix) return false;
+      }
+
       const pKey = `${p.code || ''}-${p.year || ''}-${p.store || ''}-${p.id || p.no}`;
       const info = projectInfoMap.get(pKey) || getProjectInfo(p);
-      const pYear = p.year ? String(p.year).trim() : (info.computedTakStart ? String(info.computedTakStart).substring(0, 4) : (p.start ? String(p.start).substring(0, 4) : null));
+      const pYear = p.year ? String(p.year).trim() : null;
       if (globalYearFilter !== 'all' && (pYear === null || pYear !== String(globalYearFilter).trim())) return false;
       if (effectiveStore !== 'all' && (!p.store || String(p.store).toUpperCase().trim() !== effectiveStore.toUpperCase().trim())) return false;
-      if (globalLocationFilter.length > 0 && (!p.location || !globalLocationFilter.includes(p.location))) return false;
+      if (effectiveLocationFilter.length > 0 && (!p.location || !effectiveLocationFilter.includes(p.location))) return false;
 
       let matchesStatus = true;
       if (statusFilter === 'On process + Upcoming 3 days') {
@@ -240,27 +189,10 @@ export function useDetailData({
           [],
           (term) => {
             const summariesMatch = p.taskSummaries?.some(ts =>
-              String(ts.name || "").toLowerCase().includes(term)
+              matchesAdvancedSearch(term, [ts.name, ts.taskCodePhu, ts.party])
             ) || false;
-            const taskMatches = groupTasks.some((t, idx) => {
-              const taskFields = [
-                t.taskCodePhu,
-                `${p.code}#${(t.orderIndex !== undefined ? t.orderIndex : idx) + 1}`,
-                t.name,
-                t.duration,
-                t.start,
-                t.finish,
-                t.party,
-                formatDisplayDateMain(t.start),
-                formatDisplayDateTime(t.start),
-                formatDisplayDateMain(t.finish),
-                formatDisplayDateTime(t.finish)
-              ];
-              const fieldMatch = taskFields.some(val => String(val || "").toLowerCase().includes(term));
-              const notesMatch = t.notes?.some(n => String(n.content || '').toLowerCase().includes(term)) || false;
-              return fieldMatch || notesMatch;
-            });
-            return summariesMatch || taskMatches;
+            if (summariesMatch) return true;
+            return groupTasks.some((t, idx) => doesTaskMatchSearchTerm(t, idx, p.code, term));
           }
         );
         if (!isMatch) return false;
@@ -268,47 +200,29 @@ export function useDetailData({
 
       return true;
     });
-  }, [projects, projectInfoMap, getProjectInfo, globalYearFilter, effectiveStore, globalLocationFilter, statusFilter, deferredSearchTerm, tasksByProjectKey]);
+  }, [projects, projectInfoMap, getProjectInfo, globalYearFilter, effectiveStore, effectiveLocationFilter, statusFilter, deferredSearchTerm, tasksByProjectKey, fixedProjectCode]);
 
-  // Ensure visibleCount is large enough to render target project row
-  useEffect(() => {
-    if (!initialFilterCode) return;
-    const filterClean = String(initialFilterCode).trim().toUpperCase();
-    const projIdx = filteredProjects.findIndex(p => {
-      const pCode = String(p.code || '').trim().toUpperCase();
-      const pId = String(p.id || '').trim().toUpperCase();
-      return pId === filterClean || pCode === filterClean || (pCode && filterClean.startsWith(pCode));
-    });
-    if (projIdx >= 0 && projIdx >= visibleCount) {
-      setVisibleCount(projIdx + 25);
-    }
-  }, [initialFilterCode, filteredProjects, visibleCount]);
-
-  const prevVisibleIdsRef = useRef<string>("");
-  useEffect(() => {
-    const targetProjects = filteredProjects.length > 0
-      ? filteredProjects.slice(0, visibleCount)
-      : projects.filter(p => {
-          const pYear = p.year ? String(p.year) : (p.computedTakStart ? String(p.computedTakStart).substring(0, 4) : (p.start ? String(p.start).substring(0, 4) : null));
-          if (globalYearFilter !== 'all' && pYear !== globalYearFilter) return false;
-          if (effectiveStore !== 'all' && p.store !== effectiveStore) return false;
-          if (globalLocationFilter.length > 0 && (!p.location || !globalLocationFilter.includes(p.location))) return false;
-          return true;
-        }).slice(0, visibleCount);
-
-    const visibleIds = targetProjects.map(p => String(p.id || p.no));
-    const idsKey = visibleIds.join(',');
-    if (prevVisibleIdsRef.current !== idsKey) {
-      prevVisibleIdsRef.current = idsKey;
-      setVisibleActiveProjectIds(visibleIds);
-    }
-  }, [filteredProjects, projects, visibleCount, globalYearFilter, effectiveStore, globalLocationFilter, setVisibleActiveProjectIds]);
-
-  useEffect(() => {
-    return () => {
-      useAppStore.getState().setVisibleActiveProjectIds([]);
-    };
-  }, []);
+  useDetailFilterSync({
+    projects,
+    filteredProjects,
+    tasksByProjectKey,
+    getProjectInfo,
+    searchTerm,
+    setSearchTerm,
+    deferredSearchTerm,
+    statusFilter,
+    setStatusFilter,
+    lastSelectedStatusFilterRef,
+    globalYearFilter,
+    effectiveStore,
+    globalLocationFilter,
+    setGlobalLocationFilter,
+    effectiveLocationFilter,
+    initialFilterCode,
+    visibleCount,
+    setVisibleCount,
+    setVisibleActiveProjectIds,
+  });
 
   const allVisibleTaskIds = useMemo(() => {
     return filteredProjects.slice(0, visibleCount).flatMap(p => {
@@ -318,7 +232,7 @@ export function useDetailData({
     });
   }, [filteredProjects, visibleCount, projectInfoMap, getProjectInfo]);
 
-  const lowerSearchTerm = searchTerm.toLowerCase().trim();
+  const lowerSearchTerm = deferredSearchTerm.toLowerCase().trim();
 
   // Task code & status maps
   const taskCodeMap = useMemo(() => {
@@ -337,17 +251,116 @@ export function useDetailData({
     return map;
   }, [tasks, delegationGroupByParentKey]);
 
-  // Pre-indexed O(1) map of subtask counts per parent to avoid 250,000 array filters in DetailTaskRow
+  // Pre-indexed O(1) map of subtask counts per resolved canonical parent task ID
   const childTasksCountMap = useMemo(() => {
     const map = new Map<string, number>();
-    for (let idx = 0; idx < tasks.length; idx++) {
-      const child = tasks[idx];
-      if (child.parentTaskId) {
-        map.set(child.parentTaskId, (map.get(child.parentTaskId) || 0) + 1);
-      }
-    }
+    projects.forEach(p => {
+      const pKey = `${p.code || ''}-${p.year || ''}-${p.store || ''}-${p.id || p.no}`;
+      const info = projectInfoMap.get(pKey) || getProjectInfo(p);
+      const pTasks = info.sortedTasks || [];
+      if (pTasks.length === 0) return;
+      const { localChildCountByParentId } = buildProjectParentHierarchyIndex(pTasks);
+      localChildCountByParentId.forEach((cnt, pid) => {
+        map.set(pid, cnt);
+      });
+    });
     return map;
-  }, [tasks]);
+  }, [projects, projectInfoMap, getProjectInfo]);
+
+  // Modular parent task expand/collapse state (isolated to Detail Tab)
+  const [expandedModularTasks, setExpandedModularTasks] = useState<string[]>(() => {
+    try {
+      const saved = safeGetItemSession('taka_detail_modular_expanded') || sessionStorage.getItem('taka_detail_modular_expanded');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const expandedModularTasksSet = useMemo(() => {
+    const set = new Set<string>();
+    expandedModularTasks.forEach(id => {
+      const idStr = String(id).trim();
+      set.add(idStr);
+      set.add(idStr.toLowerCase());
+    });
+    return set;
+  }, [expandedModularTasks]);
+
+  const handleToggleModularParent = useCallback((parentTaskId: string) => {
+    const { targetTask, aliases } = collectTaskAliases(parentTaskId, tasks, projectInfoMap);
+    const pId = String(parentTaskId).trim();
+    if (!pId) return;
+
+    setExpandedModularTasks(prev => {
+      const isCurrentlyExpanded = prev.some(id => aliases.has(String(id).trim()) || aliases.has(String(id).trim().toLowerCase()));
+      let next: string[];
+      if (isCurrentlyExpanded) {
+        next = prev.filter(id => !aliases.has(String(id).trim()) && !aliases.has(String(id).trim().toLowerCase()));
+      } else {
+        const canonicalId = targetTask?.id ? String(targetTask.id).trim() : pId;
+        const cleaned = prev.filter(id => !aliases.has(String(id).trim()) && !aliases.has(String(id).trim().toLowerCase()));
+        cleaned.push(canonicalId);
+        next = cleaned;
+      }
+      safeSetItemSession('taka_detail_modular_expanded', JSON.stringify(next));
+      return next;
+    });
+  }, [tasks, projectInfoMap]);
+
+  const handleToggleProjectModularTasks = useCallback((parentTaskIds: string[], expand: boolean) => {
+    setExpandedModularTasks(prev => {
+      const prevSet = new Set(prev);
+      parentTaskIds.forEach(pId => {
+        const { targetTask, aliases } = collectTaskAliases(pId, tasks, projectInfoMap);
+        aliases.forEach(a => expand ? prevSet.add(a) : prevSet.delete(a));
+        if (targetTask?.id) expand ? prevSet.add(String(targetTask.id).trim()) : prevSet.delete(String(targetTask.id).trim());
+      });
+      const next = Array.from(prevSet);
+      safeSetItemSession('taka_detail_modular_expanded', JSON.stringify(next));
+      return next;
+    });
+  }, [tasks, projectInfoMap]);
+
+  const { currentModularParentIds, totalChildTasksCount } = useMemo(() => {
+    const parentIdSet = new Set<string>();
+    let totalChildren = 0;
+    filteredProjects.slice(0, visibleCount).forEach(p => {
+      const pKey = `${p.code || ''}-${p.year || ''}-${p.store || ''}-${p.id || p.no}`;
+      const info = projectInfoMap.get(pKey) || getProjectInfo(p);
+      const pTasks = info.sortedTasks || [];
+      if (pTasks.length === 0) return;
+      const { projectModularParentIds, projectChildTasksCount } = buildProjectParentHierarchyIndex(pTasks);
+      projectModularParentIds.forEach(pid => parentIdSet.add(pid));
+      totalChildren += projectChildTasksCount;
+    });
+
+    return {
+      currentModularParentIds: Array.from(parentIdSet),
+      totalChildTasksCount: totalChildren,
+    };
+  }, [filteredProjects, visibleCount, projectInfoMap, getProjectInfo]);
+
+  const isAllModularExpanded = useMemo(() => {
+    if (currentModularParentIds.length === 0) return false;
+    return currentModularParentIds.some(id => 
+      expandedModularTasksSet.has(id) || expandedModularTasksSet.has(id.toLowerCase())
+    );
+  }, [currentModularParentIds, expandedModularTasksSet]);
+
+  const handleToggleExpandAllModular = useCallback(() => {
+    if (isAllModularExpanded) {
+      setExpandedModularTasks([]);
+      safeSetItemSession('taka_detail_modular_expanded', JSON.stringify([]));
+    } else {
+      setExpandedModularTasks(currentModularParentIds);
+      safeSetItemSession('taka_detail_modular_expanded', JSON.stringify(currentModularParentIds));
+    }
+  }, [isAllModularExpanded, currentModularParentIds]);
+
+  const modularParentsCount = useMemo(() => {
+    return currentModularParentIds.length;
+  }, [currentModularParentIds]);
 
   // Virtual Windowing Flat Rows
   const flatTableRows = useDetailFlatRows({
@@ -357,6 +370,7 @@ export function useDetailData({
     getProjectInfo,
     sortConfig,
     expandedCodes,
+    expandedModularTasks: expandedModularTasksSet,
     delegationGroups,
     lowerSearchTerm,
     taskCodeMap,
@@ -427,6 +441,13 @@ export function useDetailData({
     taskCodeMap,
     taskActualStatusMap,
     childTasksCountMap,
+    expandedModularTasks: expandedModularTasksSet,
+    handleToggleModularParent,
+    handleToggleProjectModularTasks,
+    isAllModularExpanded,
+    handleToggleExpandAllModular,
+    totalChildTasksCount,
+    modularParentsCount,
     flatTableRows,
     handleSelectAllTasksInProject,
     handleToggleSelectTask,

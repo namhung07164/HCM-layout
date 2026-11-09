@@ -23,6 +23,8 @@ export function useTaskDelegationData({
   const appUsers = useAppStore((state) => state.appUsers);
   const subAppUsers = useAppStore((state) => state.subAppUsers);
   const rawDelegationGroups = useAppStore((state) => state.delegationGroups);
+  const isPrintPreview = useAppStore((state) => state.isPrintPreview);
+  const isExportingPDF = useAppStore((state) => state.isExportingPDF);
 
   const groups = useMemo(() => {
     return [...rawDelegationGroups].sort(
@@ -43,16 +45,16 @@ export function useTaskDelegationData({
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
 
   const [colWidths, setColWidths] = useState<DelegationColWidths>({
-    expand: 50,
+    expand: 52,
     taskName: 300,
     projectCode: 150,
-    comments: 400,
-    status: 120,
+    comments: 380,
+    status: 140,
     startAct: 120,
     finishAct: 120,
     priority: 120,
     party: 150,
-    actions: 80,
+    actions: 210,
   });
 
   const availableColumnsForUser = useMemo(() => AVAILABLE_COLUMNS, []);
@@ -68,7 +70,10 @@ export function useTaskDelegationData({
       const saved = safeGetDeviceItemLocal('taka_delegation_col_widths', currentUser.id);
       if (saved) {
         try {
-          setColWidths(JSON.parse(saved));
+          const parsed = JSON.parse(saved);
+          if (parsed.actions && parsed.actions < 200) parsed.actions = 210;
+          if (parsed.status && parsed.status < 135) parsed.status = 140;
+          setColWidths((prev) => ({ ...prev, ...parsed }));
         } catch (e) {
           console.error(e);
         }
@@ -325,7 +330,9 @@ export function useTaskDelegationData({
     const byProject = new Map<string, typeof visibleGroups>();
     const orphans: typeof visibleGroups = [];
 
-    const paginatedGroups = visibleGroups.slice(0, visibleCount);
+    const paginatedGroups = (isPrintPreview || isExportingPDF)
+      ? visibleGroups
+      : visibleGroups.slice(0, visibleCount);
 
     paginatedGroups.forEach((group) => {
       const p = resolveGroupParentProject(group, projects, tasks);
@@ -354,7 +361,7 @@ export function useTaskDelegationData({
       });
 
     return { orderedProjects, orphans };
-  }, [visibleGroups, visibleCount, projects, tasks]);
+  }, [visibleGroups, visibleCount, projects, tasks, isPrintPreview, isExportingPDF]);
 
   const isAllExpanded =
     expandedGroups.length >= visibleGroups.length &&

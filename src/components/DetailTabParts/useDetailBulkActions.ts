@@ -68,8 +68,10 @@ export function useDetailBulkActions({
       setSelectedTaskIds(new Set());
       lastCheckedTaskIdRef.current = null;
 
-      // 2. Update Dexie (IndexedDB)
+      // 2. Sync project summaries + Update Dexie (IndexedDB)
       try {
+        const { saveTaskStateUnified } = await import('../../lib/taskStateService');
+        await saveTaskStateUnified(updatedTasks.filter(t => allIdsToUnlink.has(t.id)));
         const { localDb } = await import('../../lib/localDb');
         await Promise.all(
           unlinkedArray.map(id => (localDb.tasks.update as any)(id, { parentTaskId: null, parentId: null, updatedAt: now }))
@@ -82,7 +84,7 @@ export function useDetailBulkActions({
       const batch = writeBatch(db);
       unlinkedArray.forEach(id => {
         const docRef = doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_tasks', id);
-        batch.update(docRef, { parentTaskId: deleteField(), parentId: null, updatedAt: now });
+        batch.set(docRef, { parentTaskId: deleteField(), parentId: null, updatedAt: now }, { merge: true });
       });
 
       try {
@@ -120,10 +122,11 @@ export function useDetailBulkActions({
     try {
       if (action === 'delete') {
         const count = selectedTaskIds.size;
-        const selectedObjs = tasks.filter(t => selectedTaskIds.has(t.id));
+        const taskById = new Map(tasks.map(t => [String(t.id), t]));
+        const itemsToDelete = Array.from(selectedTaskIds).map(id => taskById.get(String(id)) || String(id));
         setSelectedTaskIds(new Set());
         lastCheckedTaskIdRef.current = null;
-        await deleteTaskStateUnified(selectedObjs.length > 0 ? selectedObjs : Array.from(selectedTaskIds));
+        await deleteTaskStateUnified(itemsToDelete as any);
         useAppStore.getState().setToast({ title: "Success", message: `Successfully deleted ${count} tasks.` });
         return;
       }
@@ -185,7 +188,7 @@ export function useDetailBulkActions({
           }
         }
         
-        batch.update(docRef, payload);
+        batch.set(docRef, payload, { merge: true });
         updateCount++;
       });
 
@@ -210,12 +213,36 @@ export function useDetailBulkActions({
           saveTaskStateUnified(updatedTasksList);
         }
 
+        const prevSelectedTasks = updatedTasksList
+          .map((u) => tasks.find((t) => t.id === u.id))
+          .filter((item): item is Task => Boolean(item));
+        const nextSelectedTasks = updatedTasksList
+          .map((u) => {
+            const orig = tasks.find((t) => t.id === u.id);
+            return orig ? ({ ...orig, ...u } as Task) : null;
+          })
+          .filter((item): item is Task => Boolean(item));
+
         try {
           await batch.commit();
         } catch (error: any) {
           console.error("Batch commit failed", error);
           useAppStore.getState().setToast({ title: "Save Failed", message: "Network error or permission denied. Data was not saved.", type: "error" });
           return;
+        }
+
+        if (prevSelectedTasks.length > 0) {
+          const { undoManager } = await import('../../lib/undoManager');
+          const { restoreTasksSnapshot } = await import('../../lib/undoStateHelpers');
+          undoManager.push({
+            description: `Bulk ${action.replace('_', ' ')} (${updateCount} tasks)`,
+            revert: async () => {
+              await restoreTasksSnapshot({ tasksToRestore: prevSelectedTasks });
+            },
+            redo: async () => {
+              await restoreTasksSnapshot({ tasksToRestore: nextSelectedTasks });
+            },
+          });
         }
 
         useAppStore.getState().setToast({ title: "Success", message: `Successfully updated ${updateCount} tasks.` });

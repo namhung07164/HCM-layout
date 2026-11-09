@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React from "react";
 import { Map } from 'lucide-react';
 import { LiveLayoutViewer } from './LiveLayoutViewer';
 import { useLayoutTabData } from './LayoutTabParts/useLayoutTabData';
@@ -21,8 +21,6 @@ export function LayoutTab({
   onClearFocus,
   onBackToGantt
 }: LayoutTabProps) {
-  const [cacheBuster, setCacheBuster] = useState<number>(Date.now());
-
   const {
     allowedStores,
     activeStore,
@@ -60,6 +58,8 @@ export function LayoutTab({
     handleClearSearchAndFocus,
     isFullscreenView,
     setIsFullscreenView,
+    cacheBuster,
+    setCacheBuster,
   } = useLayoutTabData({
     propInitialStore,
     propInitialLocation,
@@ -88,7 +88,7 @@ export function LayoutTab({
         />
       )}
 
-      <div className="flex-grow flex flex-col p-2.5 sm:p-4 md:p-6 bg-slate-50 dark:bg-slate-950 relative h-full print:p-0 print:m-0 print:bg-white print:border-none print:shadow-none">
+      <div className="flex-grow flex flex-col p-2 sm:p-3 bg-slate-50 dark:bg-slate-950 relative h-full print:p-0 print:m-0 print:bg-white print:border-none print:shadow-none">
         <LayoutTabFilterToolbar
           activeStore={activeStore}
           allowedStores={allowedStores}
@@ -125,7 +125,7 @@ export function LayoutTab({
           onClearSearchAndFocus={handleClearSearchAndFocus}
         />
 
-        <div className="flex-grow flex w-full min-h-[460px] h-[calc(100dvh-175px)] sm:h-[calc(100vh-195px)] bg-slate-50 dark:bg-slate-900/50 rounded-2xl shadow-inner border border-slate-200 dark:border-slate-800 overflow-hidden relative print:h-[100vh] print:w-full print:min-h-0 print:border-none print:shadow-none print:rounded-none print:bg-white">
+        <div className="flex-grow flex w-full min-h-[320px] sm:min-h-[480px] h-[calc(100dvh-140px)] sm:h-[calc(100vh-135px)] bg-slate-50 dark:bg-slate-900/50 rounded-2xl shadow-inner border border-slate-200 dark:border-slate-800 overflow-hidden relative print:h-[100vh] print:w-full print:min-h-0 print:border-none print:shadow-none print:rounded-none print:bg-white">
           {allowedStores.length === 0 || availableLocations.length === 0 ? (
             <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-slate-900 p-6 text-center">
               <Map className="w-12 h-12 mb-3 opacity-20" />

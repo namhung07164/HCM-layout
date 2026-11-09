@@ -4,6 +4,7 @@ import { BudgetTreeNode, BudgetSortConfig } from './budgetTypes';
 import { BudgetTableRow } from './BudgetTableRow';
 import { ResizableHeader } from '../ResizableHeader';
 import { useLanguage } from '../../lib/LanguageContext';
+import { useAppStore } from '../../store/useAppStore';
 import { cn } from '../../lib/utils';
 
 interface BudgetTableViewProps {
@@ -66,12 +67,17 @@ export function BudgetTableView({
   formatCurrency
 }: BudgetTableViewProps) {
   const { t } = useLanguage();
+  const isPrintPreview = useAppStore(state => state.isPrintPreview);
+  const isExportingPDF = useAppStore(state => state.isExportingPDF);
+
+  const fixedProjectCode = useAppStore(state => state.fixedProjectCode);
 
   const renderRows = (nodes: BudgetTreeNode[], depth = 0): React.ReactNode[] => {
     let rows: React.ReactNode[] = [];
     nodes.forEach((node, idx) => {
       const isParent = node.isParentNode && node.filteredChildren && node.filteredChildren.length > 0;
-      const isExpanded = searchTerm.trim() 
+      const hasActiveSearchOrFix = Boolean(searchTerm.trim() || (fixedProjectCode && fixedProjectCode.trim()));
+      const isExpanded = hasActiveSearchOrFix
         ? !collapsedInSearch.has(node.id || node.code) 
         : expandedParents.has(node.id || node.code);
 
@@ -104,14 +110,16 @@ export function BudgetTableView({
     return rows;
   };
 
-  const paginatedRoots = filteredRoots.slice(0, visibleCount);
+  const paginatedRoots = (isPrintPreview || isExportingPDF)
+    ? filteredRoots
+    : filteredRoots.slice(0, visibleCount);
 
   return (
     <div 
       onScroll={handleBudgetScroll}
       className="hidden xl:block flex-grow overflow-auto border-t border-slate-200 dark:border-[#444446] bg-white dark:bg-[#1e1e20] relative min-h-0"
     >
-      <table className="w-full text-left border-collapse table-fixed">
+      <table className="w-full min-w-[1180px] text-left border-collapse table-fixed">
         <thead className="sticky top-0 z-30 bg-slate-100 dark:bg-[#28282b] text-slate-700 dark:text-[#c3c3c3] font-bold shadow-xs text-xs border-b border-slate-200 dark:border-[#38383a]">
           <tr>
             {visibleColumns.includes('no') && (
@@ -160,13 +168,13 @@ export function BudgetTableView({
                 width={colWidths.variance} 
                 onResize={(w) => handleResize('variance', w)} 
                 onClick={() => handleSort('variance')} 
-                className="cursor-pointer hover:bg-slate-200 dark:hover:bg-[#333336] text-right"
+                className="cursor-pointer hover:bg-slate-200 dark:hover:bg-[#333336] text-right pr-4"
               >
                 {t('Remaining')} {sortConfig?.key === 'variance' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
               </ResizableHeader>
             )}
             {visibleColumns.includes('type') && (
-              <ResizableHeader width={colWidths.type} onResize={(w) => handleResize('type', w)}>{t('Type')}</ResizableHeader>
+              <ResizableHeader width={colWidths.type} onResize={(w) => handleResize('type', w)} className="pl-4">{t('Type')}</ResizableHeader>
             )}
             {visibleColumns.includes('note') && (
               <ResizableHeader width={colWidths.note} onResize={(w) => handleResize('note', w)}>{t('Note')}</ResizableHeader>

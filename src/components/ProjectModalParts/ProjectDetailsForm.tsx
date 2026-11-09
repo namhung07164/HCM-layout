@@ -1,12 +1,13 @@
 import React, { Dispatch, SetStateAction, memo } from 'react';
 import { Target, Plus } from 'lucide-react';
-import { Project, AppUser } from '../../types';
+import { Project, AppUser, SHOP_TYPE_OPTIONS } from '../../types';
 import { FastInput } from '../FastInput';
 import { FastTextarea } from './FastTextarea';
 import { MultiSelect } from '../MultiSelect';
-import { getStatus, cn } from '../../lib/utils';
+import { getStatus, cn, updateLinkCodesOnProjectCodeChange } from '../../lib/utils';
 import { useLanguage } from '../../lib/LanguageContext';
 import { LinkCodesValidationError } from './projectModalTypes';
+import { MatchedUnitSizeResult } from '../../lib/unitSizeResolver';
 
 interface ProjectDetailsFormProps {
   formData: Partial<Project>;
@@ -27,6 +28,7 @@ interface ProjectDetailsFormProps {
   handleDelete: () => Promise<void>;
   onClose: () => void;
   yearRef: React.RefObject<HTMLInputElement | null>;
+  matchedUnitSizeInfo?: MatchedUnitSizeResult;
 }
 
 export const ProjectDetailsForm = memo(function ProjectDetailsForm({
@@ -47,7 +49,8 @@ export const ProjectDetailsForm = memo(function ProjectDetailsForm({
   handleSubmit,
   handleDelete,
   onClose,
-  yearRef
+  yearRef,
+  matchedUnitSizeInfo
 }: ProjectDetailsFormProps) {
   const { t } = useLanguage();
 
@@ -168,13 +171,12 @@ export const ProjectDetailsForm = memo(function ProjectDetailsForm({
                 const cleanCode = val.replace(/\s+/g, '');
                 setFormData((prev) => {
                   const newCode = cleanCode;
-                  const currentLink = prev.linkCodes;
                   const oldCode = prev.code || '';
-                  const shouldSync = !currentLink || currentLink.trim() === '' || currentLink.trim() === oldCode.trim();
+                  const nextLinkCodes = updateLinkCodesOnProjectCodeChange(prev.linkCodes, oldCode, newCode);
                   return {
                     ...prev,
                     code: newCode,
-                    linkCodes: shouldSync ? newCode : currentLink
+                    linkCodes: nextLinkCodes
                   };
                 });
               }}
@@ -218,20 +220,71 @@ export const ProjectDetailsForm = memo(function ProjectDetailsForm({
           </div>
         </div>
 
-        {/* Project Name */}
-        <div className="mb-5">
-          <label className="block text-xs font-bold text-slate-400 dark:text-[#838383] uppercase mb-1">
-            Project Name *
-          </label>
-          <FastInput
-            type="text"
-            inputMode="text"
-            value={formData.name || ''}
-            onChange={(val) => setFormData({ ...formData, name: val })}
-            required
-            readOnly={!canWrite}
-            className="w-full p-2.5 border border-slate-200 dark:border-[#444446] rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-          />
+        {/* Row 3: Project Name, Shop Type & Size (m²) */}
+        <div className="grid grid-cols-1 sm:grid-cols-12 gap-4 mb-5">
+          <div className="sm:col-span-12 md:col-span-6">
+            <label className="block text-xs font-bold text-slate-400 dark:text-[#838383] uppercase mb-1">
+              Project Name *
+            </label>
+            <FastInput
+              type="text"
+              inputMode="text"
+              value={formData.name || ''}
+              onChange={(val) => setFormData({ ...formData, name: val })}
+              required
+              readOnly={!canWrite}
+              className="w-full p-2.5 border border-slate-200 dark:border-[#444446] rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+            />
+          </div>
+
+          <div className="sm:col-span-6 md:col-span-3">
+            <label className="block text-xs font-bold text-slate-400 dark:text-[#838383] uppercase mb-1">
+              Shop Type
+            </label>
+            <select
+              value={formData.shopType || ''}
+              onChange={(e) => setFormData({ ...formData, shopType: e.target.value })}
+              disabled={!canWrite}
+              className="w-full p-2.5 border border-slate-200 dark:border-[#444446] rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm bg-white dark:bg-[#1e1e20] text-slate-800 dark:text-[#e3e3e3] cursor-pointer"
+            >
+              <option value="">Select Shop Type</option>
+              {SHOP_TYPE_OPTIONS.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="sm:col-span-6 md:col-span-3">
+            <label className="flex items-center justify-between text-xs font-bold text-slate-400 dark:text-[#838383] uppercase mb-1 gap-1">
+              <span>Size (m²)</span>
+              {matchedUnitSizeInfo?.sizeM2 !== undefined && matchedUnitSizeInfo.sizeM2 > 0 && (
+                <button
+                  type="button"
+                  disabled={!canWrite}
+                  onClick={() => setFormData(prev => ({ ...prev, sizeM2: matchedUnitSizeInfo.sizeM2 }))}
+                  className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 transition-colors cursor-pointer truncate max-w-[110px]"
+                  title={`Auto-matched from Picture Mapping unit (${matchedUnitSizeInfo.matchedUnitNames.join(', ')})${matchedUnitSizeInfo.versionName ? ` • ${matchedUnitSizeInfo.versionName}` : ''}. Click to sync.`}
+                >
+                  Unit: {matchedUnitSizeInfo.sizeM2}m²
+                </button>
+              )}
+            </label>
+            <FastInput
+              type="text"
+              inputMode="decimal"
+              value={formData.sizeM2 !== undefined && formData.sizeM2 !== null ? String(formData.sizeM2) : ''}
+              onChange={(val) => {
+                const trimmed = val.trim().replace(',', '.');
+                const num = trimmed === '' ? undefined : parseFloat(trimmed);
+                setFormData({ ...formData, sizeM2: isNaN(num as number) ? undefined : num });
+              }}
+              readOnly={!canWrite}
+              placeholder={matchedUnitSizeInfo?.sizeM2 ? `${matchedUnitSizeInfo.sizeM2} (Unit)` : "e.g. 150"}
+              className="w-full p-2.5 border border-slate-200 dark:border-[#444446] rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+            />
+          </div>
         </div>
 
         {/* Baseline Start & Finish */}

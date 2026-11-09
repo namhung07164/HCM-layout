@@ -1,226 +1,301 @@
-import { collection, documentId, getDocsFromServer, query, where } from 'firebase/firestore';
+import { doc, getDocFromServer, getDoc } from 'firebase/firestore';
 import { db, APP_ID } from './firebase';
 import { useAppStore } from '../store/useAppStore';
-import { localDb } from './localDb';
-import { LOGICAL_TO_FS } from './autoDeltaQueue';
-import type { TakaDelta, TakaDeltaItem } from '../types';
 import { usePerformanceStore } from '../store/usePerformanceStore';
+import { safeGetItemLocal, safeSetItemLocal } from './storage';
+import type { TakaDelta, TakaDeltaItem } from '../types';
 
-/**
- * Resolves "invalidate" delta items: re-reads only the changed docs from the server (1 read per doc,
- * in chunks of 30 ids) and returns synthetic deltas (create/delete) that the normal apply pipeline understands.
- *
- * Read-saving relevance filter: for tasks/costs/delegations a doc is re-read only if this device already holds it
- * (Zustand or Dexie) or the collection is currently requested (Tri-Gate). Projects are always re-read.
- */
+const PHYSICAL_COLLECTION: Record<TakaDeltaItem['collectionName'], string> = {
+  taka_projects: 'taka_projects',
+  taka_tasks: 'taka_tasks',
+  taka_costs: 'taka_costs',
+  taka_delegations: 'taka_delegation_groups',
+};
 
-type Logical = TakaDeltaItem['collectionName'];
-const CHUNK = 30;
-const MAX_DOCS = 1500;
+const tsOf = (v: any): number => {
+  if (!v) return 0;
+  if (typeof v === 'string') {
+    const n = Date.parse(v);
+    return Number.isFinite(n) ? n : 0;
+  }
+  if (typeof v?.toMillis === 'function') {
+    const n = v.toMillis();
+    return Number.isFinite(n) ? n : 0;
+  }
+  if (typeof v?.seconds === 'number') {
+    return v.seconds * 1000 + Math.floor((v.nanoseconds || 0) / 1e6);
+  }
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+};
 
-function sleep(ms: number) {
-  return new Promise((r) => setTimeout(r, ms));
-}
+const DEFERRED_INVALIDATIONS_STORAGE_KEY = 'taka_deferred_trigate_invalidations_v1';
+const deferredTriGateInvalidations = new Map<string, TakaDeltaItem>();
+const MAX_DEFERRED_INVALIDATIONS = 500;
+const inFlightDocReads = new Map<string, Promise<TakaDeltaItem | null>>();
+const recentlyResolvedAt = new Map<string, number>();
+const RECENT_RESOLVE_DEDUP_MS = 2000;
+let deferredHydratedFromStorage = false;
 
-
-/**
- * B2: Checks if a document is already covered by a live active onSnapshot listener.
- * If so, the real-time listener will receive the update natively, so invalidate re-read is skipped.
- */
-function isCoveredByLiveListener(coll: Logical, docId: string): boolean {
+function ensureDeferredHydrated(): void {
+  if (deferredHydratedFromStorage) return;
+  deferredHydratedFromStorage = true;
   try {
-    const stats = usePerformanceStore.getState().collectionStats;
-    const store = useAppStore.getState();
-    const currentYear = store.globalYearFilter || '2026';
-
-    if (coll === 'taka_projects') {
-      const proj = store.projects?.find((p) => p.id === docId);
-      const year = proj?.year ? String(proj.year) : (currentYear !== 'all' ? currentYear : null);
-      if (year && (stats[`taka_projects_${year}`]?.activeListeners || 0) > 0) return true;
-      if (currentYear !== 'all' && (stats[`taka_projects_${currentYear}`]?.activeListeners || 0) > 0) {
-        if (!proj || String(proj.year) === String(currentYear)) return true;
+    const raw = safeGetItemLocal(DEFERRED_INVALIDATIONS_STORAGE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      for (const item of parsed) {
+        if (item?.docId && item?.collectionName) {
+          deferredTriGateInvalidations.set(`${item.collectionName}:${item.docId}`, item);
+        }
       }
-      return false;
     }
-
-    if (coll === 'taka_tasks') {
-      const task = store.tasks?.find((t) => t.id === docId);
-      const year = task?.projectYear ? String(task.projectYear) : (currentYear !== 'all' ? currentYear : null);
-      if (year && (stats[`taka_tasks_year_${year}`]?.activeListeners || 0) > 0) return true;
-      if (task?.projectId && (stats[`taka_tasks_proj_${task.projectId}`]?.activeListeners || 0) > 0) return true;
-      return false;
-    }
-
-    if (coll === 'taka_costs') {
-      const cost = store.costs?.find((c) => c.id === docId);
-      const year = cost?.projectYear ? String(cost.projectYear) : (currentYear !== 'all' ? currentYear : null);
-      if (year && (stats[`taka_costs_${year}`]?.activeListeners || 0) > 0) return true;
-      return false;
-    }
-
-    if (coll === 'taka_delegations') {
-      const group = store.delegationGroups?.find((g) => g.id === docId);
-      const year = group?.projectYear ? String(group.projectYear) : (currentYear !== 'all' ? currentYear : null);
-      if (year && (stats[`taka_delegation_groups_${year}`]?.activeListeners || 0) > 0) return true;
-      return false;
-    }
-  } catch (err) {
-    console.warn('[deltaInvalidate] isCoveredByLiveListener error:', err);
+  } catch {
+    // Ignore malformed storage
   }
-  return false;
+}
+
+function persistDeferredInvalidations(): void {
+  try {
+    const items = Array.from(deferredTriGateInvalidations.values());
+    safeSetItemLocal(DEFERRED_INVALIDATIONS_STORAGE_KEY, JSON.stringify(items));
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
+function queueDeferredInvalidation(item: TakaDeltaItem): void {
+  if (!item?.docId || !item?.collectionName) return;
+  ensureDeferredHydrated();
+  const key = `${item.collectionName}:${item.docId}`;
+  deferredTriGateInvalidations.set(key, item);
+  if (deferredTriGateInvalidations.size > MAX_DEFERRED_INVALIDATIONS) {
+    const oldest = deferredTriGateInvalidations.keys().next().value;
+    if (oldest !== undefined) deferredTriGateInvalidations.delete(oldest);
+  }
+  persistDeferredInvalidations();
+}
+
+interface InvalidationStoreMaps {
+  isCostsRequested: boolean;
+  isDelegationsRequested: boolean;
+  isTasksRequested: boolean;
+  costsById: Map<string, any>;
+  delegationsById: Map<string, any>;
+  tasksById: Map<string, any>;
+  projectsById: Map<string, any>;
+}
+
+function buildInvalidationStoreMaps(): InvalidationStoreMaps {
+  const store = useAppStore.getState();
+  const costsById = new Map<string, any>();
+  const delegationsById = new Map<string, any>();
+  const tasksById = new Map<string, any>();
+  const projectsById = new Map<string, any>();
+
+  (store.costs || []).forEach((c) => {
+    if (c?.id) costsById.set(c.id, c);
+  });
+  (store.delegationGroups || []).forEach((d) => {
+    if (d?.id) delegationsById.set(d.id, d);
+  });
+  (store.tasks || []).forEach((t) => {
+    if (t?.id) tasksById.set(t.id, t);
+  });
+  (store.projects || []).forEach((p) => {
+    if (p?.id) projectsById.set(p.id, p);
+  });
+
+  return {
+    isCostsRequested: Boolean(store.isCostsRequested),
+    isDelegationsRequested: Boolean(store.isDelegationsRequested),
+    isTasksRequested: Boolean(store.isTasksRequested),
+    costsById,
+    delegationsById,
+    tasksById,
+    projectsById,
+  };
 }
 
 /**
- * B1 & B2: Relevance filter:
- * 1. Filter out documents already covered by active onSnapshot listeners (B2: 0 redundant read).
- * 2. For tasks/costs/delegations, only re-read if Tri-Gate is currently requested on this device
- *    or the document is already held locally in Zustand/Dexie (B1: stop wasted reads on unrequested slices).
+ * Checks Tri-Gate flags and skips re-reading documents that were already delivered
+ * within the last 1.5 seconds by an active onSnapshot listener or explicit delta.
+ * Deferred items for closed Tri-Gates are queued and resolved only when the gate opens.
  */
-async function filterRelevant(coll: Logical, ids: string[]): Promise<string[]> {
-  if (!ids || ids.length === 0) return [];
-
-  // Always re-read invalidated project docs to guarantee cross-device sync
-  if (coll === 'taka_projects') return ids;
-
-  const store = useAppStore.getState();
-
-  if (coll === 'taka_tasks') {
-    if (store.isTasksRequested) return ids;
-    const storeTaskIds = new Set((store.tasks || []).map((t) => t.id));
-    const relevant: string[] = [];
-    const missing: string[] = [];
-    for (const id of ids) {
-      if (storeTaskIds.has(id)) relevant.push(id);
-      else missing.push(id);
-    }
-    if (missing.length > 0) {
-      try {
-        const dexieDocs = await localDb.tasks.where('id').anyOf(missing).toArray();
-        dexieDocs.forEach((d) => relevant.push(d.id));
-      } catch {}
-    }
-    return relevant;
+function isRelevant(item: TakaDeltaItem, nowMs: number, maps: InvalidationStoreMaps): boolean {
+  if (!item || !item.docId || !item.collectionName) return false;
+  const key = `${item.collectionName}:${item.docId}`;
+  const forceResolve = Boolean((item as any).forceResolve);
+  const lastResolved = recentlyResolvedAt.get(key) || 0;
+  if (!forceResolve && lastResolved > 0 && nowMs - lastResolved < RECENT_RESOLVE_DEDUP_MS) {
+    return false;
   }
 
-  if (coll === 'taka_costs') {
-    if (store.isCostsRequested) return ids;
-    const storeCostIds = new Set((store.costs || []).map((c) => c.id));
-    const relevant: string[] = [];
-    const missing: string[] = [];
-    for (const id of ids) {
-      if (storeCostIds.has(id)) relevant.push(id);
-      else missing.push(id);
+  const RECENT_SNAPSHOT_WINDOW_MS = 1500;
+
+  if (item.collectionName === 'taka_costs') {
+    const existing = maps.costsById.get(item.docId);
+    if (!maps.isCostsRequested && !existing && !forceResolve) {
+      queueDeferredInvalidation(item);
+      return false;
     }
-    if (missing.length > 0) {
-      try {
-        const dexieDocs = await localDb.costs.where('id').anyOf(missing).toArray();
-        dexieDocs.forEach((d) => relevant.push(d.id));
-      } catch {}
+    if (!forceResolve && existing && nowMs - tsOf(existing.updatedAt) < RECENT_SNAPSHOT_WINDOW_MS) return false;
+  } else if (item.collectionName === 'taka_delegations') {
+    const existing = maps.delegationsById.get(item.docId);
+    if (!maps.isDelegationsRequested && !existing && !forceResolve) {
+      queueDeferredInvalidation(item);
+      return false;
     }
-    return relevant;
+    if (!forceResolve && existing && nowMs - tsOf(existing.updatedAt) < RECENT_SNAPSHOT_WINDOW_MS) return false;
+  } else if (item.collectionName === 'taka_tasks') {
+    const existing = maps.tasksById.get(item.docId);
+    if (!forceResolve && existing && nowMs - tsOf(existing.updatedAt) < RECENT_SNAPSHOT_WINDOW_MS) return false;
+  } else if (item.collectionName === 'taka_projects') {
+    const existing = maps.projectsById.get(item.docId);
+    if (!forceResolve && existing && nowMs - tsOf(existing.updatedAt) < RECENT_SNAPSHOT_WINDOW_MS) return false;
   }
 
-  if (coll === 'taka_delegations') {
-    if (store.isDelegationsRequested) return ids;
-    const storeGroupIds = new Set((store.delegationGroups || []).map((g) => g.id));
-    const relevant: string[] = [];
-    const missing: string[] = [];
-    for (const id of ids) {
-      if (storeGroupIds.has(id)) relevant.push(id);
-      else missing.push(id);
-    }
-    if (missing.length > 0) {
-      try {
-        const dexieDocs = await localDb.delegations.where('id').anyOf(missing).toArray();
-        dexieDocs.forEach((d) => relevant.push(d.id));
-      } catch {}
-    }
-    return relevant;
-  }
-
-  return ids;
+  return true;
 }
 
-async function fetchChunk(coll: Logical, ids: string[]) {
-  const fsColl = LOGICAL_TO_FS[coll];
-  const col = collection(db, 'artifacts', APP_ID, 'public', 'data', fsColl);
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const snap = await getDocsFromServer(query(col, where(documentId(), 'in', ids)));
-      usePerformanceStore
-        .getState()
-        .trackGetDoc(
-          `${fsColl}_invalidate`,
-          false,
-          snap.size || 1,
-          `Delta invalidate fetch (${ids.length} id)`
-        );
-      return snap;
-    } catch (err) {
-      if (attempt === 1) console.warn('[deltaInvalidate] fetch failed:', err);
-      else await sleep(2000);
+/**
+ * Flushes any deferred invalidations for a specific collection when its Tri-Gate opens.
+ */
+export async function flushDeferredInvalidations(
+  collectionName: TakaDeltaItem['collectionName']
+): Promise<TakaDelta[]> {
+  ensureDeferredHydrated();
+  const toFlush: TakaDeltaItem[] = [];
+  for (const [k, item] of deferredTriGateInvalidations.entries()) {
+    if (item.collectionName === collectionName) {
+      toFlush.push(item);
+      deferredTriGateInvalidations.delete(k);
     }
   }
-  return null;
+  if (toFlush.length === 0) return [];
+  persistDeferredInvalidations();
+  return resolveInvalidations(toFlush);
 }
 
+/**
+ * Đọc lại đúng các document vừa nhận tín hiệu invalidate từ thiết bị khác (1 Read / 1 Doc sửa đổi)
+ * và chuyển thành synthetic delta để applyIncomingDeltas cập nhật nguyên tử vào Zustand + Dexie.
+ */
 export async function resolveInvalidations(items: TakaDeltaItem[]): Promise<TakaDelta[]> {
-  if (!items || items.length === 0) return [];
-
-  const byColl = new Map<Logical, Set<string>>();
-  for (const it of items) {
-    if (!it.docId) continue;
-    if (!byColl.has(it.collectionName)) byColl.set(it.collectionName, new Set());
-    byColl.get(it.collectionName)!.add(it.docId);
-  }
-
-  const out: TakaDeltaItem[] = [];
-  let budget = MAX_DOCS;
-
-  for (const [coll, idSet] of byColl) {
-    let ids = await filterRelevant(coll, Array.from(idSet));
-    if (ids.length > budget) ids = ids.slice(0, budget);
-    budget -= ids.length;
-
-    const chunks: string[][] = [];
-    for (let i = 0; i < ids.length; i += CHUNK) {
-      chunks.push(ids.slice(i, i + CHUNK));
-    }
-
-    const snaps = await Promise.all(chunks.map((chunk) => fetchChunk(coll, chunk)));
-    snaps.forEach((snap, idx) => {
-      if (!snap) return;
-      const chunk = chunks[idx];
-      const found = new Set<string>();
-      snap.forEach((d) => {
-        found.add(d.id);
-        const data = d.data() as Record<string, any>;
-        if (data?.isDeleted) {
-          out.push({ docId: d.id, collectionName: coll, action: 'delete', data: {} });
-        } else {
-          const y = data?.year ?? data?.projectYear;
-          out.push({ docId: d.id, collectionName: coll, action: 'create', data, year: y ? String(y) : undefined });
-        }
-      });
-      // Docs that no longer exist on the server were hard-deleted
-      chunk.forEach((id) => {
-        if (!found.has(id)) out.push({ docId: id, collectionName: coll, action: 'delete', data: {} });
-      });
-    });
-  }
-
-  if (out.length === 0) return [];
   const now = Date.now();
+  const storeMaps = buildInvalidationStoreMaps();
+  // Khử trùng lặp theo collectionName + docId
+  const unique = new Map<string, TakaDeltaItem>();
+  for (const it of items) {
+    if (!isRelevant(it, now, storeMaps)) continue;
+    unique.set(`${it.collectionName}:${it.docId}`, it);
+  }
+  if (unique.size === 0) return [];
+
+  const nowIso = new Date(now).toISOString();
+
+  const results = await Promise.all(
+    Array.from(unique.entries()).map(async ([dedupKey, it]): Promise<TakaDeltaItem | null> => {
+      if (inFlightDocReads.has(dedupKey)) {
+        return inFlightDocReads.get(dedupKey)!;
+      }
+      const physical = PHYSICAL_COLLECTION[it.collectionName];
+      if (!physical) return null;
+
+      const readPromise = (async (): Promise<TakaDeltaItem | null> => {
+        try {
+          const ref = doc(db, 'artifacts', APP_ID, 'public', 'data', physical, it.docId);
+          let snap;
+          try {
+            snap = await getDocFromServer(ref);
+          } catch {
+            snap = await getDoc(ref);
+          }
+          recentlyResolvedAt.set(dedupKey, Date.now());
+          if (recentlyResolvedAt.size > 1000) {
+            const oldestKey = recentlyResolvedAt.keys().next().value;
+            if (oldestKey !== undefined) recentlyResolvedAt.delete(oldestKey);
+          }
+          usePerformanceStore
+            .getState()
+            .trackGetDoc(physical, false, 1, `Delta invalidate re-read: ${it.docId}`);
+
+          if (!snap.exists()) {
+            return {
+              docId: it.docId,
+              collectionName: it.collectionName,
+              action: 'delete',
+              isPatch: false,
+              data: {
+                id: it.docId,
+                isDeleted: true,
+                ...(it.projectId ? { projectId: it.projectId } : {}),
+                ...(it.projectCode ? { projectCode: it.projectCode } : {}),
+                ...(it.projectStore ? { projectStore: it.projectStore } : {}),
+                ...(it.year ? { projectYear: it.year } : {}),
+              },
+              year: it.year,
+              projectId: it.projectId,
+              projectCode: it.projectCode,
+              projectStore: it.projectStore,
+            };
+          }
+          const data = snap.data() as Record<string, any>;
+          const resolvedYear = String(data.year || data.projectYear || it.year || '');
+          const resolvedProjectId = data.projectId ? String(data.projectId) : it.projectId;
+          const resolvedProjectCode = data.projectCode ? String(data.projectCode) : (data.code ? String(data.code) : it.projectCode);
+          const resolvedProjectStore = data.projectStore ? String(data.projectStore) : (data.store ? String(data.store) : it.projectStore);
+
+          if (data?.isDeleted) {
+            return {
+              docId: it.docId,
+              collectionName: it.collectionName,
+              action: 'delete',
+              isPatch: false,
+              data: { id: it.docId, isDeleted: true, ...data },
+              year: resolvedYear || undefined,
+              projectId: resolvedProjectId,
+              projectCode: resolvedProjectCode,
+              projectStore: resolvedProjectStore,
+            };
+          }
+          return {
+            docId: it.docId,
+            collectionName: it.collectionName,
+            action: 'create',
+            isPatch: false,
+            data: { id: it.docId, ...data },
+            year: resolvedYear,
+            projectId: resolvedProjectId,
+            projectCode: resolvedProjectCode,
+            projectStore: resolvedProjectStore,
+          };
+        } catch (err) {
+          console.warn('[deltaSync] Failed to re-read invalidated doc:', it.collectionName, it.docId, err);
+          return null;
+        } finally {
+          inFlightDocReads.delete(dedupKey);
+        }
+      })();
+
+      inFlightDocReads.set(dedupKey, readPromise);
+      return readPromise;
+    })
+  );
+
+  const resolved = results.filter((x): x is TakaDeltaItem => x !== null);
+  if (resolved.length === 0) return [];
+
   return [
     {
-      id: `invalidate_resolved_${now}_${Math.random().toString(36).slice(2, 8)}`,
+      id: `delta_resolved_${now}`,
       action: 'batch_update',
-      batchItems: out,
-      updatedBy: 'invalidate',
-      sessionId: 'invalidate_resolved',
-      timestamp: new Date(now).toISOString(),
-      // 0 so resolving never advances lastSyncTime
-      numericTime: 0,
+      batchItems: resolved,
+      updatedBy: 'delta-invalidate',
+      sessionId: '__resolved__',
+      timestamp: nowIso,
+      numericTime: now,
     },
   ];
 }

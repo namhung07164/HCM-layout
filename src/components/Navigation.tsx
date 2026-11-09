@@ -1,5 +1,4 @@
 import { useAppStore } from '../store/useAppStore';
-import { useEnrichedData } from '../hooks/useEnrichedData';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   TabId,
@@ -25,6 +24,7 @@ import {
   X,
   ChevronDown,
   Image,
+  CheckCircle2,
 } from "lucide-react";
 import { useLanguage } from "../lib/LanguageContext";
 import { RibbonDisplayMenu } from "./RibbonDisplayMenu";
@@ -46,23 +46,17 @@ const parentTabs: { id: ParentTabId; label: string }[] = [
 
 const childTabMap: Record<ParentTabId, TabId[]> = {
   Report: ["calendar", "layout", "summary"],
-  Index: ["general", "gantt", "detail"],
+  Index: ["general", "myWork", "gantt", "detail"],
   Financial: ["budget", "cost"],
   Delegation: ["taskDelegationCalendar", "taskDelegation"],
   Help: ["manual", "csv_export", "picture_mapping"],
 };
 
-export function Navigation({
+export const Navigation = React.memo(function Navigation({
   activeTab, onTabChange}: NavigationProps) {
 
-  const { enrichedProjects: projects, filteredTasks: tasks, visibleDelegationGroups: delegationGroups } = useEnrichedData();
   const currentUser = useAppStore(state => state.currentUser)!;
   const permissionMatrix = useAppStore(state => state.permissionMatrix);
-  const locations = useAppStore(state => state.locations);
-  const theme = useAppStore(state => state.theme);
-  const appUsers = useAppStore(state => state.appUsers);
-  const subAppUsers = useAppStore(state => state.subAppUsers);
-  const parties = useAppStore(state => state.parties);
 
   const isAdmin = currentUser.role === "admin";
   const role = (
@@ -96,6 +90,15 @@ export function Navigation({
   );
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const mobileNavRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleToggleNav = (e: Event) => {
+      const customEvent = e as CustomEvent<{ open?: boolean }>;
+      setIsMobileMenuOpen(Boolean(customEvent?.detail?.open));
+    };
+    window.addEventListener('taka_toggle_mobile_nav', handleToggleNav);
+    return () => window.removeEventListener('taka_toggle_mobile_nav', handleToggleNav);
+  }, []);
 
   useEffect(() => {
     if (!isMobileMenuOpen && !expandedParent) return;
@@ -163,6 +166,12 @@ export function Navigation({
       label: t("General"),
       icon: LayoutDashboard,
       hidden: !canSeeModule("general"),
+    },
+    {
+      id: "myWork",
+      label: "My Work",
+      icon: CheckCircle2,
+      hidden: !(canSeeModule("general") || canSeeModule("detail") || canSeeModule("taskDelegation")),
     },
     {
       id: "gantt",
@@ -385,7 +394,22 @@ export function Navigation({
               onClick={() => setIsMobileMenuOpen(false)}
             />
             {/* Drawer */}
-            <div className="relative w-[280px] max-w-[80vw] bg-white dark:bg-[#1e1e20] h-full shadow-2xl flex flex-col animate-in slide-in-from-right duration-300 ease-out">
+            <div
+              className="relative w-[280px] max-w-[80vw] bg-white dark:bg-[#1e1e20] h-full shadow-2xl flex flex-col animate-in slide-in-from-right duration-300 ease-out touch-pan-y"
+              onTouchStart={(e) => {
+                (e.currentTarget as any)._touchStartX = e.touches[0].clientX;
+              }}
+              onTouchEnd={(e) => {
+                const startX = (e.currentTarget as any)._touchStartX || 0;
+                const endX = e.changedTouches[0].clientX;
+                if (endX - startX > 50) {
+                  if (typeof navigator !== 'undefined' && navigator.vibrate) {
+                    try { navigator.vibrate(12); } catch {}
+                  }
+                  setIsMobileMenuOpen(false);
+                }
+              }}
+            >
               <div className="flex items-center justify-between p-4 border-b border-slate-100 dark:border-[#333336]">
                 <span className="font-bold text-lg text-slate-800 dark:text-[#f3f3f3]">Navigation</span>
                 <button
@@ -448,4 +472,4 @@ export function Navigation({
       </div>
     </>
   );
-}
+});

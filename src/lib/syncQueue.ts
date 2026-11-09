@@ -8,8 +8,18 @@ const MAX_PENDING_AGE_MS = 24 * 60 * 60 * 1000;
 
 const toMs = (v: any): number => {
   if (!v) return 0;
-  const n =
-    typeof v === 'string' ? Date.parse(v) : typeof v?.toMillis === 'function' ? v.toMillis() : Number(v);
+  if (typeof v === 'string') {
+    const n = Date.parse(v);
+    return Number.isFinite(n) ? n : 0;
+  }
+  if (typeof v?.toMillis === 'function') {
+    const n = v.toMillis();
+    return Number.isFinite(n) ? n : 0;
+  }
+  if (typeof v?.seconds === 'number') {
+    return v.seconds * 1000 + Math.floor((v.nanoseconds || 0) / 1e6);
+  }
+  const n = Number(v);
   return Number.isFinite(n) ? n : 0;
 };
 
@@ -62,19 +72,60 @@ function openDB(): Promise<IDBDatabase> {
 }
 
 export async function addPendingUpdate(update: Omit<PendingUpdate, 'id' | 'timestamp'>) {
+  if (!update.docId || String(update.docId).startsWith('ts_')) return;
   try {
     const db = await openDB();
-    const newUpdate: PendingUpdate = {
-      ...update,
-      id: Math.random().toString(36).substring(2, 9),
-      timestamp: Date.now(),
-    };
+    const deterministicId = `${update.collectionPath}__${update.docId}`;
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, 'readwrite');
       const store = tx.objectStore(STORE_NAME);
-      const request = store.add(newUpdate);
-      request.onsuccess = () => resolve(newUpdate);
-      request.onerror = () => reject(request.error);
+      const getReq = store.get(deterministicId);
+      getReq.onsuccess = () => {
+        const existing = getReq.result as PendingUpdate | undefined;
+        let mergedAction = update.action;
+        let mergedData = update.data;
+
+        if (existing) {
+          if (update.action === 'delete') {
+            mergedAction = 'delete';
+            mergedData = null;
+          } else if (existing.action === 'set' && update.action === 'update') {
+            mergedAction = 'set';
+            mergedData =
+              existing.data && typeof existing.data === 'object' && update.data && typeof update.data === 'object'
+                ? { ...existing.data, ...update.data }
+                : update.data;
+          } else if (existing.action === 'update' && update.action === 'update') {
+            mergedAction = 'update';
+            mergedData =
+              existing.data && typeof existing.data === 'object' && update.data && typeof update.data === 'object'
+                ? { ...existing.data, ...update.data }
+                : update.data;
+          }
+        }
+
+        const coalescedUpdate: PendingUpdate = {
+          ...update,
+          id: deterministicId,
+          action: mergedAction,
+          data: mergedData,
+          timestamp: Date.now(),
+        };
+
+        const putReq = store.put(coalescedUpdate);
+        putReq.onsuccess = () => resolve(coalescedUpdate);
+        putReq.onerror = () => reject(putReq.error);
+      };
+      getReq.onerror = () => {
+        const fallbackUpdate: PendingUpdate = {
+          ...update,
+          id: deterministicId,
+          timestamp: Date.now(),
+        };
+        const putReq = store.put(fallbackUpdate);
+        putReq.onsuccess = () => resolve(fallbackUpdate);
+        putReq.onerror = () => reject(putReq.error);
+      };
     });
   } catch (e) {
     console.error('Failed to add pending update to IDB', e);
@@ -236,6 +287,36 @@ export async function processPendingSync(): Promise<{ synced: number; failed: nu
   return { synced, failed };
 }
 
+export async function addPendingUpdatesBulk(
+  updates: Array<Omit<PendingUpdate, 'id' | 'timestamp'>>
+): Promise<void> {
+  const validUpdates = updates.filter(
+    (u) => u.docId && !String(u.docId).startsWith('ts_')
+  );
+  if (validUpdates.length === 0) return;
+
+  try {
+    const idb = await openDB();
+    const now = Date.now();
+    await new Promise<void>((resolve, reject) => {
+      const tx = idb.transaction(STORE_NAME, 'readwrite');
+      const store = tx.objectStore(STORE_NAME);
+      for (const u of validUpdates) {
+        const deterministicId = `${u.collectionPath}__${u.docId}`;
+        store.put({
+          ...u,
+          id: deterministicId,
+          timestamp: now,
+        });
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (e) {
+    console.error('Failed to bulk add pending updates to IDB', e);
+  }
+}
+
 export const syncQueueManager = {
   addToQueue: async (
     collectionName: string,
@@ -254,6 +335,29 @@ export const syncQueueManager = {
       data,
     });
 
+    if (getConnectionStatus() === 'online') {
+      processPendingSync().catch(() => {});
+    }
+  },
+
+  bulkAddToQueue: async (
+    items: Array<{
+      collectionName: string;
+      docId: string;
+      action: 'set' | 'update' | 'delete';
+      data: any;
+    }>
+  ) => {
+    if (!items || items.length === 0) return;
+    const formatted = items.map((item) => ({
+      collectionPath: item.collectionName.includes('/')
+        ? item.collectionName
+        : `artifacts/${APP_ID}/public/data/${item.collectionName}`,
+      action: item.action,
+      docId: item.docId,
+      data: item.data,
+    }));
+    await addPendingUpdatesBulk(formatted);
     if (getConnectionStatus() === 'online') {
       processPendingSync().catch(() => {});
     }

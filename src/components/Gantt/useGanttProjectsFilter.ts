@@ -8,10 +8,15 @@ import {
   parseDateTime, 
   getUserAllowedStores, 
   getEffectiveStoreFilter, 
-  matchesAdvancedSearch 
+  matchesAdvancedSearch,
+  isProjectTasksHydrated 
 } from '../../lib/utils';
 import { useLocationOptions } from '../../hooks/useLocationOptions';
 import { safeGetItemSession, safeSetItemSession } from '../../lib/storage';
+import { isTaskDeletedInTracker } from '../../lib/taskDeletedTracker';
+import { deduplicateTasksInMemory } from '../../lib/taskDeduplicationService';
+import { filterNonOrphanTasks, rollupParentTaskDatesAndStatus } from '../../lib/taskRollupService';
+import { sortGroupTasks } from '../../lib/ganttUtils';
 
 interface UseGanttProjectsFilterParams {
   projects: Project[];
@@ -37,61 +42,70 @@ export function useGanttProjectsFilter({
   const ganttTabFilterProjectId = useAppStore(state => state.ganttTabFilterProjectId);
   const setGanttTabFilterProjectId = useAppStore(state => state.setGanttTabFilterProjectId);
 
-  const [searchTerm, setSearchTerm] = useState(() => safeGetItemSession("taka_gantt_search") || "");
-  const deferredSearchTerm = useDeferredValue(searchTerm);
+  const fixedProjectCode = useAppStore(state => state.fixedProjectCode);
+  const setFixedProjectCode = useAppStore(state => state.setFixedProjectCode);
+  const isPrintPreview = useAppStore(state => state.isPrintPreview);
+  const isExportingPDF = useAppStore(state => state.isExportingPDF);
 
-  // Sync QuickNav targeted project filter
+  const [searchTerm, setSearchTermState] = useState(() => safeGetItemSession("taka_gantt_search") || "");
+  const setSearchTerm = useCallback((val: string) => {
+    setSearchTermState(val);
+    safeSetItemSession("taka_gantt_search", val);
+  }, []);
+  const rawDeferredSearch = useDeferredValue(searchTerm);
+  const deferredSearchTerm = isPrintPreview || isExportingPDF ? searchTerm : rawDeferredSearch;
+  const effectiveFilterTerm = deferredSearchTerm.trim() || (fixedProjectCode ? fixedProjectCode.trim() : '');
+
+  // Sync QuickNav targeted project filter into FixedProjectCode once and clear ganttTabFilterProjectId so Print Preview remount never wipes searchTerm
   useEffect(() => {
     if (ganttTabFilterProjectId) {
       const targetProj = projects.find(
         p => (p.id && String(p.id) === String(ganttTabFilterProjectId)) ||
              (p.code && String(p.code).trim().toUpperCase() === String(ganttTabFilterProjectId).trim().toUpperCase())
       );
-      const codeToDisplay = targetProj?.code || ganttTabFilterProjectId;
-      setSearchTerm(codeToDisplay);
+      const codeToDisplay = String(targetProj?.code || ganttTabFilterProjectId).split('#')[0].trim().toUpperCase();
+      if (codeToDisplay) setFixedProjectCode(codeToDisplay);
+      if (!useAppStore.getState().isPrintPreview && !useAppStore.getState().isExportingPDF) {
+        setSearchTermState('');
+        safeSetItemSession("taka_gantt_search", "");
+      }
       setFilterProjectStatus('all');
+      if (targetProj || projects.length > 0) setGanttTabFilterProjectId('');
     }
-  }, [ganttTabFilterProjectId, projects]);
+  }, [ganttTabFilterProjectId, projects, setFixedProjectCode, setGanttTabFilterProjectId]);
 
   const [filterProjectStatus, setFilterProjectStatus] = useState<string>(() => {
-    if ((safeGetItemSession("taka_gantt_search") || "").trim()) return 'all';
-    return safeGetItemSession("taka_gantt_status_filter") || 'On process + Upcoming 3 days';
+    if ((safeGetItemSession("taka_gantt_search") || "").trim() || (useAppStore.getState().fixedProjectCode || "").trim()) return 'all';
+    const saved = safeGetItemSession("taka_gantt_status_filter");
+    return saved && saved !== 'all' ? saved : 'On process + Upcoming 3 days';
   });
 
   const lastSelectedStatusFilterRef = useRef<string>(
-    safeGetItemSession("taka_gantt_status_filter") || 'On process + Upcoming 3 days'
+    (() => {
+      const saved = safeGetItemSession("taka_gantt_status_filter");
+      return saved && saved !== 'all' ? saved : 'On process + Upcoming 3 days';
+    })()
   );
   const lastSelectedLocationFilterRef = useRef<string[]>(globalLocationFilter);
-  const wasSearchingRef = useRef<boolean>(!!(safeGetItemSession("taka_gantt_search") || "").trim());
+  const wasSearchingRef = useRef<boolean>(
+    Boolean((safeGetItemSession("taka_gantt_search") || "").trim() || (useAppStore.getState().fixedProjectCode || "").trim())
+  );
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      safeSetItemSession("taka_gantt_search", searchTerm);
-      if (ganttTabFilterProjectId) {
-        const targetProj = projects.find(
-          p => (p.id && String(p.id) === String(ganttTabFilterProjectId)) ||
-               (p.code && String(p.code).trim().toUpperCase() === String(ganttTabFilterProjectId).trim().toUpperCase())
-        );
-        const expectedCode = targetProj?.code || ganttTabFilterProjectId;
-        if (!searchTerm.trim() || searchTerm.trim().toUpperCase() !== expectedCode.trim().toUpperCase()) {
-          setGanttTabFilterProjectId('');
-        }
-      }
-    }, 350);
-    return () => clearTimeout(timer);
-  }, [searchTerm, ganttTabFilterProjectId, setGanttTabFilterProjectId, projects]);
+    safeSetItemSession("taka_gantt_search", searchTerm);
+  }, [searchTerm]);
 
   const onStatusFilterChange = useCallback((status: string) => {
     setFilterProjectStatus(status);
-    if (!searchTerm.trim()) {
+    if (!searchTerm.trim() && !(fixedProjectCode && fixedProjectCode.trim())) {
       lastSelectedStatusFilterRef.current = status;
       safeSetItemSession("taka_gantt_status_filter", status);
     }
-  }, [searchTerm]);
+  }, [searchTerm, fixedProjectCode]);
 
-  // Status & Location filter preservation during search
+  // Status & Location filter preservation during search or fixedProjectCode
   useEffect(() => {
-    const isSearching = !!deferredSearchTerm.trim();
+    const isSearching = !!effectiveFilterTerm;
     if (!wasSearchingRef.current && isSearching) {
       if (filterProjectStatus !== 'all') {
         lastSelectedStatusFilterRef.current = filterProjectStatus;
@@ -102,18 +116,43 @@ export function useGanttProjectsFilter({
       wasSearchingRef.current = true;
     } else if (wasSearchingRef.current && !isSearching) {
       const restored = lastSelectedStatusFilterRef.current || safeGetItemSession("taka_gantt_status_filter") || 'On process + Upcoming 3 days';
-      setFilterProjectStatus(restored);
+      const finalStatus = restored && restored !== 'all' ? restored : 'On process + Upcoming 3 days';
+      setFilterProjectStatus(finalStatus);
       setGlobalLocationFilter(lastSelectedLocationFilterRef.current || []);
       wasSearchingRef.current = false;
     }
-  }, [deferredSearchTerm]);
+  }, [effectiveFilterTerm]);
+
+  // Reset to default 'On process + Upcoming 3 days' when switching Year or Store
+  const prevGanttScopeRef = useRef(`${globalYearFilter}_${effectiveStore}`);
+  useEffect(() => {
+    const currentScope = `${globalYearFilter}_${effectiveStore}`;
+    if (prevGanttScopeRef.current !== currentScope) {
+      prevGanttScopeRef.current = currentScope;
+      if (!searchTerm.trim() && !(fixedProjectCode && fixedProjectCode.trim())) {
+        setFilterProjectStatus('On process + Upcoming 3 days');
+        lastSelectedStatusFilterRef.current = 'On process + Upcoming 3 days';
+        safeSetItemSession("taka_gantt_status_filter", 'On process + Upcoming 3 days');
+      }
+      if (globalLocationFilter.length > 0) {
+        const hasMatchingLoc = projects.some(p => {
+          if (p.isDeleted) return false;
+          const pYear = p.year ? String(p.year) : null;
+          if (globalYearFilter !== 'all' && pYear !== String(globalYearFilter)) return false;
+          if (effectiveStore !== 'all' && String(p.store || '').toUpperCase() !== String(effectiveStore).toUpperCase()) return false;
+          return p.location && globalLocationFilter.includes(p.location);
+        });
+        if (!hasMatchingLoc) {
+          setGlobalLocationFilter([]);
+        }
+      }
+    }
+  }, [globalYearFilter, effectiveStore, searchTerm, fixedProjectCode, projects, globalLocationFilter, setGlobalLocationFilter]);
 
   const uniqueYears = useMemo(() => {
     const yearsSet = new Set<string>();
     projects.forEach(p => {
       if (p.year) yearsSet.add(String(p.year));
-      else if (p.computedTakStart) yearsSet.add(String(p.computedTakStart).substring(0, 4));
-      else if (p.start) yearsSet.add(String(p.start).substring(0, 4));
     });
     ['2026', '2027'].forEach(y => yearsSet.add(y));
     return Array.from(yearsSet).sort();
@@ -155,33 +194,61 @@ export function useGanttProjectsFilter({
     return map;
   }, [tasks]);
 
+  const projectTasksCache = useMemo(
+    () => new WeakMap<Project, Task[]>(),
+    [tasksByProjectId, tasksByProject, tasksMapByCode]
+  );
+
   const getGroupTasksForProject = useCallback(
     (p: Project): Task[] => {
-      const mergedMap = new Map<string, Task>();
+      if (!p) return [];
+      const cached = projectTasksCache.get(p);
+      if (cached) return cached;
 
+      const realTasksMap = new Map<string, Task>();
+      const virtualTasksMap = new Map<string, Task>();
+
+      const pIdStr = p.id ? String(p.id).trim() : '';
       const pStore = p.store ? String(p.store).trim().toUpperCase() : '';
-      const pYear = p.year ? String(p.year).trim() : '';
+      const pYear = p.year !== undefined && p.year !== null ? String(p.year).trim() : '';
+
+      const tryAddTask = (t: Task) => {
+        if (!t || (!t.id && !t.name) || t.isDeleted) return;
+        const tIdStr = String(t.id || '').trim();
+        if (tIdStr && isTaskDeletedInTracker(tIdStr, pIdStr || undefined)) return;
+        if ((!t.name || !String(t.name).trim()) && (!t.start || !String(t.start).trim()) && (!t.finish || !String(t.finish).trim()) && !t.taskCodePhu) {
+          return;
+        }
+
+        const tProjId = t.projectId ? String(t.projectId).trim() : '';
+        if (tProjId && pIdStr) {
+          if (tProjId !== pIdStr) return;
+        } else {
+          const tStore = t.projectStore ? String(t.projectStore).trim().toUpperCase() : '';
+          const tYear = t.projectYear !== undefined && t.projectYear !== null ? String(t.projectYear).trim() : '';
+          if (pStore && tStore && pStore !== tStore) return;
+          if (pYear && tYear && pYear !== tYear) return;
+        }
+
+        const mapKey = (tIdStr || String(t.name)).toLowerCase();
+        const isVirtual = Boolean((t as any)._isVirtualSummary);
+        if (isVirtual) {
+          if (!virtualTasksMap.has(mapKey)) virtualTasksMap.set(mapKey, t);
+        } else {
+          realTasksMap.set(mapKey, t);
+        }
+      };
 
       // 1. By projectId
-      if (p.id && tasksByProjectId.has(String(p.id))) {
-        tasksByProjectId.get(String(p.id))!.forEach(t => {
-          if (t && (t.id || t.name)) {
-            const tStore = t.projectStore ? String(t.projectStore).trim().toUpperCase() : '';
-            const tYear = t.projectYear !== undefined && t.projectYear !== null ? String(t.projectYear).trim() : '';
-            if (pStore && tStore && pStore !== tStore) return;
-            if (pYear && tYear && pYear !== tYear) return;
-            mergedMap.set(String(t.id || t.name), t);
-          }
-        });
+      if (pIdStr && tasksByProjectId.has(pIdStr)) {
+        tasksByProjectId.get(pIdStr)!.forEach(tryAddTask);
       }
 
       // 2. By project key (CODE_YEAR_STORE)
-      const key = `${String(p.code || '').trim().toUpperCase()}_${String(p.year || '').trim()}_${String(p.store || '').trim().toUpperCase()}`;
+      const key = `${String(p.code || '').trim().toUpperCase()}_${pYear}_${pStore}`;
       const foundByKey = tasksByProject.get(key);
       if (foundByKey && foundByKey.length > 0) {
-        foundByKey.forEach(t => {
-          if (t && (t.id || t.name)) mergedMap.set(String(t.id || t.name), t);
-        });
+        foundByKey.forEach(tryAddTask);
       }
 
       // 3. By project code
@@ -189,38 +256,29 @@ export function useGanttProjectsFilter({
       if (codeKey) {
         const foundByCode = tasksMapByCode.get(codeKey);
         if (foundByCode && foundByCode.length > 0) {
-          foundByCode.forEach(t => {
-            const matchesStore = !t.projectStore || !p.store || String(t.projectStore).trim().toUpperCase() === String(p.store).trim().toUpperCase();
-            const matchesYear = !t.projectYear || !p.year || String(t.projectYear).trim() === String(p.year).trim();
-            if (matchesStore && matchesYear && t && (t.id || t.name)) {
-              mergedMap.set(String(t.id || t.name), t);
-            }
-          });
+          foundByCode.forEach(tryAddTask);
         }
       }
 
-      let resultTasks = Array.from(mergedMap.values());
-
-      // Fallback & Merge from taskSummaries if taskSummaries has more items
-      if (p.taskSummaries && Array.isArray(p.taskSummaries) && p.taskSummaries.length > resultTasks.length) {
-        const existingSet = new Set<string>();
-        resultTasks.forEach(t => {
-          if (t.id) existingSet.add(String(t.id).toLowerCase());
-          if (t.taskCodePhu) existingSet.add(String(t.taskCodePhu).trim().toLowerCase());
-          if (t.name) existingSet.add(String(t.name).trim().toLowerCase());
-        });
-
+      // 4. Fallback & Merge from taskSummaries if project tasks are not yet fully hydrated
+      if (
+        p.taskSummaries &&
+        Array.isArray(p.taskSummaries) &&
+        !isProjectTasksHydrated(pIdStr) &&
+        realTasksMap.size < p.taskSummaries.length
+      ) {
         p.taskSummaries.forEach((ts, idx) => {
-          const tsId = ts.id ? String(ts.id).toLowerCase() : '';
-          const tsCode = ts.taskCodePhu ? String(ts.taskCodePhu).trim().toLowerCase() : '';
-          const tsName = ts.name ? String(ts.name).trim().toLowerCase() : '';
-          const hasMatch = (tsId && existingSet.has(tsId)) ||
-                           (tsCode && existingSet.has(tsCode)) ||
-                           (tsName && existingSet.has(tsName));
-          if (!hasMatch) {
-            resultTasks.push({
-              id: ts.id || `ts_${p.id || p.code}_${p.store || 'HCM'}_${p.year || ''}_${idx}`,
-              name: ts.name || `Task ${idx + 1}`,
+          if (isTaskDeletedInTracker(ts.id, pIdStr || undefined)) return;
+          if ((!ts.name || !String(ts.name).trim()) && (!ts.start || !String(ts.start).trim()) && (!ts.finish || !String(ts.finish).trim()) && !ts.taskCodePhu) {
+            return;
+          }
+          const rawTsId = ts.id ? String(ts.id).trim() : '';
+          const tsId = rawTsId || `ts_${p.id || p.code}_${p.store || 'HCM'}_${p.year || ''}_${idx}`;
+          const tsIdLower = tsId.toLowerCase();
+          if (!virtualTasksMap.has(tsIdLower)) {
+            virtualTasksMap.set(tsIdLower, {
+              id: tsId,
+              name: (ts.name && String(ts.name).trim()) ? ts.name : (ts.taskCodePhu || `Task ${idx + 1}`),
               start: ts.start || p.computedTakStart || p.start || '',
               finish: ts.finish || p.computedTakCompl || p.handover || '',
               projectCode: p.code || '',
@@ -230,27 +288,80 @@ export function useGanttProjectsFilter({
               runningStatus: ts.runningStatus || 'On process',
               duration: ts.duration || '',
               parentTaskId: ts.parentTaskId,
-              taskCodePhu: ts.taskCodePhu || (p.code ? `${p.code}-${idx + 1}` : undefined),
+              taskCodePhu: ts.taskCodePhu || (p.code ? `${p.code}#${idx + 1}` : undefined),
               orderIndex: ts.orderIndex !== undefined ? ts.orderIndex : idx,
               projectId: p.id,
-              ...ts
-            } as Task);
+              ...ts,
+              _isVirtualSummary: true,
+            } as unknown as Task);
           }
         });
       }
 
-      return resultTasks;
+      const rawGroupTasks: Task[] = Array.from(realTasksMap.values());
+      const realCodeSet = new Set<string>();
+      const realNameOrdSet = new Set<string>();
+      rawGroupTasks.forEach(rt => {
+        if (rt.taskCodePhu) realCodeSet.add(String(rt.taskCodePhu).trim().toLowerCase());
+        if (rt.name) {
+          const nLower = String(rt.name).trim().toLowerCase();
+          const ordStr = rt.orderIndex !== undefined && rt.orderIndex !== null ? String(rt.orderIndex) : '';
+          realNameOrdSet.add(`${nLower}|${ordStr}`);
+        }
+      });
+
+      virtualTasksMap.forEach((vt, mapKey) => {
+        if (realTasksMap.has(mapKey)) return;
+        const vtCode = vt.taskCodePhu ? String(vt.taskCodePhu).trim().toLowerCase() : '';
+        if (vtCode && realCodeSet.has(vtCode)) return;
+        const vtName = vt.name ? String(vt.name).trim().toLowerCase() : '';
+        const vtOrd = vt.orderIndex !== undefined && vt.orderIndex !== null ? String(vt.orderIndex) : '';
+        if (!vt.id || String(vt.id).startsWith('ts_')) {
+          if (vtName && realNameOrdSet.has(`${vtName}|${vtOrd}`)) return;
+        }
+        rawGroupTasks.push(vt);
+      });
+
+      if (rawGroupTasks.length <= 1) {
+        projectTasksCache.set(p, rawGroupTasks);
+        return rawGroupTasks;
+      }
+      const { dedupedTasks } = deduplicateTasksInMemory(rawGroupTasks, [p]);
+      const { cleaned } = filterNonOrphanTasks(dedupedTasks);
+      const rolledUp = rollupParentTaskDatesAndStatus(cleaned);
+      const sorted = sortGroupTasks(rolledUp);
+      projectTasksCache.set(p, sorted);
+      return sorted;
     },
-    [tasksByProjectId, tasksByProject, tasksMapByCode]
+    [projectTasksCache, tasksByProjectId, tasksByProject, tasksMapByCode]
   );
 
-  // Pre-indexed Search Pool Cache to eliminate Garbage Collection pauses on mobile Safari
+  const hasActiveSearchTerm = Boolean(deferredSearchTerm.trim());
+
+  // Pre-indexed Search Pool Cache built lazily only when user actually searches
   const projectSearchIndex = useMemo(() => {
-    const map = new Map<string, { pPool: (string | number | undefined | null)[]; tPools: (string | number | undefined | null)[][] }>();
+    const map = new Map<string, { mainFields: (string | number | undefined | null)[]; subFields: (string | number | undefined | null)[] }>();
+    if (!hasActiveSearchTerm) return map;
     projects.forEach(p => {
       const pTasks = getGroupTasksForProject(p);
-      const pPool = [p.code, p.name, p.store, p.location, p.year, p.detail, p.party];
-      const tPools = pTasks.map(t => [
+      const rawLink = Array.isArray(p.linkCodes) ? p.linkCodes : typeof p.linkCodes === 'string' ? [p.linkCodes] : [];
+      const computedTakStart = p.computedTakStart || p.start || "";
+      const status = p.computedStatus || getStatus(computedTakStart, p.computedTakCompl || p.handover, p.computedOpening || p.opening, p.code);
+
+      const mainFields = [
+        p.code,
+        p.name,
+        p.store,
+        p.location,
+        p.year,
+        p.detail,
+        p.party,
+        p.shopType,
+        status,
+        ...rawLink
+      ];
+
+      const subFields = pTasks.flatMap(t => [
         t.name,
         t.taskCodePhu,
         t.party,
@@ -258,22 +369,40 @@ export function useGanttProjectsFilter({
         t.predecessor,
         ...(t.notes ? t.notes.map(n => n.content) : [])
       ]);
-      map.set(p.id || p.code, { pPool, tPools });
+
+      if (p.taskSummaries && Array.isArray(p.taskSummaries)) {
+        p.taskSummaries.forEach(ts => {
+          subFields.push(ts.name, ts.taskCodePhu, ts.party, ts.runningStatus);
+        });
+      }
+
+      map.set(String(p.id || p.code), { mainFields, subFields });
     });
     return map;
-  }, [projects, getGroupTasksForProject]);
+  }, [hasActiveSearchTerm, projects, getGroupTasksForProject]);
 
   const filteredProjects = useMemo(() => {
     return projects.filter(p => {
+      // Check fixedProjectCode
+      if (fixedProjectCode && fixedProjectCode.trim()) {
+        const fix = fixedProjectCode.trim().toLowerCase();
+        const pCode = (p.code || '').trim().toLowerCase();
+        const pName = (p.name || '').trim().toLowerCase();
+        const pLink = Array.isArray(p.linkCodes) ? p.linkCodes.join(' ').toLowerCase() : String(p.linkCodes || '').toLowerCase();
+        const matchesFix = pCode === fix || pCode.includes(fix) || pName.includes(fix) || pLink.includes(fix) || String(p.id).toLowerCase() === fix;
+        if (!matchesFix) return false;
+      }
+
       // Strict single-project isolation when navigated via Quick Navigation
       if (ganttTabFilterProjectId) {
         const isTarget = (p.id && String(p.id) === String(ganttTabFilterProjectId)) ||
                          (p.code && String(p.code).trim().toUpperCase() === String(ganttTabFilterProjectId).trim().toUpperCase());
-        return isTarget;
+        if (!isTarget) return false;
       }
 
-      const { computedTakStart, status } = getProjectDatesAndStatus(p, tasks);
-      const pYear = p.year ? String(p.year).trim() : (computedTakStart ? String(computedTakStart).substring(0, 4) : null);
+      const computedTakStart = p.computedTakStart || p.start || "";
+      const status = p.computedStatus || getStatus(computedTakStart, p.computedTakCompl || p.handover, p.computedOpening || p.opening, p.code);
+      const pYear = p.year ? String(p.year).trim() : null;
       const matchesYear = globalYearFilter === 'all' || (pYear !== null && pYear === String(globalYearFilter).trim());
       const matchesStore = effectiveStore === 'all' || (Boolean(p.store) && String(p.store).toUpperCase().trim() === effectiveStore.toUpperCase().trim());
       const matchesLocation = globalLocationFilter.length === 0 || (p.location && globalLocationFilter.includes(p.location));
@@ -284,16 +413,17 @@ export function useGanttProjectsFilter({
 
       if (!deferredSearchTerm.trim()) return true;
 
-      const indexed = projectSearchIndex.get(p.id || p.code);
+      const key = String(p.id || p.code);
+      const indexed = projectSearchIndex.get(key);
       if (indexed) {
-        if (matchesAdvancedSearch(deferredSearchTerm, [...indexed.pPool, status])) return true;
-        return indexed.tPools.some(tPool => matchesAdvancedSearch(deferredSearchTerm, tPool));
+        return matchesAdvancedSearch(deferredSearchTerm, indexed.mainFields, indexed.subFields);
       }
 
-      return matchesAdvancedSearch(deferredSearchTerm, [p.code, p.name, p.store, p.location, status]);
+      return matchesAdvancedSearch(deferredSearchTerm, [p.code, p.name, p.store, p.location, p.year, p.detail, p.party, p.shopType, status]);
     });
   }, [
     projects,
+    fixedProjectCode,
     ganttTabFilterProjectId,
     globalYearFilter,
     effectiveStore,
@@ -305,6 +435,10 @@ export function useGanttProjectsFilter({
 
   const [visibleCount, setVisibleCount] = useState(20);
 
+  useEffect(() => {
+    setVisibleCount(20);
+  }, [globalYearFilter, effectiveStore, globalLocationFilter, filterProjectStatus, deferredSearchTerm, fixedProjectCode]);
+
   const sortedProjects = useMemo(() => {
     return [...filteredProjects].sort((a, b) => {
       const startA = a.computedTakStart || '9999-12-31';
@@ -314,48 +448,38 @@ export function useGanttProjectsFilter({
     });
   }, [filteredProjects]);
 
-  const paginatedProjects = useMemo(() => {
-    return sortedProjects.slice(0, visibleCount);
-  }, [sortedProjects, visibleCount]);
+  const ganttTabFocusTaskId = useAppStore(state => state.ganttTabFocusTaskId);
+  useEffect(() => {
+    if (!ganttTabFocusTaskId) return;
+    const cleanId = String(ganttTabFocusTaskId).replace('task-', '').trim();
+    const targetTask = tasks.find(t => String(t.id) === cleanId);
+    if (!targetTask) return;
+    const projIdx = sortedProjects.findIndex(
+      p => (p.id && String(p.id) === String(targetTask.projectId)) ||
+           (p.code && targetTask.projectCode && p.code.trim().toUpperCase() === targetTask.projectCode.trim().toUpperCase())
+    );
+    if (projIdx >= visibleCount) {
+      setVisibleCount(Math.min(sortedProjects.length, projIdx + 5));
+    }
+  }, [ganttTabFocusTaskId, tasks, sortedProjects, visibleCount]);
 
-  const handleLoadMore = useCallback(() => {
-    setVisibleCount(prev => Math.min(prev + 20, sortedProjects.length));
-  }, [sortedProjects.length]);
+  const paginatedProjects = useMemo(
+    () => (isPrintPreview || isExportingPDF ? sortedProjects : sortedProjects.slice(0, visibleCount)),
+    [sortedProjects, visibleCount, isPrintPreview, isExportingPDF]
+  );
+  const handleLoadMore = useCallback(() => setVisibleCount(prev => Math.min(prev + 20, sortedProjects.length)), [sortedProjects.length]);
 
-  // Search filter operates on Project Summaries + loaded tasks first (Tri-Gate Lazy Loading).
-  // Projects remain in summarized/collapsed state until user taps Expand (+), which triggers Delta Sync task fetching.
   const lastAutoExpandedSearchRef = useRef<string>('');
   useEffect(() => {
-    const term = deferredSearchTerm.trim();
-    if (!term) {
-      lastAutoExpandedSearchRef.current = '';
-    }
+    if (!deferredSearchTerm.trim()) lastAutoExpandedSearchRef.current = '';
   }, [deferredSearchTerm]);
 
   return {
-    globalYearFilter,
-    setGlobalYearFilter,
-    globalStoreFilter,
-    setGlobalStoreFilter,
-    effectiveStore,
-    globalLocationFilter,
-    setGlobalLocationFilter,
-    filterProjectStatus,
-    onStatusFilterChange,
-    searchTerm,
-    setSearchTerm,
-    deferredSearchTerm,
-    uniqueYears,
-    uniqueStores,
-    locationOptions,
-    tasksByProject,
-    tasksMapByCode,
-    getGroupTasksForProject,
-    filteredProjects,
-    sortedProjects,
-    paginatedProjects,
-    visibleCount,
-    setVisibleCount,
-    handleLoadMore
+    globalYearFilter, setGlobalYearFilter, globalStoreFilter, setGlobalStoreFilter,
+    effectiveStore, globalLocationFilter, setGlobalLocationFilter, filterProjectStatus,
+    onStatusFilterChange, searchTerm, setSearchTerm, deferredSearchTerm,
+    uniqueYears, uniqueStores, locationOptions, tasksByProject, tasksMapByCode,
+    getGroupTasksForProject, filteredProjects, sortedProjects, paginatedProjects,
+    visibleCount, setVisibleCount, handleLoadMore
   };
 }

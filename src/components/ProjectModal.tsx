@@ -8,7 +8,7 @@ import { useProjectModalData } from './ProjectModalParts/useProjectModalData';
 import { ProjectChat } from './ProjectModal/ProjectChat';
 import { ProjectDelegationTab } from './ProjectDelegationTab';
 import { lazyWithRetry } from '../lib/lazyWithRetry';
-import { getZIndexClass } from '../lib/zIndexManager';
+import { getZIndexClass, getZIndexValue } from '../lib/zIndexManager';
 
 const ConfirmModal = lazyWithRetry(() => import('./ConfirmModal').then(m => ({ default: m.ConfirmModal })), 'ConfirmModal');
 
@@ -39,6 +39,7 @@ export function ProjectModal(props: ProjectModalProps) {
     confirmModal,
     setConfirmModal,
     yearRef,
+    matchedUnitSizeInfo,
     handleAddNewLocation,
     handleSubmit,
     handleDelete
@@ -48,7 +49,10 @@ export function ProjectModal(props: ProjectModalProps) {
 
   return (
     <Portal>
-      <div className={`fixed inset-0 bg-slate-900/60 ${getZIndexClass('MODAL_BASE')} flex items-center justify-center p-0 md:p-4 overscroll-contain`}>
+      <div 
+        className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-0 md:p-4 overscroll-contain"
+        style={{ zIndex: getZIndexValue('MODAL_BASE') }}
+      >
         <React.Suspense fallback={null}>
           {confirmModal.isOpen && (
             <ConfirmModal
@@ -98,6 +102,7 @@ export function ProjectModal(props: ProjectModalProps) {
                 handleDelete={handleDelete}
                 onClose={onClose}
                 yearRef={yearRef}
+                matchedUnitSizeInfo={matchedUnitSizeInfo}
               />
             )}
 

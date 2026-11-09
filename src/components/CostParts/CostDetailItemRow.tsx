@@ -157,7 +157,7 @@ export const CostDetailItemRow = React.memo(function CostDetailItemRow({
               onSave={(val) => handleUpdateCost(c, 'firstPaid', val)}
               canWrite={canWrite}
             />
-            {c.firstPaidAt && (
+            {Boolean(c.firstPaidAt && formatDisplayDateMain(c.firstPaidAt)) && (
               <span
                 className={cn(
                   'text-[10px] font-normal mt-1',
@@ -191,7 +191,7 @@ export const CostDetailItemRow = React.memo(function CostDetailItemRow({
               onSave={(val) => handleUpdateCost(c, 'secondPaid', val)}
               canWrite={canWrite}
             />
-            {c.secondPaidAt && (
+            {Boolean(c.secondPaidAt && formatDisplayDateMain(c.secondPaidAt)) && (
               <span
                 className={cn(
                   'text-[10px] font-normal mt-1',
@@ -225,7 +225,7 @@ export const CostDetailItemRow = React.memo(function CostDetailItemRow({
               onSave={(val) => handleUpdateCost(c, 'thirdPaid', val)}
               canWrite={canWrite}
             />
-            {c.thirdPaidAt && (
+            {Boolean(c.thirdPaidAt && formatDisplayDateMain(c.thirdPaidAt)) && (
               <span
                 className={cn(
                   'text-[10px] font-normal mt-1',
@@ -241,13 +241,33 @@ export const CostDetailItemRow = React.memo(function CostDetailItemRow({
         </td>
       )}
       {visibleColumns.includes('balance') && (
-        <td className="px-4 py-3 text-right font-mono font-bold text-slate-700 dark:text-[#c3c3c3] bg-slate-50 dark:bg-[#1e1e20]/30">
-          {formatCurrency(
-            (c.actual || 0) -
-              (c.firstPaid || 0) -
-              (c.secondPaid || 0) -
-              (c.thirdPaid || 0)
+        <td
+          className={cn(
+            'px-4 py-3 text-right font-mono font-bold bg-slate-50 dark:bg-[#1e1e20]/30',
+            (c.actual || 0) - (c.firstPaid || 0) - (c.secondPaid || 0) - (c.thirdPaid || 0) < 0
+              ? 'text-red-600 dark:text-red-400'
+              : 'text-slate-700 dark:text-[#c3c3c3]'
           )}
+        >
+          <div className="flex flex-col items-end gap-0.5">
+            <span>
+              {formatCurrency(
+                (c.actual || 0) -
+                  (c.firstPaid || 0) -
+                  (c.secondPaid || 0) -
+                  (c.thirdPaid || 0)
+              )}
+            </span>
+            {(c.actual || 0) - (c.firstPaid || 0) - (c.secondPaid || 0) - (c.thirdPaid || 0) <
+              0 && (
+              <span
+                className="text-[8px] px-1 py-0.2 rounded bg-red-100 dark:bg-red-950/80 text-red-700 dark:text-red-300 border border-red-300 dark:border-red-800 uppercase font-extrabold leading-none"
+                title="1st + 2nd + 3rd Paid exceeds Actual/Forecast"
+              >
+                OVERPAID
+              </span>
+            )}
+          </div>
         </td>
       )}
       {visibleColumns.includes('supportingFee') && (
@@ -292,7 +312,7 @@ export const CostDetailItemRow = React.memo(function CostDetailItemRow({
                 title={c.description || c.vendor || 'Cost Entry'}
                 url={`${window.location.origin}${window.location.pathname}?tab=cost&q=${encodeURIComponent(
                   c.description || c.vendor || ''
-                )}`}
+                )}${c.projectStore ? `&store=${encodeURIComponent(c.projectStore)}` : ''}${c.projectYear ? `&year=${encodeURIComponent(String(c.projectYear))}` : ''}`}
               />
               {canWrite && (
                 <button
@@ -303,7 +323,7 @@ export const CostDetailItemRow = React.memo(function CostDetailItemRow({
                 </button>
               )}
             </div>
-            {c.updatedAt && (
+            {Boolean(c.updatedAt && formatDisplayDateMain(c.updatedAt)) && (
               <div className="text-[9px] text-slate-400 dark:text-[#838383] font-mono text-center leading-tight">
                 Update
                 <br />

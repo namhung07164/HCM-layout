@@ -5,25 +5,13 @@ import { SortConfig } from './generalTypes';
 import { useAppStore } from '../../store/useAppStore';
 
 interface DrawGeneralCanvasParams {
-  canvas: HTMLCanvasElement;
-  wrapper: HTMLDivElement;
-  paginatedProjects: Project[];
-  pinnedProjects: string[];
-  sortConfig: SortConfig | null;
-  theme: string;
-  flashToggle: boolean;
-  t: (key: string) => string;
+  canvas: HTMLCanvasElement; wrapper: HTMLDivElement; paginatedProjects: Project[];
+  pinnedProjects: string[]; sortConfig: SortConfig | null; theme: string;
+  flashToggle: boolean; t: (key: string) => string;
 }
 
 export function drawGeneralCanvas({
-  canvas,
-  wrapper,
-  paginatedProjects,
-  pinnedProjects,
-  sortConfig,
-  theme,
-  flashToggle,
-  t
+  canvas, wrapper, paginatedProjects, pinnedProjects, sortConfig, theme, flashToggle, t
 }: DrawGeneralCanvasParams) {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
@@ -37,13 +25,13 @@ export function drawGeneralCanvas({
   const scale = logicalWidth / totalBase;
   const colWidths = baseWidths.map(w => w * scale);
   const totalWidth = colWidths.reduce((a, b) => a + b, 0);
-  const totalHeight = Math.max(headerHeight + paginatedProjects.length * rowHeight + 30, wrapper.clientHeight);
+  const isPrint = useAppStore.getState().isPrintPreview || useAppStore.getState().isExportingPDF;
+  const totalHeight = isPrint ? (headerHeight + paginatedProjects.length * rowHeight + 2) : Math.max(headerHeight + paginatedProjects.length * rowHeight + 30, wrapper.clientHeight);
 
   canvas.width = totalWidth * dpr;
   canvas.height = totalHeight * dpr;
   canvas.style.width = totalWidth + 'px';
   canvas.style.height = totalHeight + 'px';
-
   ctx.scale(dpr, dpr);
 
   const isDark = theme === 'dark' || (typeof document !== 'undefined' && document.documentElement.classList.contains('dark'));
@@ -51,16 +39,11 @@ export function drawGeneralCanvas({
   ctx.fillRect(0, 0, totalWidth, totalHeight);
 
   const cols = [
-    { label: t('Year'), key: 'year' },
-    { label: t('Store'), key: 'store' },
-    { label: t('Location'), key: 'location' },
-    { label: t('Code'), key: 'code' },
-    { label: t('Project'), key: 'name' },
-    { label: t('Status'), key: 'status' },
-    { label: t('Details'), key: 'detail' },
-    { label: t('Pj Start'), key: 'start' },
-    { label: t('Pj Compl'), key: 'handover' },
-    { label: t('Opening'), key: 'opening' }
+    { label: t('Year'), key: 'year' }, { label: t('Store'), key: 'store' },
+    { label: t('Location'), key: 'location' }, { label: t('Code'), key: 'code' },
+    { label: t('Project'), key: 'name' }, { label: t('Status'), key: 'status' },
+    { label: t('Details'), key: 'detail' }, { label: t('Pj Start'), key: 'start' },
+    { label: t('Pj Compl'), key: 'handover' }, { label: t('Opening'), key: 'opening' }
   ];
 
   const fontSans = 'Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
@@ -448,51 +431,30 @@ interface ResolveCanvasClickParams {
 }
 
 export function resolveCanvasClick({
-  e,
-  canvas,
-  wrapper,
-  paginatedProjects,
-  onProjectClick,
-  handlePinToggle,
-  setSortConfig,
-  t
+  e, canvas, wrapper, paginatedProjects, onProjectClick, handlePinToggle, setSortConfig, t
 }: ResolveCanvasClickParams) {
   const rect = canvas.getBoundingClientRect();
   const x = e.clientX - rect.left;
   const y = e.clientY - rect.top;
   const headerHeight = 60;
   const rowHeight = 70;
+  const baseWidths = [100, 75, 80, 140, 210, 125, 210, 105, 105, 105];
+  const logicalWidth = Math.max(wrapper.clientWidth, 1280);
+  const scale = logicalWidth / baseWidths.reduce((a, b) => a + b, 0);
 
   if (y <= headerHeight) {
-    const baseWidths = [100, 75, 80, 140, 210, 125, 210, 105, 105, 105];
-    const logicalWidth = Math.max(wrapper.clientWidth, 1280);
-    const totalBase = baseWidths.reduce((a, b) => a + b, 0);
-    const scale = logicalWidth / totalBase;
     const colWidths = baseWidths.map(w => w * scale);
-    
-    const cols = [
-      { label: t('Year'), key: 'year' },
-      { label: t('Store'), key: 'store' },
-      { label: t('Location'), key: 'location' },
-      { label: t('Code'), key: 'code' },
-      { label: t('Project'), key: 'name' },
-      { label: t('Status'), key: 'status' },
-      { label: t('Details'), key: 'detail' },
-      { label: t('Tak start'), key: 'start' },
-      { label: t('Tak compl'), key: 'handover' },
-      { label: t('Opening'), key: 'opening' }
-    ];
-
+    const colKeys = ['year', 'store', 'location', 'code', 'name', 'status', 'detail', 'start', 'handover', 'opening'];
+    void t;
     let currentX = 0;
-    for (let i = 0; i < cols.length; i++) {
+    for (let i = 0; i < colKeys.length; i++) {
       const colWidth = colWidths[i];
       if (x >= currentX && x <= currentX + colWidth) {
-        const key = cols[i].key;
+        const key = colKeys[i];
         if (key === 'start' || key === 'handover' || key === 'opening') {
           setSortConfig(prev => {
             if (prev && prev.key === key) {
-              if (prev.direction === 'asc') return { key, direction: 'desc' };
-              return null;
+              return prev.direction === 'asc' ? { key, direction: 'desc' } : null;
             }
             return { key, direction: 'asc' };
           });
@@ -506,18 +468,11 @@ export function resolveCanvasClick({
 
   const idx = Math.floor((y - headerHeight) / rowHeight);
   if (idx >= 0 && idx < paginatedProjects.length) {
-    const baseWidths = [100, 75, 80, 140, 210, 125, 210, 105, 105, 105];
-    const logicalWidth = Math.max(wrapper.clientWidth, 1280);
-    const totalBase = baseWidths.reduce((a, b) => a + b, 0);
-    const scale = logicalWidth / totalBase;
-    const noColWidth = 100 * scale;
     const clickedProject = paginatedProjects[idx];
-    
-    if (x < noColWidth && clickedProject.id) {
+    if (x < 100 * scale && clickedProject.id) {
       handlePinToggle(e, clickedProject.id);
       return;
     }
-    
     onProjectClick(clickedProject);
   }
 }

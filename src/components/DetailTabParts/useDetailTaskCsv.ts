@@ -1,11 +1,13 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Project, Task, AppUser } from '../../types';
 import { useAppStore } from '../../store/useAppStore';
 import { downloadCSV, generateCSV } from '../../lib/csvUtils';
 import { sortGroupTasks } from '../../lib/ganttUtils';
-import { formatToCSVDate, parseCSVDate } from './detailCsvUtils';
+import { formatToCSVDate, parseCSVDate, formatPredecessorForExport } from './detailCsvUtils';
 import { parseTasksFile } from './detailTaskImportParser';
 import { executeImportTasks } from './detailTaskImportExecutor';
+import { ImportErrorModal } from './ImportErrorModal';
+import { ImportValidationResult } from './importValidator';
 
 interface UseDetailTaskCsvParams {
   filteredProjects: Project[];
@@ -22,6 +24,12 @@ export function useDetailTaskCsv({
   appUsers,
   currentUser,
 }: UseDetailTaskCsvParams) {
+  const [importErrorData, setImportErrorData] = useState<{
+    validationResult: ImportValidationResult;
+    errorReportCSV: string;
+    fileName: string;
+  } | null>(null);
+
   const handleExportTasks = () => {
     const headers = [
       'store',
@@ -83,7 +91,7 @@ export function useDetailTaskCsv({
         formatToCSVDate(t.finish), 
         t.duration !== undefined ? t.duration : '',
         t.party || '',
-        t.predecessor || '',
+        formatPredecessorForExport(t.predecessor, t.projectCode || p?.code),
         t.delegation ? 'true' : 'false',
         t.realtimeUpdate ? 'true' : 'false',
         commentsText
@@ -99,18 +107,46 @@ export function useDetailTaskCsv({
     if (!file) return;
 
     try {
-      const rawParsedRowsByProject = await parseTasksFile(file, projects);
-      const { count } = await executeImportTasks({
-        rawParsedRowsByProject,
-        projects,
+      useAppStore.getState().setToast({
+        title: "Processing Import...",
+        message: "Validating and importing tasks, please wait...",
+        type: "info"
+      });
+      await new Promise((r) => setTimeout(r, 15));
+
+      const parsed = await parseTasksFile(file, projects);
+
+      // If errors, duplicates, or data bugs are detected, BLOCK the import completely
+      if (!parsed.validation.isValid) {
+        setImportErrorData({
+          validationResult: parsed.validation,
+          errorReportCSV: parsed.errorReportCSV,
+          fileName: `${file.name.replace(/\.[^/.]+$/, '')}_import_errors.csv`
+        });
+        useAppStore.getState().setToast({
+          title: "Import Blocked",
+          message: `Found ${parsed.validation.errorCount} error(s) in ${parsed.validation.errorRowNumbers.size} row(s). Import was blocked.`,
+          type: "error"
+        });
+        return;
+      }
+
+      // Safe to execute import with the latest hydrated projects across all years
+      const latestProjects = parsed.allKnownProjects && parsed.allKnownProjects.length > 0
+        ? parsed.allKnownProjects
+        : (useAppStore.getState().projects || projects);
+      const { count, projectCount } = await executeImportTasks({
+        rawParsedRowsByProject: parsed.rawParsedRowsByProject,
+        projects: latestProjects,
         tasks,
         appUsers,
         currentUser
       });
 
       useAppStore.getState().setToast({
-        title: "Success",
-        message: `Import Tasks completed! Processed ${count} tasks without duplicates.`
+        title: "Import Successful",
+        message: `Import Tasks completed! Successfully processed ${count} task(s)${projectCount ? ` across ${projectCount} project(s)` : ''} and synced to cloud.`,
+        type: "success"
       });
     } catch (err: any) {
       console.error("Import error:", err);
@@ -124,10 +160,19 @@ export function useDetailTaskCsv({
     }
   };
 
+  const importErrorModal = importErrorData ? React.createElement(ImportErrorModal, {
+    isOpen: Boolean(importErrorData),
+    onClose: () => setImportErrorData(null),
+    validationResult: importErrorData.validationResult,
+    errorReportCSV: importErrorData.errorReportCSV,
+    fileName: importErrorData.fileName
+  }) : null;
+
   return {
     handleExportTasks,
     handleImportTasks,
     parseCSVDate,
     formatToCSVDate,
+    importErrorModal
   };
 }

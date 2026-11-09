@@ -22,7 +22,18 @@ export interface UnitShape {
   locked?: boolean;
   store?: string;
   location?: string;
+  size?: number;
+  sizeM2?: number;
 }
+
+export type HatchPatternType = 
+  | 'none' 
+  | 'diagonal-right' 
+  | 'diagonal-left' 
+  | 'cross' 
+  | 'dots' 
+  | 'horizontal' 
+  | 'vertical';
 
 export interface GroupRule {
   field: string;
@@ -35,6 +46,10 @@ export interface Group {
   name: string;
   color: string;
   opacity?: number;
+  hatchPattern?: HatchPatternType;
+  symbol?: string;
+  category?: string;
+  paintCategory?: string;
   rules?: GroupRule[];
 }
 
@@ -54,4 +69,5 @@ export interface MapVersion {
   location?: string;
   year?: string;
   mapUnits?: UnitShape[];
+  unitSizes?: Record<string, number>; // unitId or normalized unitName -> sizeM2
 }

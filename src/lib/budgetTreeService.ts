@@ -65,7 +65,7 @@ export function buildBudgetTree(projects: any[], costs: any[]): BudgetTreeResult
       if (costCode !== pCode) return false;
 
       const costYear = String(c.projectYear || (c as any).year || '').trim();
-      const pYear = String(p.year || (p.start ? String(p.start).substring(0, 4) : '')).trim();
+      const pYear = String(p.year || '').trim();
       const matchesYear = !costYear || !pYear || costYear === pYear;
       if (!matchesYear) return false;
 
@@ -81,11 +81,11 @@ export function buildBudgetTree(projects: any[], costs: any[]): BudgetTreeResult
     const computedForc = projectCosts.filter(c => c.costType === 'forc').reduce((sum, c) => sum + (Number(c.actual) || 0), 0);
     const computedSupportingFee = projectCosts.reduce((sum, c) => sum + (Number(c.supportingFee) || 0), 0);
 
-    const fin = p.financial || { totalApproved: p.budget || 0, totalActualPaid: p.actual || 0, totalForecastPaid: 0 };
+    const fin = p.financial || { totalApproved: p.budget || 0, totalActualPaid: 0, totalForecastPaid: 0 };
     const hasCosts = projectCosts.length > 0;
 
-    const finalActual = hasCosts ? computedActual : (fin.totalActualPaid || p.actual || 0);
-    const finalForc = hasCosts ? computedForc : (fin.totalForecastPaid || 0);
+    const finalActual = computedActual;
+    const finalForc = computedForc;
     const finalSupportingFee = hasCosts ? computedSupportingFee : (p.supportingFee || 0);
 
     const pData = {
@@ -241,7 +241,7 @@ export function filterBudgetRoots(roots: BudgetNode[], options: BudgetFilterOpti
   const cleanCode = (codeFilter || '').replace(/["']/g, '').trim().toLowerCase();
 
   return roots.filter(node => {
-    const pYear = node.year ? String(node.year) : (node.project?.start ? String(node.project.start).substring(0, 4) : null);
+    const pYear = node.year ? String(node.year) : null;
     const matchesYear = globalYearFilter === 'all' || pYear === globalYearFilter;
     const matchesStore = effectiveStore === 'all' || node.store === effectiveStore;
     const matchesLocation = globalLocationFilter.length === 0 || (node.location && globalLocationFilter.includes(node.location));

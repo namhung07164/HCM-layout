@@ -1,10 +1,12 @@
 import React, { forwardRef, memo, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { useLanguage } from '../../../lib/LanguageContext';
-import { AppUser, Task } from '../../../types';
-import { storage, googleSignIn, getAccessToken } from '../../../lib/firebase';
+import { AppUser, Task, Project } from '../../../types';
+import { storage } from '../../../lib/firebase';
 import { ref as storageRef, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { Paperclip, AtSign, Hash, Send, Loader2 } from 'lucide-react';
 import { recordMention, getMentionFrequencies } from '../../TaskModalParts/chat/chatSharedUtils';
+import { uploadPictureToTakaFolder } from '../../../lib/r2StorageUtils';
+import { syncUploadedImageToProjectAndUnit } from '../../../lib/projectImageSync';
 
 export interface ProjectChatInputHandle {
   insertTaskTag: (tagName: string) => void;
@@ -14,11 +16,12 @@ export interface ProjectChatInputProps {
   onSend: (text: string, mentions: string[]) => void;
   appUsers: AppUser[];
   projectTasks: Task[];
+  project?: Project;
 }
 
 export const ProjectChatInput = React.memo(
   React.forwardRef<ProjectChatInputHandle, ProjectChatInputProps>(function ProjectChatInput(
-    { onSend, appUsers, projectTasks },
+    { onSend, appUsers, projectTasks, project },
     ref
   ) {
     const { t } = useLanguage();
@@ -46,63 +49,42 @@ export const ProjectChatInput = React.memo(
 
       setIsUploading(true);
       try {
-        let accessToken = await getAccessToken();
-        if (!accessToken) {
-          const result = await googleSignIn();
-          if (result) accessToken = result.accessToken;
-        }
+        let uploadedUrl = '';
+        const isImage = file.type.startsWith('image/') || /\.(jpe?g|png|webp|gif|bmp|heic|heif|svg)$/i.test(file.name);
 
-        let downloadURL = '';
-        try {
-          const storageReference = storageRef(storage, `comments/${Date.now()}_${file.name}`);
-          const uploadTask = await uploadBytesResumable(storageReference, file);
-          downloadURL = await getDownloadURL(uploadTask.ref);
-        } catch (err) {
-          console.error('Firebase Storage upload failed:', err);
-        }
-
-        let driveUrl = '';
-        if (accessToken) {
-          try {
-            const res1 = await fetch('https://www.googleapis.com/drive/v3/files', {
-              method: 'POST',
-              headers: {
-                Authorization: `Bearer ${accessToken}`,
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({ name: file.name, mimeType: file.type }),
-            });
-            const data1 = await res1.json();
-            const fileId = data1.id;
-
-            await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
-              method: 'PATCH',
-              headers: {
-                Authorization: `Bearer ${accessToken}`,
-                'Content-Type': file.type,
-              },
-              body: file,
-            });
-
-            await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}/permissions`, {
-              method: 'POST',
-              headers: {
-                Authorization: `Bearer ${accessToken}`,
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({ role: 'reader', type: 'anyone' }),
-            });
-
-            driveUrl = `https://drive.google.com/file/d/${fileId}/view`;
-          } catch (err) {
-            console.error('Drive upload failed:', err);
+        if (isImage) {
+          // 1. Upload to Cloudflare R2 (same folder Taka-Pm-folder/ and WebP compression as Layout Tab)
+          const r2Res = await uploadPictureToTakaFolder(file, project?.code, project?.store);
+          if (r2Res.success && r2Res.publicUrl) {
+            uploadedUrl = r2Res.publicUrl;
+            // 2. Automatically sync to project.imageLinks and taka_unit_images so it appears in the Layout Tooltip gallery
+            await syncUploadedImageToProjectAndUnit(uploadedUrl, file.name, project);
+          } else {
+            console.warn('[ProjectChatInput] R2 upload failed, attempting fallback:', r2Res.error);
           }
         }
 
-        const finalUrl = [downloadURL, driveUrl].filter(Boolean).join(' ');
-        if (!finalUrl) throw new Error('Upload failed');
-        setCommentText((prev) => (prev ? `${prev} ${finalUrl} ` : `${finalUrl} `));
+        // 3. Fallback to Firebase Storage if not an image or if R2 was not configured
+        if (!uploadedUrl) {
+          try {
+            const storageReference = storageRef(storage, `comments/${Date.now()}_${file.name}`);
+            const uploadTask = await uploadBytesResumable(storageReference, file);
+            uploadedUrl = await getDownloadURL(uploadTask.ref);
+            if (isImage && uploadedUrl) {
+              await syncUploadedImageToProjectAndUnit(uploadedUrl, file.name, project);
+            }
+          } catch (err) {
+            console.error('Firebase Storage upload failed:', err);
+          }
+        }
+
+        if (!uploadedUrl) {
+          throw new Error('Upload failed');
+        }
+
+        setCommentText((prev) => (prev ? `${prev} ${uploadedUrl} ` : `${uploadedUrl} `));
         if (fileInputRef.current) fileInputRef.current.value = '';
+        setTimeout(() => inputRef.current?.focus(), 50);
       } catch (error) {
         console.error('Upload error', error);
       } finally {
@@ -160,15 +142,15 @@ export const ProjectChatInput = React.memo(
     const handleSend = () => {
       if (!commentText.trim()) return;
 
-      const lowerCommentText = commentText.toLowerCase();
+      const lowerCommentText = (commentText || '').toLowerCase();
       const activeMentions = Array.from(
         new Set([
           ...mentions.filter((userId) => {
-            const user = appUsers.find((u) => u.id === userId);
-            return user && lowerCommentText.includes(`@${user.username.toLowerCase()}`);
+            const user = (appUsers || []).find((u) => u && u.id === userId);
+            return user && typeof user.username === 'string' && lowerCommentText.includes(`@${user.username.toLowerCase()}`);
           }),
-          ...appUsers
-            .filter((u) => lowerCommentText.includes(`@${u.username.toLowerCase()}`))
+          ...(appUsers || [])
+            .filter((u) => u && typeof u.username === 'string' && lowerCommentText.includes(`@${u.username.toLowerCase()}`))
             .map((u) => u.id),
         ])
       );
@@ -182,18 +164,20 @@ export const ProjectChatInput = React.memo(
 
     const filteredUsers = useMemo(() => {
       const freqs = getMentionFrequencies();
-      return appUsers
-        .filter((u) => u.username.toLowerCase().includes(mentionQuery.toLowerCase()))
+      const q = (mentionQuery || '').toLowerCase();
+      return (appUsers || [])
+        .filter((u) => u && typeof u.username === 'string' && u.username.toLowerCase().includes(q))
         .sort((a, b) => {
           const freqA = freqs[a.id] || 0;
           const freqB = freqs[b.id] || 0;
           if (freqA !== freqB) return freqB - freqA;
-          return a.username.localeCompare(b.username);
+          return (a.username || '').localeCompare(b.username || '');
         });
     }, [appUsers, mentionQuery]);
 
     const filteredTasks = useMemo(() => {
-      return projectTasks.filter((t) => t.name?.toLowerCase().includes(taskQuery.toLowerCase()));
+      const q = (taskQuery || '').toLowerCase();
+      return (projectTasks || []).filter((t) => t && typeof t.name === 'string' && t.name.toLowerCase().includes(q));
     }, [projectTasks, taskQuery]);
 
     return (
@@ -208,9 +192,9 @@ export const ProjectChatInput = React.memo(
                 className="w-full text-left px-4 py-2 text-sm hover:bg-slate-50 dark:hover:bg-[#333336] dark:text-[#e3e3e3] transition-colors flex items-center gap-2"
               >
                 <div className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 flex items-center justify-center font-bold text-[10px]">
-                  {u.username.substring(0, 2).toUpperCase()}
+                  {(u.username || u.email || 'U').substring(0, 2).toUpperCase()}
                 </div>
-                {u.username}
+                {u.username || u.email || 'User'}
               </button>
             ))}
           </div>

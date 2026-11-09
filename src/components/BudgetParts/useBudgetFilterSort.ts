@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { matchesAdvancedSearch } from '../../lib/utils';
 import { BudgetTreeNode, BudgetSortConfig } from './budgetTypes';
+import { useAppStore } from '../../store/useAppStore';
 
 interface UseBudgetFilterSortParams {
   treeData: BudgetTreeNode[];
@@ -23,6 +24,7 @@ export function useBudgetFilterSort({
   searchTerm,
   deferredSearchTerm
 }: UseBudgetFilterSortParams) {
+  const fixedProjectCode = useAppStore(state => state.fixedProjectCode);
   const [sortConfig, setSortConfig] = useState<BudgetSortConfig | null>(null);
   const [visibleCount, setVisibleCount] = useState(30);
 
@@ -60,9 +62,9 @@ export function useBudgetFilterSort({
     return matchesAdvancedSearch(term, searchFields);
   };
 
-  // Auto-jump to matched project location(s) when searching (Debounced)
+  // Auto-jump to matched project location(s) when searching or fixing project code (Debounced)
   useEffect(() => {
-    const term = searchTerm.trim();
+    const term = searchTerm.trim() || (fixedProjectCode ? fixedProjectCode.trim() : '');
     if (!term) return;
     if (!treeData || treeData.length === 0) return;
 
@@ -70,7 +72,7 @@ export function useBudgetFilterSort({
       const matchedLocationsList: string[] = [];
 
       treeData.forEach((node: any) => {
-        const pYear = node.year ? String(node.year) : (node.start ? String(node.start).substring(0, 4) : null);
+        const pYear = node.year ? String(node.year) : null;
         if (globalYearFilter !== 'all' && pYear !== globalYearFilter) return;
         if (effectiveStore !== 'all' && node.store !== effectiveStore) return;
 
@@ -107,10 +109,26 @@ export function useBudgetFilterSort({
     }, 350);
 
     return () => clearTimeout(timer);
-  }, [searchTerm, treeData, globalYearFilter, effectiveStore, globalLocationFilter, setGlobalLocationFilter]);
+  }, [searchTerm, fixedProjectCode, treeData, globalYearFilter, effectiveStore, globalLocationFilter, setGlobalLocationFilter]);
 
   const filterNode = (node: any): boolean => {
-    const pYear = node.year ? String(node.year).trim() : (node.start ? String(node.start).substring(0, 4) : null);
+    const hasSearch = Boolean(deferredSearchTerm.trim());
+    const hasFixed = Boolean(fixedProjectCode && fixedProjectCode.trim());
+
+    if (hasFixed) {
+      const fix = fixedProjectCode.trim().toLowerCase();
+      const nodeCode = (node.code || '').trim().toLowerCase();
+      const nodeName = (node.name || '').trim().toLowerCase();
+      const matchesParentFix = nodeCode === fix || nodeCode.includes(fix) || nodeName.includes(fix) || String(node.id || '').toLowerCase() === fix;
+      const matchesChildFix = node.children && node.children.some((c: any) => {
+        const cCode = (c.code || '').trim().toLowerCase();
+        const cName = (c.name || '').trim().toLowerCase();
+        return cCode === fix || cCode.includes(fix) || cName.includes(fix) || String(c.id || '').toLowerCase() === fix;
+      });
+      if (!matchesParentFix && !matchesChildFix) return false;
+    }
+
+    const pYear = node.year ? String(node.year).trim() : null;
     const matchesYear = globalYearFilter === 'all' || (pYear !== null && pYear === String(globalYearFilter).trim());
     const matchesStore = effectiveStore === 'all' || (Boolean(node.store) && String(node.store).toUpperCase().trim() === effectiveStore.toUpperCase().trim());
     
@@ -119,7 +137,7 @@ export function useBudgetFilterSort({
       return false;
     }
 
-    const matchesLocation = globalLocationFilter.length === 0 || (node.location && globalLocationFilter.includes(node.location));
+    const matchesLocation = globalLocationFilter.length === 0 || (node.location && globalLocationFilter.includes(node.location)) || hasSearch || hasFixed;
     
     const hasBudget = (node.totalBudget || 0) !== 0;
     const hasActForc = (node.totalActual || 0) !== 0;
@@ -129,15 +147,21 @@ export function useBudgetFilterSort({
     else if (moneyFilter === 'has_act_forc') matchesMoney = hasActForc;
     
     const baseParentMatch = matchesLocation && matchesMoney;
-    const parentMatchesSearch = !deferredSearchTerm || isParentMatchSearch(node, deferredSearchTerm);
+    const parentMatchesFix = !hasFixed || (
+      (node.code || '').trim().toLowerCase() === fixedProjectCode.trim().toLowerCase() ||
+      (node.code || '').trim().toLowerCase().includes(fixedProjectCode.trim().toLowerCase()) ||
+      (node.name || '').trim().toLowerCase().includes(fixedProjectCode.trim().toLowerCase()) ||
+      String(node.id || '').toLowerCase() === fixedProjectCode.trim().toLowerCase()
+    );
+    const parentMatchesSearch = (!hasSearch || isParentMatchSearch(node, deferredSearchTerm)) && parentMatchesFix;
 
     if (node.children && node.children.length > 0) {
       const validChildren = node.children.filter((child: any) => {
-        const cYear = child.year ? String(child.year).trim() : (child.start ? String(child.start).substring(0, 4) : pYear);
+        const cYear = child.year ? String(child.year).trim() : pYear;
         const cMatchesYear = globalYearFilter === 'all' || !cYear || cYear === String(globalYearFilter).trim();
         const cStore = child.store ? String(child.store).toUpperCase().trim() : (node.store ? String(node.store).toUpperCase().trim() : '');
         const cMatchesStore = effectiveStore === 'all' || !cStore || cStore === effectiveStore.toUpperCase().trim();
-        const cMatchesLocation = globalLocationFilter.length === 0 || (!child.location) || globalLocationFilter.includes(child.location);
+        const cMatchesLocation = globalLocationFilter.length === 0 || (!child.location) || globalLocationFilter.includes(child.location) || hasSearch || hasFixed;
         
         const cHasBudget = (child.budget || 0) !== 0;
         const cHasActForc = (child.totalActual || 0) !== 0;
@@ -151,14 +175,21 @@ export function useBudgetFilterSort({
 
       const hasMultiChildren = node.children.length >= 2;
 
-      if (!deferredSearchTerm.trim()) {
+      if (!hasSearch && !hasFixed) {
         node.filteredChildren = validChildren.map((c: any) => ({ ...c, isSearchMatch: false }));
         return baseParentMatch || validChildren.length > 0;
       }
 
       const matchingChildIds = new Set<string>();
       validChildren.forEach((child: any) => {
-        if (isChildMatchSearch(child, deferredSearchTerm)) {
+        const matchesSearch = hasSearch ? isChildMatchSearch(child, deferredSearchTerm) : true;
+        const matchesFix = hasFixed ? (
+          (child.code || '').trim().toLowerCase() === fixedProjectCode.trim().toLowerCase() ||
+          (child.code || '').trim().toLowerCase().includes(fixedProjectCode.trim().toLowerCase()) ||
+          (child.name || '').trim().toLowerCase().includes(fixedProjectCode.trim().toLowerCase()) ||
+          String(child.id || '').toLowerCase() === fixedProjectCode.trim().toLowerCase()
+        ) : true;
+        if (matchesSearch && matchesFix) {
           matchingChildIds.add(child.id);
         }
       });
@@ -167,7 +198,7 @@ export function useBudgetFilterSort({
 
       if (hasMultiChildren) {
         if (anyChildMatchesSearch || (baseParentMatch && parentMatchesSearch)) {
-          const shouldFilterChildren = !parentMatchesSearch && anyChildMatchesSearch;
+          const shouldFilterChildren = (!parentMatchesSearch && anyChildMatchesSearch) || (hasFixed && !parentMatchesFix);
           node.filteredChildren = validChildren
             .filter((child: any) => shouldFilterChildren ? matchingChildIds.has(child.id) : true)
             .map((child: any) => ({
@@ -213,7 +244,7 @@ export function useBudgetFilterSort({
       roots = [...roots].sort(sortFn);
     }
     return roots;
-  }, [treeData, globalYearFilter, effectiveStore, globalLocationFilter, moneyFilter, deferredSearchTerm, sortConfig]);
+  }, [treeData, fixedProjectCode, globalYearFilter, effectiveStore, globalLocationFilter, moneyFilter, deferredSearchTerm, sortConfig]);
 
   const handleBudgetScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     const target = e.currentTarget;

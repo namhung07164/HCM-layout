@@ -1,7 +1,19 @@
 import { collection, onSnapshot, orderBy, query, where, Timestamp } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth, db, APP_ID } from './firebase';
-import { applyIncomingDeltas, filterUnappliedDeltas, getLastDeltaSyncTime, deltaTime, pullAndApplyDeltas } from './deltaSyncService';
+import {
+  applyIncomingDeltas,
+  filterUnappliedDeltas,
+  getLastDeltaSyncTime,
+  deltaTime,
+  serverDeltaTime,
+  LAST_SYNC_KEY,
+} from './deltaSyncService';
+import { waitForInFlightDeltaPull } from './deltaPullService';
+import { waitForNetworkRecovery } from './syncResilience';
+import { bootstrapLocalStore } from './backgroundSyncWorker';
+import { safeSetItemLocal } from './storage';
+import { CLIENT_SESSION_ID } from './deltaConstants';
 import type { TakaDelta } from '../types';
 
 /**
@@ -11,12 +23,19 @@ import type { TakaDelta } from '../types';
  *  - idle cost = 0 reads (previously >= 1 read per poll, ~1100+/user/day)
  *  - changes arrive in ~1s instead of 25s - 3 min
  *  - billed once per delta doc; cached deltas (persistent cache) are free
- * The listener is detached when the tab has been hidden > 2 min and re-attached (since = lastSyncTime) on return.
+ * The listener is detached when the tab has been hidden > 15 min and re-attached (since = lastSyncTime) on return.
  */
 
-const OVERLAP_MS = 10 * 1000; // serverTime overlap window, duplicates filtered by delta id
-const DETACH_AFTER_HIDDEN_MS = 2 * 60 * 1000;
+const OVERLAP_MS = 90 * 1000; // 90s clock-skew & boot buffer (duplicates filtered in O(1) by delta id)
+const DETACH_AFTER_HIDDEN_MS = 15 * 60 * 1000; // Keep listener alive for up to 15 min when tab hidden (matches pool TTL)
 const RETRY_MS = 30 * 1000;
+const RECONNECT_COOLDOWN_MS = 2000;
+
+let activeRealtimeUnsub: (() => void) | null = null;
+
+export function isDeltaRealtimeConnected(): boolean {
+  return activeRealtimeUnsub !== null;
+}
 
 export function startDeltaRealtimeListener(): () => void {
   if (typeof window === 'undefined') return () => {};
@@ -26,13 +45,21 @@ export function startDeltaRealtimeListener(): () => void {
   let flushTimer: ReturnType<typeof setTimeout> | null = null;
   let detachTimer: ReturnType<typeof setTimeout> | null = null;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let lastReconnectAt = 0;
   let signedIn = !!auth.currentUser;
   let stopped = false;
 
-  const flush = () => {
+  const flush = async () => {
     flushTimer = null;
-    const batch = filterUnappliedDeltas(buffer);
+    if (buffer.length === 0) return;
+    const rawBatch = buffer;
     buffer = [];
+    try {
+      // Ensure Dexie Local-First store hydration has completed on boot before applying incoming deltas
+      await bootstrapLocalStore();
+    } catch {}
+    const batch = filterUnappliedDeltas(rawBatch);
     if (batch.length === 0) return;
     batch.sort((a, b) => deltaTime(a) - deltaTime(b));
     try {
@@ -47,11 +74,13 @@ export function startDeltaRealtimeListener(): () => void {
       try { unsub(); } catch {}
       unsub = null;
     }
+    activeRealtimeUnsub = null;
   };
 
   const attach = () => {
     if (stopped || unsub || !signedIn) return;
-    const since = getLastDeltaSyncTime() - OVERLAP_MS;
+    lastReconnectAt = Date.now();
+    const since = Math.max(0, getLastDeltaSyncTime() - OVERLAP_MS);
     const q = query(
       collection(db, 'artifacts', APP_ID, 'public', 'data', 'taka_deltas'),
       where('serverTime', '>', Timestamp.fromMillis(since)),
@@ -60,13 +89,24 @@ export function startDeltaRealtimeListener(): () => void {
     unsub = onSnapshot(
       q,
       (snap) => {
+        let maxSeenServerMs = 0;
         snap.docChanges().forEach((c) => {
           if (c.type === 'added' || c.type === 'modified') {
-            const raw = c.doc.data({ serverTimestamps: 'estimate' }) as TakaDelta;
+            const raw = c.doc.data() as TakaDelta;
+            if (c.doc.metadata.hasPendingWrites && raw?.sessionId === CLIENT_SESSION_ID) {
+              return;
+            }
+            const srvMs = !c.doc.metadata.hasPendingWrites ? serverDeltaTime(raw) : 0;
+            if (srvMs > maxSeenServerMs) maxSeenServerMs = srvMs;
             buffer.push({ ...raw, id: raw.id || c.doc.id });
           }
         });
-        if (buffer.length > 0 && !flushTimer) flushTimer = setTimeout(flush, 20);
+        if (!snap.metadata.fromCache && maxSeenServerMs > 0) {
+          // Rule 16.5: Advance sync cursor strictly using Firestore serverTime (never client Date.now())
+          const nextCursor = Math.max(getLastDeltaSyncTime(), maxSeenServerMs);
+          safeSetItemLocal(LAST_SYNC_KEY, String(nextCursor));
+        }
+        if (buffer.length > 0 && !flushTimer) flushTimer = setTimeout(flush, 8);
       },
       (err) => {
         console.warn('[deltaRealtime] listener error, retrying:', err);
@@ -79,6 +119,22 @@ export function startDeltaRealtimeListener(): () => void {
         }
       }
     );
+    activeRealtimeUnsub = unsub;
+  };
+
+  const scheduleReconnect = () => {
+    if (stopped) return;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(async () => {
+      reconnectTimer = null;
+      if (stopped || document.visibilityState !== 'visible') return;
+      if (unsub && Date.now() - lastReconnectAt < RECONNECT_COOLDOWN_MS) return;
+      await waitForNetworkRecovery();
+      await waitForInFlightDeltaPull();
+      if (stopped || document.visibilityState !== 'visible') return;
+      detach();
+      attach();
+    }, 50);
   };
 
   if (signedIn) attach();
@@ -91,44 +147,44 @@ export function startDeltaRealtimeListener(): () => void {
       detachTimer = setTimeout(detach, DETACH_AFTER_HIDDEN_MS);
     } else {
       if (detachTimer) { clearTimeout(detachTimer); detachTimer = null; }
-      const hiddenFor = hiddenAt ? Date.now() - hiddenAt : Infinity;
+      const hiddenMs = hiddenAt > 0 ? Date.now() - hiddenAt : 0;
       hiddenAt = 0;
-      // Ẩn ngắn (dưới 15 giây, ví dụ chuyển tab): kết nối vẫn sống và listener vẫn nhận delta realtime,
-      // không cần tạo lại listener hay kéo delta (tránh đọc lại cửa sổ 3 phút).
-      if (unsub && hiddenFor < 15000) return;
-      // Ẩn lâu: ép tạo lại socket để phục hồi kết nối WebChannel bị iOS/Safari treo
-      detach();
-      attach();
-      pullAndApplyDeltas(undefined, true).catch(() => {});
+      // On iOS Safari / PWA, backgrounding >= 60s can freeze WebChannel sockets without firing onError.
+      // Re-attaching with since = lastSyncTime - OVERLAP_MS only reads new deltas (0 extra reads if none).
+      if (unsub && hiddenMs < 60000) return;
+      scheduleReconnect();
     }
   };
 
   const onNetworkRecovered = () => {
-    if (document.visibilityState === 'visible') {
-      detach();
-      attach();
-      pullAndApplyDeltas(undefined, true).catch(() => {});
-    }
+    scheduleReconnect();
   };
 
-  const handlePageShow = (e: PageTransitionEvent) => {
-    if (e.persisted) {
-      detach();
-      attach();
-      pullAndApplyDeltas(undefined, true).catch(() => {});
-    }
+  const onSleepWake = () => {
+    scheduleReconnect();
+  };
+
+  const handlePageShow = () => {
+    scheduleReconnect();
   };
 
   const handleOnline = () => {
-    detach();
-    attach();
-    pullAndApplyDeltas(undefined, true).catch(() => {});
+    scheduleReconnect();
+  };
+
+  let blurredAt = 0;
+  const handleBlur = () => {
+    blurredAt = Date.now();
   };
 
   const handleFocus = () => {
-    // Listener còn sống thì đã nhận delta realtime (Firestore SDK tự nối lại và bù delta bị lỡ)
-    if (unsub) return;
-    pullAndApplyDeltas(undefined, true).catch(() => {});
+    const blurMs = blurredAt > 0 ? Date.now() - blurredAt : 0;
+    blurredAt = 0;
+    if (!unsub) {
+      attach();
+    } else if (blurMs >= 60000) {
+      scheduleReconnect();
+    }
   };
 
   const unsubAuth = onAuthStateChanged(auth, (user) => {
@@ -139,8 +195,10 @@ export function startDeltaRealtimeListener(): () => void {
 
   document.addEventListener('visibilitychange', onVisibility);
   window.addEventListener('taka_network_recovered', onNetworkRecovered);
+  window.addEventListener('taka_sleep_wake_recovery', onSleepWake);
   window.addEventListener('pageshow', handlePageShow as any);
   window.addEventListener('online', handleOnline);
+  window.addEventListener('blur', handleBlur);
   window.addEventListener('focus', handleFocus);
 
   return () => {
@@ -148,12 +206,15 @@ export function startDeltaRealtimeListener(): () => void {
     unsubAuth();
     document.removeEventListener('visibilitychange', onVisibility);
     window.removeEventListener('taka_network_recovered', onNetworkRecovered);
+    window.removeEventListener('taka_sleep_wake_recovery', onSleepWake);
     window.removeEventListener('pageshow', handlePageShow as any);
     window.removeEventListener('online', handleOnline);
+    window.removeEventListener('blur', handleBlur);
     window.removeEventListener('focus', handleFocus);
     if (flushTimer) clearTimeout(flushTimer);
     if (detachTimer) clearTimeout(detachTimer);
     if (retryTimer) clearTimeout(retryTimer);
+    if (reconnectTimer) clearTimeout(reconnectTimer);
     detach();
   };
 }

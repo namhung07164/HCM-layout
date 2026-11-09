@@ -1,0 +1,478 @@
+import { useDataStore } from '../components/PictureMapping/DataContext';
+import { MapVersion, UnitShape } from '../components/PictureMapping/components/DataMapping/types';
+import { extractAllProjectCodes, projectMatchesUnitCode } from './utilsParts/projectCodeAndScopeUtils';
+import { useAppStore } from '../store/useAppStore';
+import {
+  ensureMappingConfigHydrated,
+  normalizeFloorCode,
+  extractPrimaryProjectCodes,
+  isProjectGroupedWithOthers,
+  isSecondaryGroupedUnitForProject,
+  _cachedLocalBackup,
+} from './unitCodeMatcher';
+
+export {
+  ensureMappingConfigHydrated,
+  normalizeFloorCode,
+  extractPrimaryProjectCodes,
+  isProjectGroupedWithOthers,
+  isSecondaryGroupedUnitForProject,
+};
+
+
+/**
+ * Resolves the effective Size (m²) of a single unit shape, respecting version-specific unitSizes first,
+ * then unit.sizeM2 / unit.size, then fallback master Excel size, and finally any non-grouped primary Project's sizeM2.
+ */
+export function getUnitEffectiveSizeM2(
+  unit?: Partial<UnitShape> | null,
+  version?: Partial<MapVersion> | null,
+  fallbackSize?: number | string | null,
+  skipProjectFallback = false
+): number {
+  if (!unit) {
+    const fb = Number(String(fallbackSize ?? '').replace(/,/g, '.'));
+    return !isNaN(fb) && fb > 0 ? fb : 0;
+  }
+
+  if (version?.unitSizes) {
+    if (unit.id && typeof version.unitSizes[unit.id] === 'number' && !isNaN(version.unitSizes[unit.id]) && version.unitSizes[unit.id] >= 0) {
+      return version.unitSizes[unit.id];
+    }
+    const uNameKey = String(unit.name || '').trim().toUpperCase();
+    if (uNameKey && typeof version.unitSizes[uNameKey] === 'number' && !isNaN(version.unitSizes[uNameKey]) && version.unitSizes[uNameKey] >= 0) {
+      return version.unitSizes[uNameKey];
+    }
+  }
+
+  if (typeof unit.sizeM2 === 'number' && !isNaN(unit.sizeM2) && unit.sizeM2 >= 0) {
+    return unit.sizeM2;
+  }
+  if (typeof unit.size === 'number' && !isNaN(unit.size) && unit.size >= 0) {
+    return unit.size;
+  }
+  const rawUnitSize = (unit as any).sizeM2 ?? (unit as any).size;
+  if (rawUnitSize !== undefined && rawUnitSize !== null && String(rawUnitSize).trim() !== '') {
+    const parsedUnitSize = Number(String(rawUnitSize).replace(/,/g, '.'));
+    if (!isNaN(parsedUnitSize) && parsedUnitSize >= 0) {
+      return parsedUnitSize;
+    }
+  }
+
+  const fb = Number(String(fallbackSize ?? '').replace(/,/g, '.'));
+  if (!isNaN(fb) && fb > 0) {
+    return fb;
+  }
+
+  const uName = String(unit.name || unit.id || '').trim();
+  if (uName) {
+    const uNameLower = uName.toLowerCase();
+    const unitInfoList = useDataStore.getState().unitInfo || [];
+    for (let i = 0; i < unitInfoList.length; i++) {
+      const ui = unitInfoList[i];
+      if (String(ui?.unit || '').trim().toLowerCase() === uNameLower) {
+        const uiSize = Number(String(ui?.size ?? '').replace(/,/g, '.'));
+        if (!isNaN(uiSize) && uiSize > 0) {
+          return uiSize;
+        }
+        break;
+      }
+    }
+
+    if (!skipProjectFallback) {
+      const targetStore = String(unit.store || version?.store || useDataStore.getState().store || 'HCM').toUpperCase().trim();
+      const targetLoc = normalizeFloorCode(unit.location || version?.location || useDataStore.getState().location);
+      const targetYear = String(version?.year || '').trim();
+
+      const projects = useAppStore.getState().projects || [];
+      for (let i = 0; i < projects.length; i++) {
+        const p = projects[i];
+        if (!p || p.isDeleted || !p.sizeM2 || p.sizeM2 <= 0) continue;
+        const pStore = String(p.store || 'HCM').toUpperCase().trim();
+        if (pStore !== targetStore) continue;
+        if (targetYear && targetYear !== 'all' && p.year && String(p.year).trim() !== targetYear) continue;
+        const pLoc = normalizeFloorCode(p.location);
+        const isStorewide = !pLoc || pLoc === 'ALL' || pLoc === 'STORE' || pLoc === 'STOREWIDE' || pLoc === 'WHOLE STORE' || pLoc === 'ALL FLOORS';
+        if (!isStorewide && targetLoc && pLoc !== targetLoc) continue;
+
+        // Rule: Grouped secondary projects/units NEVER inherit the master project's sizeM2.
+        // Only a unit that directly matches the project's primary code (when not a secondary grouped unit) can fallback.
+        const primaryCodes = extractPrimaryProjectCodes(p);
+        if (primaryCodes.length === 0) continue;
+        const isPrimaryExact = primaryCodes.some((c) => c.toLowerCase() === uNameLower);
+        if (isPrimaryExact || projectMatchesUnitCode(primaryCodes, uName)) {
+          return Math.round(p.sizeM2 * 100) / 100;
+        }
+      }
+    }
+  }
+
+  return 0;
+}
+
+export interface MatchedUnitSizeResult {
+  sizeM2: number | undefined;
+  matchedUnitNames: string[];
+  versionName?: string;
+  versionYear?: string;
+}
+
+const _unitsArraySigCache = new WeakMap<object, string>();
+const _versionsArraySigCache = new WeakMap<object, string>();
+const _storeLocSigCache = new WeakMap<object, string>();
+
+function getUnitsSizeSig(units?: UnitShape[] | null): string {
+  if (!Array.isArray(units) || units.length === 0) return '';
+  const cached = _unitsArraySigCache.get(units);
+  if (cached !== undefined) return cached;
+  let s = '';
+  for (let i = 0; i < units.length; i++) {
+    const u = units[i];
+    if (!u) continue;
+    const sz = u.sizeM2 ?? u.size ?? '';
+    s += `${u.id || ''}:${u.name || ''}:${sz};`;
+  }
+  _unitsArraySigCache.set(units, s);
+  return s;
+}
+
+function getVersionsSizeSig(versions?: MapVersion[] | null): string {
+  if (!Array.isArray(versions) || versions.length === 0) return '';
+  const cached = _versionsArraySigCache.get(versions);
+  if (cached !== undefined) return cached;
+  let s = '';
+  for (let i = 0; i < versions.length; i++) {
+    const v = versions[i];
+    if (!v) continue;
+    let usStr = '';
+    if (v.unitSizes) {
+      const keys = Object.keys(v.unitSizes).sort();
+      for (let j = 0; j < keys.length; j++) {
+        const k = keys[j];
+        usStr += `${k}=${v.unitSizes[k]},`;
+      }
+    }
+    const vUnitsStr = getUnitsSizeSig(v.mapUnits);
+    s += `${v.id || ''}:${v.year || ''}:${v.name || ''}:[${usStr}]:[${vUnitsStr}];`;
+  }
+  _versionsArraySigCache.set(versions, s);
+  return s;
+}
+
+export function selectUnitSizeSignature(state: {
+  store?: string;
+  location?: string;
+  activeMapVersionId?: string | null;
+  mapUnits?: UnitShape[];
+  mapVersions?: MapVersion[];
+  storeLocationData?: Record<string, any>;
+}): string {
+  let locDataSig = '';
+  const sld = state.storeLocationData;
+  if (sld && typeof sld === 'object') {
+    const cached = _storeLocSigCache.get(sld);
+    if (cached !== undefined) {
+      locDataSig = cached;
+    } else {
+      const keys = Object.keys(sld).sort();
+      for (let i = 0; i < keys.length; i++) {
+        const k = keys[i];
+        const part = sld[k];
+        if (!part) continue;
+        locDataSig += `${k}{${part.activeMapVersionId || ''}|${getUnitsSizeSig(part.mapUnits)}|${getVersionsSizeSig(part.mapVersions)}}`;
+      }
+      _storeLocSigCache.set(sld, locDataSig);
+    }
+  }
+  return `${state.store || ''}|${state.location || ''}|${state.activeMapVersionId || ''}|${getUnitsSizeSig(state.mapUnits)}|${getVersionsSizeSig(state.mapVersions)}|${locDataSig}`;
+}
+
+interface ResolverCachedIndex {
+  unitSizeSig: string;
+  unitInfoRef: any;
+  projectLinkRef: any;
+  localBackupRef: any;
+  allPartitions: Record<string, { mapUnits: UnitShape[]; mapVersions: MapVersion[]; activeMapVersionId: string | null }>;
+  partitionKeysByStore: { HCM: Array<{ key: string; loc: string }>; HN: Array<{ key: string; loc: string }> };
+  masterSizeByUnit: Map<string, number>;
+  projectLinkEntries: Array<{ unitLower: string; plCode: string }>;
+  combinedUnitsCache: Map<string, Map<string, UnitShape>>;
+  resultCache: Map<string, MatchedUnitSizeResult>;
+}
+
+let _resolverIndex: ResolverCachedIndex | null = null;
+
+function getOrBuildResolverIndex(state: ReturnType<typeof useDataStore.getState>): ResolverCachedIndex {
+  const currentSig = selectUnitSizeSignature(state);
+  if (
+    _resolverIndex &&
+    _resolverIndex.unitSizeSig === currentSig &&
+    _resolverIndex.unitInfoRef === state.unitInfo &&
+    _resolverIndex.projectLinkRef === state.projectLink &&
+    _resolverIndex.localBackupRef === _cachedLocalBackup
+  ) {
+    return _resolverIndex;
+  }
+
+  const activeKey = `${state.store}_${normalizeFloorCode(state.location)}`;
+  const basePartitions =
+    state.storeLocationData && Object.keys(state.storeLocationData).length > 0
+      ? state.storeLocationData
+      : (_cachedLocalBackup || {});
+  const allPartitions: Record<string, { mapUnits: UnitShape[]; mapVersions: MapVersion[]; activeMapVersionId: string | null }> = {
+    ...basePartitions,
+  };
+  if ((state.mapUnits && state.mapUnits.length > 0) || (state.mapVersions && state.mapVersions.length > 0)) {
+    const existing = allPartitions[activeKey];
+    allPartitions[activeKey] = {
+      mapUnits: state.mapUnits.length > 0 ? state.mapUnits : (existing?.mapUnits || []),
+      mapVersions: state.mapVersions.length > 0 ? state.mapVersions : (existing?.mapVersions || []),
+      activeMapVersionId: state.activeMapVersionId || existing?.activeMapVersionId || null,
+    };
+  }
+
+  const partitionKeysByStore: { HCM: Array<{ key: string; loc: string }>; HN: Array<{ key: string; loc: string }> } = {
+    HCM: [],
+    HN: [],
+  };
+  for (const k of Object.keys(allPartitions)) {
+    const loc = normalizeFloorCode(k.split('_')[1]);
+    if (k.startsWith('HCM_')) {
+      partitionKeysByStore.HCM.push({ key: k, loc });
+    } else if (k.startsWith('HN_')) {
+      partitionKeysByStore.HN.push({ key: k, loc });
+    }
+  }
+
+  const masterSizeByUnit = new Map<string, number>();
+  (state.unitInfo || []).forEach((ui: any) => {
+    const uKey = String(ui?.unit || '').trim().toLowerCase();
+    const sz = Number(String(ui?.size ?? '').replace(/,/g, ''));
+    if (uKey && !isNaN(sz) && sz > 0) {
+      masterSizeByUnit.set(uKey, sz);
+    }
+  });
+
+  const projectLinkEntries: Array<{ unitLower: string; plCode: string }> = [];
+  (state.projectLink || []).forEach((pl: any) => {
+    const u = String(pl?.unit || '').trim().toLowerCase();
+    const plCode = String(pl?.code || pl?.projectCode || pl?.project || '').trim().toLowerCase();
+    if (u && plCode) {
+      projectLinkEntries.push({ unitLower: u, plCode });
+    }
+  });
+
+  _resolverIndex = {
+    unitSizeSig: currentSig,
+    unitInfoRef: state.unitInfo,
+    projectLinkRef: state.projectLink,
+    localBackupRef: _cachedLocalBackup,
+    allPartitions,
+    partitionKeysByStore,
+    masterSizeByUnit,
+    projectLinkEntries,
+    combinedUnitsCache: new Map(),
+    resultCache: new Map(),
+  };
+
+  return _resolverIndex;
+}
+
+const EMPTY_MATCH_RESULT: MatchedUnitSizeResult = { sizeM2: undefined, matchedUnitNames: [] };
+
+/**
+ * Finds the matching version for a Project's (store, location, year) and calculates
+ * the total Size (m²) from the unit(s) mapped/matched to the project in that version.
+ */
+export function resolveMatchedUnitSizeM2(projectOrInput: {
+  code?: string;
+  linkCodes?: string;
+  store?: string;
+  location?: string;
+  year?: string | number;
+}): MatchedUnitSizeResult {
+  ensureMappingConfigHydrated();
+
+  const pCodes = isProjectGroupedWithOthers(projectOrInput)
+    ? extractPrimaryProjectCodes(projectOrInput)
+    : extractAllProjectCodes(projectOrInput);
+  if (pCodes.length === 0) {
+    return EMPTY_MATCH_RESULT;
+  }
+
+  const state = useDataStore.getState();
+  const idx = getOrBuildResolverIndex(state);
+
+  const targetStore = (String(projectOrInput.store || state.store || 'HCM').toUpperCase().trim() === 'HN' ? 'HN' : 'HCM') as 'HCM' | 'HN';
+  const targetLoc = normalizeFloorCode(projectOrInput.location);
+  const targetYear = String(projectOrInput.year || '').trim();
+
+  const cacheKey = `${targetStore}|${targetLoc}|${targetYear}|${pCodes.join(',')}`;
+  const cachedResult = idx.resultCache.get(cacheKey);
+  if (cachedResult !== undefined) {
+    return cachedResult;
+  }
+
+  const linkedUnitNames = new Set<string>();
+  if (idx.projectLinkEntries.length > 0) {
+    for (let i = 0; i < idx.projectLinkEntries.length; i++) {
+      const { unitLower, plCode } = idx.projectLinkEntries[i];
+      if (pCodes.some(pc => pc === plCode || projectMatchesUnitCode([pc], plCode))) {
+        linkedUnitNames.add(unitLower);
+      }
+    }
+  }
+
+  const isStorewideLoc =
+    !targetLoc ||
+    targetLoc === 'ALL' ||
+    targetLoc === 'STORE' ||
+    targetLoc === 'STOREWIDE' ||
+    targetLoc === 'WHOLE STORE' ||
+    targetLoc === 'ALL FLOORS';
+
+  const storePartitions = idx.partitionKeysByStore[targetStore];
+  const candidatePartitionKeys: string[] = [];
+  for (let i = 0; i < storePartitions.length; i++) {
+    const entry = storePartitions[i];
+    if (isStorewideLoc || entry.loc === targetLoc) {
+      candidatePartitionKeys.push(entry.key);
+    }
+  }
+
+  const { allPartitions, masterSizeByUnit, combinedUnitsCache } = idx;
+  const matchedSizeByUnitKey = new Map<string, { name: string; sizeM2: number; versionName?: string; versionYear?: string }>();
+
+  for (const pKey of candidatePartitionKeys) {
+    const part = allPartitions[pKey];
+    if (!part) continue;
+
+    const versions = Array.isArray(part.mapVersions) ? part.mapVersions : [];
+    let matchedVersion: MapVersion | undefined;
+
+    if (versions.length > 0) {
+      const yearMatched = targetYear
+        ? versions.filter((v) => String(v.year || '').trim() === targetYear)
+        : versions;
+
+      const pool = yearMatched.length > 0 ? yearMatched : versions;
+
+      if (state.activeMapVersionId && pool.some((v) => v.id === state.activeMapVersionId)) {
+        matchedVersion = pool.find((v) => v.id === state.activeMapVersionId);
+      } else if (part.activeMapVersionId && pool.some((v) => v.id === part.activeMapVersionId)) {
+        matchedVersion = pool.find((v) => v.id === part.activeMapVersionId);
+      } else {
+        matchedVersion =
+          pool.find((v) => v.isDynamicActive !== false && Array.isArray(v.groups) && v.groups.length > 0) ||
+          pool[0];
+      }
+    }
+
+    const combinedCacheKey = `${pKey}__${matchedVersion?.id || 'base'}`;
+    let combinedUnitsMap = combinedUnitsCache.get(combinedCacheKey);
+    if (!combinedUnitsMap) {
+      combinedUnitsMap = new Map<string, UnitShape>();
+      const partitionUnits = Array.isArray(part.mapUnits) ? part.mapUnits : [];
+      const versionUnits = Array.isArray(matchedVersion?.mapUnits) ? matchedVersion!.mapUnits! : [];
+
+      for (let i = 0; i < partitionUnits.length; i++) {
+        const u = partitionUnits[i];
+        if (u && (u.name || u.id)) {
+          combinedUnitsMap.set(String(u.name || u.id).trim().toLowerCase(), u);
+        }
+      }
+      for (let i = 0; i < versionUnits.length; i++) {
+        const u = versionUnits[i];
+        if (u && (u.name || u.id)) {
+          const key = String(u.name || u.id).trim().toLowerCase();
+          const prev = combinedUnitsMap.get(key);
+          combinedUnitsMap.set(
+            key,
+            prev
+              ? {
+                  ...prev,
+                  ...u,
+                  sizeM2: u.sizeM2 ?? prev.sizeM2,
+                  size: u.size ?? prev.size,
+                }
+              : u
+          );
+        }
+      }
+      combinedUnitsCache.set(combinedCacheKey, combinedUnitsMap);
+    }
+
+    combinedUnitsMap.forEach((u) => {
+      const uName = String(u.name || '').trim();
+      const uId = String(u.id || '').trim();
+      const uNameLower = uName.toLowerCase();
+      const uIdLower = uId.toLowerCase();
+      if (!uNameLower && !uIdLower) return;
+
+      const isExact = pCodes.some((c) => c === uNameLower || (uIdLower && c === uIdLower));
+      const isLinked = linkedUnitNames.has(uNameLower) || (uIdLower ? linkedUnitNames.has(uIdLower) : false);
+      const isCodeMatch = isExact || isLinked || projectMatchesUnitCode(pCodes, uName || uId);
+
+      if (isCodeMatch) {
+        const fallbackMasterSize = masterSizeByUnit.get(uNameLower);
+        const effSize = getUnitEffectiveSizeM2(u, matchedVersion, fallbackMasterSize, true);
+        if (effSize > 0) {
+          const dedupKey = uNameLower || uIdLower;
+          matchedSizeByUnitKey.set(dedupKey, {
+            name: uName || uId,
+            sizeM2: effSize,
+            versionName: matchedVersion?.name,
+            versionYear: matchedVersion?.year,
+          });
+        }
+      }
+    });
+  }
+
+  // Fallback: if no partition canvas unit had a match, check masterSizeByUnit for exact code matches
+  if (matchedSizeByUnitKey.size === 0 && masterSizeByUnit.size > 0) {
+    for (let i = 0; i < pCodes.length; i++) {
+      const cl = pCodes[i].toLowerCase().trim();
+      const sz = masterSizeByUnit.get(cl);
+      if (sz && sz > 0) {
+        matchedSizeByUnitKey.set(cl, { name: pCodes[i], sizeM2: sz });
+      }
+    }
+  }
+
+  if (matchedSizeByUnitKey.size === 0) {
+    if (idx.resultCache.size < 4000) {
+      idx.resultCache.set(cacheKey, EMPTY_MATCH_RESULT);
+    }
+    return EMPTY_MATCH_RESULT;
+  }
+
+  let totalSize = 0;
+  const matchedUnitNames: string[] = [];
+  let firstVerName: string | undefined;
+  let firstVerYear: string | undefined;
+
+  matchedSizeByUnitKey.forEach((val) => {
+    totalSize += val.sizeM2;
+    matchedUnitNames.push(val.name);
+    if (!firstVerName && val.versionName) firstVerName = val.versionName;
+    if (!firstVerYear && val.versionYear) firstVerYear = val.versionYear;
+  });
+
+  const roundedTotal = Math.round(totalSize * 100) / 100;
+  const finalResult: MatchedUnitSizeResult = {
+    sizeM2: roundedTotal > 0 ? roundedTotal : undefined,
+    matchedUnitNames,
+    versionName: firstVerName,
+    versionYear: firstVerYear,
+  };
+
+  if (idx.resultCache.size >= 4000) {
+    idx.resultCache.clear();
+  }
+  idx.resultCache.set(cacheKey, finalResult);
+  return finalResult;
+}
+
+export { syncProjectSizeToUnits, syncUnitSizeToMatchedProjects } from './unitProjectSizeSyncService';
+export type { ProjectSizeSyncInput, UnitSizeSyncInput } from './unitProjectSizeSyncService';

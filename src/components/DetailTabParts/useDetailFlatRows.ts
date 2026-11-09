@@ -1,11 +1,12 @@
 import React, { useMemo } from 'react';
-import { Project, DelegationGroup } from '../../types';
+import { Project, Task, DelegationGroup } from '../../types';
 import { matchesAdvancedSearch, computePlanProgressPercent, computeActProgressPercent, computePlanProgressFromSummaries, computeActProgressFromSummaries } from '../../lib/utils';
 import { DetailTableRow, SortConfig } from './detailTypes';
 import { ProjectInfo } from './useDetailProjectInfo';
 import { useAppStore } from '../../store/useAppStore';
 import { rollupParentTaskDatesAndStatus } from '../../lib/taskRollupService';
 import { isTaskDeletedInTracker } from '../../lib/taskDeletedTracker';
+import { doesTaskMatchSearchTerm } from './useDetailFilterSync';
 
 interface UseDetailFlatRowsParams {
   filteredProjects: Project[];
@@ -14,10 +15,15 @@ interface UseDetailFlatRowsParams {
   getProjectInfo: (p: Project) => ProjectInfo;
   sortConfig: SortConfig | null;
   expandedCodes: string[];
+  expandedModularTasks?: Set<string>;
   delegationGroups: DelegationGroup[];
   lowerSearchTerm: string;
   taskCodeMap: Map<string, string>;
 }
+
+import { buildProjectParentHierarchyIndex, type ProjectParentHierarchyIndex } from '../../lib/parentHierarchyUtils';
+export { buildProjectParentHierarchyIndex, type ProjectParentHierarchyIndex };
+
 
 export function useDetailFlatRows({
   filteredProjects,
@@ -26,13 +32,20 @@ export function useDetailFlatRows({
   getProjectInfo,
   sortConfig,
   expandedCodes,
+  expandedModularTasks = new Set(),
   delegationGroups,
   lowerSearchTerm,
   taskCodeMap,
 }: UseDetailFlatRowsParams) {
+  const globalYearFilter = useAppStore(state => state.globalYearFilter);
+  const isPrintPreview = useAppStore(state => state.isPrintPreview);
+  const isExportingPDF = useAppStore(state => state.isExportingPDF);
+  const fixedProjectCode = useAppStore(state => state.fixedProjectCode);
   const flatTableRows = useMemo<DetailTableRow[]>(() => {
     const rows: DetailTableRow[] = [];
-    const visibleProjects = filteredProjects.slice(0, visibleCount);
+    const visibleProjects = (isPrintPreview || isExportingPDF)
+      ? filteredProjects
+      : filteredProjects.slice(0, visibleCount);
 
     visibleProjects.forEach((p, pIdx) => {
       const pKey = `${p.code || ''}-${p.year || ''}-${p.store || ''}-${p.id || p.no}`;
@@ -85,38 +98,72 @@ export function useDetailFlatRows({
         return direction === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
       }) : sortedTasks;
 
-      const isExpanded =
-        expandedCodes.includes(String(p.id || '')) ||
-        (p.code ? expandedCodes.includes(p.code) : false) ||
-        (p.no !== undefined && p.no !== null ? expandedCodes.includes(String(p.no)) : false);
+      const isExpanded = p.id
+        ? expandedCodes.includes(String(p.id)) ||
+          (p.code && (!p.year || String(p.year) === String(globalYearFilter))
+            ? expandedCodes.includes(p.code)
+            : false)
+        : (p.code ? expandedCodes.includes(p.code) : false);
       const isProjDelegationOn = groupTasks.some(t => Boolean(t.delegation)) || (p.taskSummaries?.some(ts => Boolean(ts.delegation)) ?? false);
 
-      const rolledUpGroupTasks = rollupParentTaskDatesAndStatus(groupTasks, delegationGroups);
-      const validGroupTasks = rolledUpGroupTasks.map(t => ({
-        ...t,
-        name: t.name && String(t.name).trim() ? t.name : (t.taskCodePhu || 'Task')
-      }));
+      const rolledUpGroupTasks = sortConfig
+        ? rollupParentTaskDatesAndStatus(groupTasks, delegationGroups)
+        : groupTasks;
+      const validGroupTasks = rolledUpGroupTasks.every(t => Boolean(t.name && String(t.name).trim()))
+        ? rolledUpGroupTasks
+        : rolledUpGroupTasks.map(t => (
+            t.name && String(t.name).trim()
+              ? t
+              : { ...t, name: t.taskCodePhu || 'Task' }
+          ));
 
       const isProjectMatch = lowerSearchTerm
         ? matchesAdvancedSearch(lowerSearchTerm, [p.store, p.location, p.year, p.code, p.linkCodes, p.name, p.detail, (p as any).description, p.note, p.party])
         : true;
 
-      const tasksToRender = isProjectMatch
-        ? validGroupTasks
-        : lowerSearchTerm 
-          ? validGroupTasks.filter(t => {
-              const code = taskCodeMap.get(t.id) || '';
-              const commentsMatch = t.comments?.some(c => String(c.text || '').toLowerCase().includes(lowerSearchTerm));
-              const notesMatch = t.notes?.some(n => String(n.content || '').toLowerCase().includes(lowerSearchTerm));
-              return (
-                String(t.name || '').toLowerCase().includes(lowerSearchTerm) ||
-                code.toLowerCase().includes(lowerSearchTerm) ||
-                String(t.party || '').toLowerCase().includes(lowerSearchTerm) ||
-                commentsMatch ||
-                notesMatch
-              );
-            })
-          : validGroupTasks;
+      const { parentTaskMap, groupTaskIndexMap, parentTaskIdsInProject } = buildProjectParentHierarchyIndex(validGroupTasks);
+
+      const directMatchedTaskIds = new Set<string>();
+      if (lowerSearchTerm) {
+        validGroupTasks.forEach((t, idx) => {
+          const code = taskCodeMap.get(t.id) || '';
+          if (
+            doesTaskMatchSearchTerm(t, idx, p.code, lowerSearchTerm) ||
+            (code && matchesAdvancedSearch(lowerSearchTerm, [code]))
+          ) {
+            directMatchedTaskIds.add(String(t.id));
+          }
+        });
+      }
+
+      const shouldFilterTasks =
+        Boolean(lowerSearchTerm) &&
+        (Boolean(fixedProjectCode && fixedProjectCode.trim()) || directMatchedTaskIds.size > 0 || !isProjectMatch);
+
+      let tasksToRender = validGroupTasks;
+      if (shouldFilterTasks) {
+        const parentIdsWithMatchingChild = new Set<string>();
+        validGroupTasks.forEach(t => {
+          if (directMatchedTaskIds.has(String(t.id))) {
+            const mp = parentTaskMap.get(String(t.id));
+            if (mp && String(mp.id) !== String(t.id)) {
+              parentIdsWithMatchingChild.add(String(mp.id));
+            }
+          }
+        });
+
+        tasksToRender = validGroupTasks.filter(t => {
+          const tId = String(t.id);
+          if (directMatchedTaskIds.has(tId) || parentIdsWithMatchingChild.has(tId)) {
+            return true;
+          }
+          const mp = parentTaskMap.get(tId);
+          if (mp && directMatchedTaskIds.has(String(mp.id)) && !parentIdsWithMatchingChild.has(String(mp.id))) {
+            return true;
+          }
+          return false;
+        });
+      }
 
       const activeSummaries = (p.taskSummaries && Array.isArray(p.taskSummaries))
         ? p.taskSummaries.filter(ts => !isTaskDeletedInTracker(ts.id, p.id ? String(p.id) : undefined))
@@ -124,7 +171,7 @@ export function useDetailFlatRows({
       const summaryCount = activeSummaries.length;
       const loadedTaskCount = validGroupTasks.length;
       const authoritativeCount = loadedTaskCount > 0 ? loadedTaskCount : (Array.isArray(p.taskSummaries) ? summaryCount : (p.taskCount ?? 0));
-      const effectiveTaskCount = (lowerSearchTerm && !isProjectMatch)
+      const effectiveTaskCount = shouldFilterTasks
         ? tasksToRender.length
         : authoritativeCount;
 
@@ -149,23 +196,51 @@ export function useDetailFlatRows({
         projectIndex: pIdx,
         effectiveTaskCount,
         isExpanded,
-        groupTasks,
+        groupTasks: validGroupTasks,
         isProjDelegationOn,
         planProgressPercent,
         actProgressPercent,
       });
 
       if (isExpanded) {
-        const groupTaskIndexMap = new Map<string, number>();
-        groupTasks.forEach((gt, idx) => {
-          if (gt.id) groupTaskIndexMap.set(gt.id, idx);
-        });
-
         const seenRenderTaskIds = new Set<string>();
         tasksToRender.forEach((t, tIdx) => {
           if (t.id && seenRenderTaskIds.has(t.id)) return;
+
+          // If t is a valid child task (and not itself a parent task), check if its parent task is expanded
+          const rawParentId = t.parentTaskId
+            ? String(t.parentTaskId).trim()
+            : ((t as any).parentId ? String((t as any).parentId).trim() : '');
+          const matchedParent =
+            parentTaskMap.get(String(t.id)) ||
+            parentTaskMap.get(String(t.id).toLowerCase()) ||
+            (t.taskCodePhu ? parentTaskMap.get(String(t.taskCodePhu).trim().toLowerCase()) : undefined) ||
+            (rawParentId ? (parentTaskMap.get(rawParentId) || parentTaskMap.get(rawParentId.toLowerCase())) : undefined);
+
+          if (matchedParent && !parentTaskIdsInProject.has(String(t.id)) && String(matchedParent.id) !== String(t.id)) {
+            const isDirectChildSearchHit = Boolean(lowerSearchTerm && directMatchedTaskIds.has(String(t.id)));
+            if (!isDirectChildSearchHit) {
+              const candidateIds: string[] = [
+                String(matchedParent.id).trim(),
+                String(matchedParent.id).trim().toLowerCase(),
+              ];
+              if (rawParentId) {
+                candidateIds.push(rawParentId, rawParentId.toLowerCase());
+              }
+              if (matchedParent.taskCodePhu) {
+                candidateIds.push(String(matchedParent.taskCodePhu).trim());
+                candidateIds.push(String(matchedParent.taskCodePhu).trim().toLowerCase());
+              }
+
+              const isParentExpanded = candidateIds.some(cid => expandedModularTasks.has(cid));
+              if (!isParentExpanded) {
+                return; // Parent task is collapsed -> hide child task
+              }
+            }
+          }
+
           if (t.id) seenRenderTaskIds.add(t.id);
-          const originalIndex = groupTaskIndexMap.get(t.id);
+          const originalIndex = groupTaskIndexMap.get(String(t.id));
           const i = originalIndex !== undefined ? originalIndex : tIdx;
           rows.push({
             type: 'task',
@@ -174,7 +249,7 @@ export function useDetailFlatRows({
             taskIndex: i,
             project: p,
             projectIndex: pIdx,
-            groupTasks,
+            groupTasks: validGroupTasks,
             isProjDelegationOn,
           });
         });
@@ -182,7 +257,7 @@ export function useDetailFlatRows({
     });
 
     return rows;
-  }, [filteredProjects, visibleCount, projectInfoMap, getProjectInfo, sortConfig, expandedCodes, delegationGroups, lowerSearchTerm, taskCodeMap]);
+  }, [filteredProjects, visibleCount, isPrintPreview, isExportingPDF, projectInfoMap, getProjectInfo, sortConfig, expandedCodes, expandedModularTasks, delegationGroups, lowerSearchTerm, taskCodeMap, globalYearFilter]);
 
   return flatTableRows;
 }

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Palette, Play, Layers, Unlink, Trash2, Eye, EyeOff, Save, Loader2 } from 'lucide-react';
+import { Palette, Layers, Unlink, Trash2, Eye, EyeOff, Save, Loader2, GitBranch, Zap, PackagePlus } from 'lucide-react';
 import { useLanguage } from '../../lib/LanguageContext';
 import { cn } from '../../lib/utils';
 
@@ -17,6 +17,8 @@ interface GanttToolbarActionsProps {
   setIsHideMode: (val: boolean) => void;
   hiddenRows: string[];
   setHiddenRows: (rows: string[]) => void;
+  showPredecessorLines?: boolean;
+  setShowPredecessorLines?: (val: boolean | ((prev: boolean) => boolean)) => void;
   handleExportToPDF: () => void;
   isExporting: boolean;
 }
@@ -44,6 +46,8 @@ export function GanttToolbarActions({
   setIsHideMode,
   hiddenRows,
   setHiddenRows,
+  showPredecessorLines = true,
+  setShowPredecessorLines,
   handleExportToPDF,
   isExporting
 }: GanttToolbarActionsProps) {
@@ -65,6 +69,24 @@ export function GanttToolbarActions({
 
   return (
     <div className="flex items-center gap-1.5 flex-wrap">
+      {/* Show / Hide Predecessor Lines Toggle (Reduce Lag on Mobile / iPad) */}
+      {setShowPredecessorLines && (
+        <button
+          type="button"
+          onClick={() => setShowPredecessorLines(prev => !prev)}
+          className={cn(
+            "p-1.5 rounded-lg border text-xs font-semibold flex items-center gap-1 transition-all active:scale-95 touch-manipulation cursor-pointer",
+            showPredecessorLines
+              ? "bg-indigo-50 dark:bg-indigo-950/40 border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100"
+              : "bg-white dark:bg-[#1e1e20] border-slate-200 dark:border-[#444446] text-slate-500 dark:text-slate-400 hover:bg-slate-50"
+          )}
+          title={showPredecessorLines ? "Hide Predecessor Lines (Reduce Lag)" : "Show Predecessor Lines"}
+        >
+          <GitBranch className={cn("w-3.5 h-3.5", showPredecessorLines ? "text-indigo-600 dark:text-indigo-400" : "opacity-50")} />
+          <span>{showPredecessorLines ? t('Hide Links') : t('Show Links')}</span>
+        </button>
+      )}
+
       {/* Color Palette Menu */}
       <div className="relative" ref={colorMenuRef}>
         <button
@@ -134,6 +156,42 @@ export function GanttToolbarActions({
         <Layers className="w-3.5 h-3.5" />
         <span className="hidden xl:inline">{t('Modular')}</span>
       </button>
+
+      {/* Visual STEM Task Library Builder */}
+      <button
+        type="button"
+        onClick={() => {
+          window.dispatchEvent(
+            new CustomEvent('taka_open_stem_workbench', {
+              detail: { projectId: selectedProjectIds[0] },
+            })
+          );
+        }}
+        className="p-1.5 rounded-lg border text-xs font-bold flex items-center gap-1 transition-all active:scale-95 touch-manipulation cursor-pointer bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300 hover:bg-amber-100"
+        title="⚡ Lắp ghép từ Thư viện (Visual STEM Task Library Builder)"
+      >
+        <Zap className="w-3.5 h-3.5 text-amber-500" />
+        <span className="hidden lg:inline">⚡ Lắp ghép từ Thư viện</span>
+      </button>
+
+      {/* 1-Click Capture to STEM Library */}
+      {selectedTaskIds.length >= 1 && (
+        <button
+          type="button"
+          onClick={() => {
+            window.dispatchEvent(
+              new CustomEvent('taka_capture_stem_preset', {
+                detail: { taskIds: selectedTaskIds },
+              })
+            );
+          }}
+          className="p-1.5 rounded-lg border text-xs font-bold flex items-center gap-1 transition-all active:scale-95 touch-manipulation cursor-pointer bg-indigo-50 dark:bg-indigo-950/40 border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100"
+          title="📦 Đóng gói các công việc đang chọn vào Thư viện STEM"
+        >
+          <PackagePlus className="w-3.5 h-3.5 text-indigo-500" />
+          <span className="hidden lg:inline">📦 Đóng gói ({selectedTaskIds.length})</span>
+        </button>
+      )}
 
       {/* Unlink Selected Tasks from Parent Link */}
       <button

@@ -4,6 +4,7 @@ import { positionTooltip, formatGanttDate } from './GanttUtils';
 import { Task, Project } from '../../types';
 import { GanttBarTooltip } from './GanttBarTooltip';
 import { useGanttBarDateDrag } from './useGanttBarDateDrag';
+import { startGanttLinkDrag } from './useGanttLinkDrag';
 
 export interface GanttBarProps {
   startStr: string | undefined;
@@ -106,61 +107,23 @@ export const GanttBar = React.memo(function GanttBar({
   const [isEditingPredecessor, setIsEditingPredecessor] = useState(false);
   const tooltipRef = useRef<HTMLDivElement>(null);
   const lastMousePos = useRef({ x: 0, y: 0 });
-  const moveRafRef = useRef<number | null>(null);
   const isDraggingTooltipRef = useRef(false);
   const dragStartPos = useRef({ x: 0, y: 0 });
   const tooltipStartPos = useRef({ x: 0, y: 0 });
-  const hoverTimeoutRef = useRef<number | null>(null);
 
-  const handleBarMouseEnter = (e: React.MouseEvent) => {
-    if (hoverTimeoutRef.current) {
-      clearTimeout(hoverTimeoutRef.current);
-      hoverTimeoutRef.current = null;
-    }
-    setIsDismissed(false);
-    lastMousePos.current = { x: e.clientX, y: e.clientY };
+  const handleBarMouseEnter = () => {
     setIsHovered(true);
   };
 
   const handleBarMouseLeave = () => {
-    hoverTimeoutRef.current = window.setTimeout(() => {
-      setIsHovered(false);
-      setIsDismissed(false);
-    }, 200);
-  };
-
-  const handleTooltipMouseEnter = () => {
-    if (hoverTimeoutRef.current) {
-      clearTimeout(hoverTimeoutRef.current);
-      hoverTimeoutRef.current = null;
-    }
-    setIsHovered(true);
-  };
-
-  const handleTooltipMouseLeave = () => {
-    hoverTimeoutRef.current = window.setTimeout(() => {
-      setIsHovered(false);
-      setIsDismissed(false);
-    }, 150);
+    setIsHovered(false);
   };
 
   const handleCloseTooltip = React.useCallback(() => {
     setIsDismissed(true);
-    setIsHovered(false);
     setActiveTooltip(null);
     setIsEditingPredecessor(false);
   }, [setActiveTooltip]);
-
-  useEffect(() => {
-    return () => {
-      if (hoverTimeoutRef.current) {
-        clearTimeout(hoverTimeoutRef.current);
-      }
-      if (moveRafRef.current !== null) {
-        cancelAnimationFrame(moveRafRef.current);
-      }
-    };
-  }, []);
 
   const isPinned = activeTooltip === id || isEditingPredecessor;
 
@@ -191,10 +154,10 @@ export const GanttBar = React.memo(function GanttBar({
   };
 
   useEffect(() => {
-    if ((isHovered || isPinned) && tooltipRef.current && !isDraggingTooltipRef.current) {
+    if (isPinned && tooltipRef.current && !isDraggingTooltipRef.current) {
       positionTooltip(tooltipRef.current, lastMousePos.current.x, lastMousePos.current.y);
     }
-  }, [isHovered, isPinned]);
+  }, [isPinned]);
 
   if (!dStart || !dEnd) {
     return null;
@@ -203,17 +166,21 @@ export const GanttBar = React.memo(function GanttBar({
   const offsetDays = getExactDays(startDate, dStart);
   const durationDays = Math.max(getExactDays(dStart, dEnd) + 1, 1);
   const leftPx = offsetDays * dayWidth;
-  const widthPx = isMilestone ? 16 : Math.max(durationDays * dayWidth, 8);
+  const widthPx = isMilestone ? 14 : Math.max(durationDays * dayWidth, 8);
 
   const barColor = isMilestone 
-    ? "bg-[#f97316] border border-[#ea580c]" 
+    ? "bg-[#f97316] border-2 border-white dark:border-slate-900 ring-1 ring-[#ea580c]" 
     : getBarColor(status, extraVars?.duration);
 
   const actProgress = extraVars?.actPrg ?? 0;
 
+  const canLinkTask = isEditMode && isTask && !isSimulation && extraVars?.canWrite !== false;
+
   return (
     <>
       <div
+        data-gantt-bar-task-id={isTask && !isSimulation ? rawTaskId : undefined}
+        data-gantt-bar-task-code={extraVars?.taskCode || undefined}
         onClick={(e) => {
           e.stopPropagation();
           lastMousePos.current = { x: e.clientX, y: e.clientY };
@@ -223,45 +190,71 @@ export const GanttBar = React.memo(function GanttBar({
             setIsDismissed(false);
             const nextPinned = activeTooltip !== id;
             setActiveTooltip(nextPinned ? id : null);
-            if (nextPinned && tooltipRef.current) {
-              positionTooltip(tooltipRef.current, e.clientX, e.clientY);
-            }
           }
         }}
         onMouseEnter={handleBarMouseEnter}
-        onMouseMove={(e) => {
-          if (!isPinned && !isDraggingTooltipRef.current) {
-            const clientX = e.clientX;
-            const clientY = e.clientY;
-            lastMousePos.current = { x: clientX, y: clientY };
-            if (moveRafRef.current === null) {
-              moveRafRef.current = requestAnimationFrame(() => {
-                if (tooltipRef.current) {
-                  positionTooltip(tooltipRef.current, lastMousePos.current.x, lastMousePos.current.y);
-                }
-                moveRafRef.current = null;
-              });
-            }
-          }
-        }}
         onMouseLeave={handleBarMouseLeave}
         className={cn(
-          "absolute top-1.5 bottom-1.5 flex items-center transition-all cursor-pointer select-none group shadow-2xs before:absolute before:-inset-y-1.5 before:-inset-x-1 before:content-['']",
-          isMilestone ? "w-4 h-4 rotate-45 rounded-[2px] mt-1.5 shadow-md z-20" : "h-6 rounded-md",
-          !customColor && barColor,
+          "gantt-bar absolute flex items-center transition-shadow cursor-pointer select-none group shadow-2xs before:absolute before:-inset-y-1.5 before:-inset-x-4 before:content-['']",
+          isMilestone
+            ? "top-1/2 -translate-y-1/2 -ml-[7px] w-3.5 h-3.5 rotate-45 rounded-[2px] shadow-md z-20"
+            : "top-1.5 bottom-1.5 h-6 rounded-md",
+          (isMilestone || !customColor) && barColor,
           isSimulation && "border-2 border-dashed border-purple-400 opacity-80",
           extraVars?.highlight === 'assignee' && "ring-2 ring-emerald-400 ring-offset-1",
           extraVars?.highlight === 'creator' && "ring-2 ring-blue-400 ring-offset-1",
           isPinned && "ring-2 ring-blue-500 shadow-md",
-          isHovered && "brightness-110 shadow-md scale-[1.01]"
+          isHovered && "brightness-110 shadow-md scale-[1.03]"
         )}
         style={{
           left: `${leftPx}px`,
           width: `${widthPx}px`,
-          zIndex: isPinned ? 30 : isHovered ? 20 : 10,
+          zIndex: isPinned ? 30 : isHovered ? 25 : isMilestone ? 20 : 10,
           ...(customColor && !isMilestone ? { backgroundColor: customColor, borderColor: customColor } : {})
         }}
       >
+        {/* Left Anchor Dot (Start Link Handle: Drag for SS/SF or Drop for FS/SS) */}
+        {canLinkTask && !isMilestone && (
+          <div
+            data-gantt-anchor="start"
+            data-gantt-task-id={rawTaskId}
+            onPointerDown={(e) =>
+              startGanttLinkDrag(e, {
+                taskId: rawTaskId,
+                taskCode: extraVars?.taskCode,
+                taskName: label,
+                anchor: 'start',
+              })
+            }
+            onClick={(e) => e.stopPropagation()}
+            title="Start Anchor: Drag to link (SS / SF) or drop here to connect to Start"
+            className="gantt-anchor-dot absolute -left-3 top-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-white dark:bg-slate-900 border-2 border-blue-500 hover:border-emerald-500 hover:bg-emerald-500 hover:scale-125 shadow-md z-40 cursor-crosshair opacity-0 scale-75 group-hover:opacity-100 group-hover:scale-100 [[data-gantt-linking=true]_&]:opacity-100 [[data-gantt-linking=true]_&]:scale-100 transition-all duration-150 flex items-center justify-center"
+          >
+            <span className="w-1 h-1 rounded-full bg-blue-500 group-hover:bg-white pointer-events-none" />
+          </div>
+        )}
+
+        {/* Right Anchor Dot (Finish Link Handle: Drag for FS/FF or Drop for FF/SF) */}
+        {canLinkTask && !isMilestone && (
+          <div
+            data-gantt-anchor="end"
+            data-gantt-task-id={rawTaskId}
+            onPointerDown={(e) =>
+              startGanttLinkDrag(e, {
+                taskId: rawTaskId,
+                taskCode: extraVars?.taskCode,
+                taskName: label,
+                anchor: 'end',
+              })
+            }
+            onClick={(e) => e.stopPropagation()}
+            title="Finish Anchor: Drag to link (FS / FF) or drop here to connect to Finish"
+            className="gantt-anchor-dot absolute -right-3 top-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-white dark:bg-slate-900 border-2 border-blue-500 hover:border-emerald-500 hover:bg-emerald-500 hover:scale-125 shadow-md z-40 cursor-crosshair opacity-0 scale-75 group-hover:opacity-100 group-hover:scale-100 [[data-gantt-linking=true]_&]:opacity-100 [[data-gantt-linking=true]_&]:scale-100 transition-all duration-150 flex items-center justify-center"
+          >
+            <span className="w-1 h-1 rounded-full bg-blue-500 group-hover:bg-white pointer-events-none" />
+          </div>
+        )}
+
         {/* Left Resize Handle for Start Date */}
         {isEditMode && isTask && !isMilestone && (
           <div
@@ -301,16 +294,45 @@ export const GanttBar = React.memo(function GanttBar({
           />
         )}
 
-        {/* Bar Label text */}
-        {!isMilestone && widthPx > 30 && (
-          <div className="px-2 w-full flex items-center justify-between text-[11px] font-bold text-white drop-shadow-xs truncate pointer-events-none">
-            <span className="truncate">{label}</span>
-            {actProgress > 0 && widthPx > 70 && (
-              <span className="text-[10px] font-mono opacity-90 pl-1">{actProgress}%</span>
-            )}
-          </div>
-        )}
+        {/* Bar Label text: Inside when wide enough, or crisp external label right next to narrow bars */}
+        {!isMilestone && (() => {
+          const minFitWidth = Math.max(58, (label?.length || 0) * 5.8 + (actProgress > 0 ? 34 : 14));
+          const fitsInside = widthPx >= minFitWidth;
+          if (fitsInside) {
+            return (
+              <div className="px-2 w-full flex items-center justify-between text-[11px] font-bold text-white drop-shadow-xs truncate pointer-events-none">
+                <span className="truncate">{label}</span>
+                {actProgress > 0 && widthPx > 70 && (
+                  <span className="text-[10px] font-mono opacity-95 pl-1">{actProgress}%</span>
+                )}
+              </div>
+            );
+          }
+          return (
+            <div
+              className="absolute top-1/2 -translate-y-1/2 flex items-center gap-1 whitespace-nowrap pointer-events-none z-20 px-1 py-0.5 rounded bg-white/90 dark:bg-[#1e1e20]/90 text-[10px] font-bold text-slate-800 dark:text-slate-200 leading-none shadow-2xs transition-all"
+              style={{ left: `${canLinkTask ? widthPx + 14 : widthPx + 4}px` }}
+            >
+              <span>{label}</span>
+              {actProgress > 0 && (
+                <span className="text-[9px] font-mono text-blue-700 dark:text-blue-400">
+                  ({actProgress}%)
+                </span>
+              )}
+            </div>
+          );
+        })()}
       </div>
+
+      {/* External Label for Milestone Diamond (un-rotated sibling) */}
+      {isMilestone && label && (
+        <div
+          className="absolute top-1/2 -translate-y-1/2 flex items-center gap-1 whitespace-nowrap pointer-events-none z-20 px-1.5 py-0.5 rounded bg-white/90 dark:bg-[#1e1e20]/90 text-[10px] font-bold text-amber-700 dark:text-amber-300 border border-amber-500/30 leading-none shadow-2xs"
+          style={{ left: `${leftPx + 12}px` }}
+        >
+          <span>{label}</span>
+        </div>
+      )}
 
       {/* Floating Date Drag Indicator Badge */}
       {isDraggingDate && (
@@ -323,8 +345,8 @@ export const GanttBar = React.memo(function GanttBar({
         </div>
       )}
 
-      {/* Floating Tooltip via Portal */}
-      {!isDismissed && (isHovered || isPinned) && (
+      {/* Floating Tooltip via Portal - Only rendered on Click */}
+      {!isDismissed && isPinned && (
         <GanttBarTooltip
           id={id}
           label={label}
@@ -340,8 +362,6 @@ export const GanttBar = React.memo(function GanttBar({
           handlePointerDown={handlePointerDown}
           handlePointerMove={handlePointerMove}
           handlePointerUp={handlePointerUp}
-          onMouseEnter={handleTooltipMouseEnter}
-          onMouseLeave={handleTooltipMouseLeave}
           onClose={handleCloseTooltip}
         />
       )}

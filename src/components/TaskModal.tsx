@@ -27,7 +27,7 @@ import { deleteStorageFiles, extractStorageUrls } from "../lib/storageUtils";
 import { useEnrichedData } from '../hooks/useEnrichedData';
 import { addPendingUpdate } from '../lib/syncQueue';
 import { QRCodeButton } from './QRCodeButton';
-import { getZIndexClass } from '../lib/zIndexManager';
+import { getZIndexClass, getZIndexValue } from '../lib/zIndexManager';
 import { syncProjectDatesByCode } from '../lib/projectDatesService';
 import { FastInput } from './FastInput';
 
@@ -39,6 +39,7 @@ interface TaskModalProps {
   prefillProjectCode: string | null;
   prefillProjectYear?: string | number | null;
   prefillProjectStore?: string | null;
+  prefillProjectId?: string | null;
   isReadOnly?: boolean;
   onNavigateToDelegation?: (groupId: string, taskId?: string) => void;
   initialTab?: 'details' | 'chat';
@@ -91,11 +92,38 @@ export function TaskModal(props: TaskModalProps) {
   } = logic;
   const { task, onNavigateToDelegation, onClose, isOpen } = props;
 
+  const effectiveTask = useMemo(() => {
+    if (!task) return null;
+    let baseTask = tasks.find((tk) => tk.id === task.id) || task;
+    if (String(baseTask.id).startsWith('ts_')) {
+      const realMatch = tasks.find(
+        (tk) =>
+          !String(tk.id).startsWith('ts_') &&
+          !(tk as any)._isVirtualSummary &&
+          tk.projectCode === baseTask.projectCode &&
+          (!baseTask.projectStore || !tk.projectStore || String(tk.projectStore).toUpperCase() === String(baseTask.projectStore).toUpperCase()) &&
+          (!baseTask.projectYear || !tk.projectYear || String(tk.projectYear) === String(baseTask.projectYear)) &&
+          ((baseTask.taskCodePhu && tk.taskCodePhu && String(tk.taskCodePhu).toLowerCase() === String(baseTask.taskCodePhu).toLowerCase()) ||
+            (baseTask.name && tk.name && String(tk.name).trim().toLowerCase() === String(baseTask.name).trim().toLowerCase()))
+      );
+      if (realMatch) baseTask = realMatch;
+    }
+    return {
+      ...baseTask,
+      ...(formData.delegation !== undefined ? { delegation: Boolean(formData.delegation) } : {}),
+      ...(formData.party !== undefined ? { party: formData.party } : {}),
+      ...(formData.name ? { name: formData.name } : {}),
+    };
+  }, [task, tasks, formData.delegation, formData.party, formData.name]);
+
   if (!isOpen) return null;
 
   return (
     <Portal>
-      <div className={`fixed inset-0 bg-slate-900/60 ${getZIndexClass('MODAL_BASE')} flex items-center justify-center p-0 md:p-4`}>
+      <div 
+        className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-0 md:p-4"
+        style={{ zIndex: getZIndexValue('MODAL_BASE') }}
+      >
       <React.Suspense fallback={null}>
         {confirmModal.isOpen && (
           <ConfirmModal 
@@ -108,9 +136,9 @@ export function TaskModal(props: TaskModalProps) {
         )}
       </React.Suspense>
         <Draggable disabled={typeof window !== 'undefined' && window.innerWidth < 768} handle=".modal-handle" bounds="parent" nodeRef={nodeRef} cancel="button">
-          <div ref={nodeRef} className="bg-white dark:bg-[#1e1e20] md:rounded-2xl shadow-2xl w-full h-full md:h-auto max-h-[100dvh] md:max-h-[90vh] max-w-md overflow-hidden relative flex flex-col pointer-events-auto">
+          <div ref={nodeRef} className="bg-white dark:bg-[#1e1e20] md:rounded-2xl shadow-2xl w-full h-full md:h-auto max-h-[100dvh] md:max-h-[90vh] max-w-lg sm:max-w-xl overflow-hidden relative flex flex-col pointer-events-auto">
             <TaskModalHeader 
-              task={task}
+              task={effectiveTask}
               activeTab={activeTab}
               setActiveTab={setActiveTab}
               handleOpenProjectComments={handleOpenProjectComments}
@@ -121,12 +149,12 @@ export function TaskModal(props: TaskModalProps) {
           
             {activeTab === 'details' && (
               <form onSubmit={handleSubmit} className="p-4 md:p-6 overflow-y-auto flex-grow pb-[env(safe-area-inset-bottom)]">
-                <TaskBasicInfo logic={logic} task={task} onNavigateToDelegation={onNavigateToDelegation} onClose={onClose} />
+                <TaskBasicInfo logic={logic} task={effectiveTask} onNavigateToDelegation={onNavigateToDelegation} onClose={onClose} />
               </form>
             )}
 
-            {activeTab === 'chat' && task && (
-              <TaskChat task={task} projects={projects} tasks={tasks} currentUser={currentUser} appUsers={appUsers} subAppUsers={subAppUsers} delegationGroups={delegationGroups} onNavigateToDelegation={onNavigateToDelegation} setConfirmModal={setConfirmModal} />
+            {activeTab === 'chat' && effectiveTask && (
+              <TaskChat task={effectiveTask} projects={projects} tasks={tasks} currentUser={currentUser} appUsers={appUsers} subAppUsers={subAppUsers} delegationGroups={delegationGroups} onNavigateToDelegation={onNavigateToDelegation} setConfirmModal={setConfirmModal} />
             )}
           </div>
         </Draggable>

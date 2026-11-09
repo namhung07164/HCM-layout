@@ -1,52 +1,30 @@
-import { useEffect, useRef, useCallback } from "react";
-import { collection, onSnapshot, query, where } from "firebase/firestore";
-import { useAppStore } from "../../store/useAppStore";
-import { usePerformanceStore } from "../../store/usePerformanceStore";
-import { db, APP_ID } from "../../lib/firebase";
-import { Task } from "../../types";
-import { buildStoreAndYearQuery } from "./firebaseQueryHelpers";
-import {
-  offloadPersistSnapshot,
-  hydrateTasksFromLocal,
-  hydrateTasksForProjects,
-  hydrateDelegationsForProjects,
-} from "../../lib/backgroundSyncWorker";
-import { loadNotificationTasks } from "../../lib/notificationTaskService";
-import { deduplicateTasksInMemory } from "../../lib/taskDeduplicationService";
-import { cleanOrphanTasks } from "../../lib/taskStateService";
-import { rollupParentTaskDatesAndStatus } from "../../lib/taskRollupService";
-import { deleteLocalRecord } from "../../lib/localDb";
-import { pullAndApplyDeltas } from "../../lib/deltaSyncService";
-import { getLoadedMarkers, hasMarker, markLoaded } from "../../lib/loadedMarkers";
-import {
-  getAppBootAgeMs,
-  BOOT_SYNC_GUARD_MS,
-  calculateProjectComputedDates,
-  syncProjectDatesToFirestore,
-} from "../../lib/projectDatesService";
-import { markTasksDeleted } from "../../lib/taskDeletedTracker";
+import { useEffect, useRef, useCallback, useState } from 'react';
+import { useAppStore } from '../../store/useAppStore';
+import { usePerformanceStore } from '../../store/usePerformanceStore';
+import { Task } from '../../types';
+import { offloadPersistSnapshot, hydrateTasksFromLocal, hydrateTasksForProjects, hydrateDelegationsForProjects } from '../../lib/backgroundSyncWorker';
+import { loadNotificationTasks } from '../../lib/notificationTaskService';
+import { deduplicateTasksInMemory } from '../../lib/taskDeduplicationService';
+import { cleanOrphanTasks } from '../../lib/taskStateService';
+import { rollupParentTaskDatesAndStatus } from '../../lib/taskRollupService';
+import { deleteLocalRecord } from '../../lib/localDb';
+import { pullAndApplyDeltas, applyIncomingDeltas } from '../../lib/deltaSyncService';
+import { flushDeferredInvalidations } from '../../lib/deltaInvalidateService';
+import { getLoadedMarkers, hasFreshMarker, markLoaded } from '../../lib/loadedMarkers';
+import { markProjectTasksHydrated } from '../../lib/utils';
+import { markTasksDeleted, unmarkTaskDeleted, clearDeletedTasksTracker } from '../../lib/taskDeletedTracker';
+import { isStaleCacheDoc, extractKeysToHydrate, groupActiveProjectsByYear, healProjectsAfterTasksBatch, purgeRemovedDuplicateTasksFromFirestore } from './tasksHydrationHelpers';
+import { buildProjectTasksLookupIndex, getLocalProjectTasksFromIndex } from './projectsHydrationHelpers';
+import { attachYearTasksListener, attachProjectTasksListener, computeActiveProjectsSummarySig, evaluateProjectTaskHydrationState } from './tasksListenerAttachHelpers';
 
-// Delta-first: sau lần tải đầy đủ đầu tiên, hủy onSnapshot lớn, dựa vào Dexie + kênh delta.
 const DELTA_FIRST = { projects: true, tasks: true, costs: true, delegations: true };
-
+const TTL_DURATION_MS = 15 * 60 * 1000;
 
 interface UseTasksHydrationProps {
   querySignature: string | null;
   userRole?: string;
   allowedStores: string[];
 }
-
-const TTL_DURATION_MS = 15 * 60 * 1000; // 15 minutes
-
-import {
-  isStaleCacheDoc,
-  extractKeysToHydrate,
-  groupActiveProjectsByYear,
-  doesTaskBelongToProject,
-  filterCompatibleProjectChanges,
-  buildZombieTaskRemovalsForYear,
-  buildZombieTaskRemovalsForProject,
-} from "./tasksHydrationHelpers";
 
 export function useTasksHydration({
   querySignature,
@@ -59,194 +37,127 @@ export function useTasksHydration({
   const visibleActiveProjectIds = useAppStore((state) => state.visibleActiveProjectIds);
   const visibleActiveProjectIdsRef = useRef(visibleActiveProjectIds);
   visibleActiveProjectIdsRef.current = visibleActiveProjectIds;
+  const activeProjectsSummarySig = useAppStore((state) =>
+    computeActiveProjectsSummarySig(
+      state.projects,
+      state.expandedProjectIds,
+      state.searchActiveProjectIds,
+      state.isTasksRequested
+    )
+  );
 
   const globalYearFilter = useAppStore((state) => state.globalYearFilter);
   const setIsTasksLoading = useAppStore((state) => state.setIsTasksLoading);
   const setAllTasksForNotifs = useAppStore((state) => state.setAllTasksForNotifs);
   const setCloudStatus = useAppStore((state) => state.setCloudStatus);
+  const [wakeTick, setWakeTick] = useState(0);
 
   const tasksPool = useRef<Map<string, () => void>>(new Map());
   const tasksTTLTimeouts = useRef<Map<string, NodeJS.Timeout>>(new Map());
   const knownHydratedProjectCodes = useRef<Set<string>>(new Set());
+  const wakeRefreshCounter = useRef<number>(0);
 
-  const prevQuerySigTasks = useRef<string>("");
-  const prevSigTasks = useRef<string>("");
+  const prevQuerySigTasks = useRef<string>('');
+  const prevSigTasks = useRef<string>('');
 
   // Atomic batching buffers for Tasks updates
   const pendingTasksMap = useRef<Map<string, Task> | null>(null);
   const pendingTasksChanged = useRef<Map<string, Task>>(new Map());
-  const pendingTasksRemoved = useRef<Set<string>>(new Set());
+  const pendingTasksRemoved = useRef<Map<string, Task>>(new Map());
   const tasksBatchTimer = useRef<NodeJS.Timeout | null>(null);
 
-  const batchTasksUpdate = useCallback((docChanges: any[], fromCache: boolean = false) => {
-    if (!pendingTasksMap.current) {
-      const currentTasks = useAppStore.getState().tasks || [];
-      const map = new Map<string, Task>();
-      currentTasks.forEach((t) => map.set(t.id, t));
-      pendingTasksMap.current = map;
-    }
-
-    docChanges.forEach((change) => {
-      const id = change.doc.id;
-      const rawDocData = change.doc.data();
-      const data = { id, ...rawDocData } as Task;
-      const isTrueDelete = Boolean(data.isDeleted || change.type === "removed");
-
-      if (isTrueDelete) {
-        markTasksDeleted([id], data.projectId ? String(data.projectId) : undefined);
-        pendingTasksMap.current!.delete(id);
-        pendingTasksChanged.current.delete(id);
-        pendingTasksRemoved.current.add(id);
-      } else {
-        if (fromCache && isStaleCacheDoc(pendingTasksMap.current!.get(id), data)) return;
-        pendingTasksMap.current!.set(id, data);
-        pendingTasksChanged.current.set(id, data);
-        pendingTasksRemoved.current.delete(id);
+  const batchTasksUpdate = useCallback(
+    (docChanges: any[], fromCache: boolean = false, isForceSnapshot: boolean = false) => {
+      if (!pendingTasksMap.current) {
+        const currentTasks = useAppStore.getState().tasks || [];
+        const map = new Map<string, Task>();
+        currentTasks.forEach((t) => map.set(t.id, t));
+        pendingTasksMap.current = map;
       }
-    });
 
-    if (tasksBatchTimer.current) {
-      clearTimeout(tasksBatchTimer.current);
-    }
+      docChanges.forEach((change) => {
+        const id = change.doc.id;
+        const rawDocData = change.doc.data();
+        const data = { id, ...rawDocData } as Task;
+        const isTrueDelete = Boolean(data.isDeleted || change.type === 'removed');
 
-    tasksBatchTimer.current = setTimeout(() => {
-      if (pendingTasksMap.current) {
-        const rawList = Array.from(pendingTasksMap.current.values());
-        const projects = useAppStore.getState().projects || [];
-        const { dedupedTasks } = deduplicateTasksInMemory(rawList, projects);
-        const { cleaned: unrolledTasks } = cleanOrphanTasks(dedupedTasks);
-        const rolledUpTasks = rollupParentTaskDatesAndStatus(unrolledTasks, useAppStore.getState().delegationGroups);
-        rolledUpTasks.sort((a, b) => {
-          if (a.projectCode !== b.projectCode) {
-            return (a.projectCode || "").localeCompare(b.projectCode || "");
+        if (isTrueDelete) {
+          const existing = pendingTasksMap.current!.get(id);
+          const pIdHint = data.projectId || existing?.projectId;
+          markTasksDeleted([id], pIdHint ? String(pIdHint) : undefined);
+          pendingTasksMap.current!.delete(id);
+          pendingTasksChanged.current.delete(id);
+          pendingTasksRemoved.current.set(id, { ...(existing || {}), ...data, id });
+        } else {
+          if (
+            !isForceSnapshot &&
+            fromCache &&
+            isStaleCacheDoc(pendingTasksMap.current!.get(id), data)
+          )
+            return;
+          if (!data.isDeleted) {
+            unmarkTaskDeleted(id);
           }
-          return (a.orderIndex || 0) - (b.orderIndex || 0);
-        });
-        const finalTasks = rolledUpTasks;
-        useAppStore.getState().setTasks(finalTasks);
-
-        // Immediately prune any removed task IDs from project.taskSummaries in store.projects
-        if (pendingTasksRemoved.current.size > 0) {
-          const removedSet = new Set(Array.from(pendingTasksRemoved.current).map(id => String(id).trim().toLowerCase()));
-          const currentProjects = useAppStore.getState().projects || [];
-          const modifiedProjects: any[] = [];
-          const prunedProjects = currentProjects.map((p) => {
-            if (Array.isArray(p.taskSummaries) && p.taskSummaries.some((s: any) => s?.id && removedSet.has(String(s.id).trim().toLowerCase()))) {
-              const filteredSummaries = p.taskSummaries.filter((s: any) => !s?.id || !removedSet.has(String(s.id).trim().toLowerCase()));
-              const pForCalc = { ...p, taskSummaries: filteredSummaries, taskCount: filteredSummaries.length };
-              const pTasks = finalTasks.filter((t) => !t.isDeleted && (
-                (t.projectId && String(t.projectId) === String(p.id)) ||
-                (!t.projectId && String(t.projectCode || "").trim().toLowerCase() === String(p.code || "").trim().toLowerCase() &&
-                  String(t.projectStore || "").trim().toLowerCase() === String(p.store || "").trim().toLowerCase() &&
-                  String(t.projectYear ?? "").trim() === String(p.year ?? "").trim())
-              ));
-              const computed = calculateProjectComputedDates(pForCalc, pTasks, useAppStore.getState().delegationGroups);
-              const nextProj = {
-                ...p,
-                ...computed,
-                taskSummaries: computed.taskSummaries || filteredSummaries,
-                taskCount: computed.taskCount !== undefined ? computed.taskCount : filteredSummaries.length,
-              };
-              modifiedProjects.push(nextProj);
-              return nextProj;
-            }
-            return p;
-          });
-          if (modifiedProjects.length > 0) {
-            useAppStore.getState().setProjects(prunedProjects);
-            offloadPersistSnapshot('taka_projects', modifiedProjects);
-          }
+          pendingTasksMap.current!.set(id, data);
+          pendingTasksChanged.current.set(id, data);
+          pendingTasksRemoved.current.delete(id);
         }
-        
-        // Self-healing an toàn:
-        // - chỉ xét các dự án có task thay đổi trong lô này (không quét toàn bộ P x T)
-        // - bỏ qua snapshot từ cache và 15 giây đầu sau khi mở app (dữ liệu cục bộ có thể cũ/thiếu)
-        // - KHÔNG chữa theo hướng giảm: ít task hơn taskCount đã lưu nghĩa là có thể mới tải một phần
-        if (!fromCache && getAppBootAgeMs() >= BOOT_SYNC_GUARD_MS && pendingTasksChanged.current.size > 0) {
-          const touchedIds = new Set<string>();
-          const touchedCodes = new Set<string>();
-          pendingTasksChanged.current.forEach((t) => {
-            if (t.projectId) touchedIds.add(String(t.projectId));
-            if (t.projectCode) touchedCodes.add(String(t.projectCode).trim().toLowerCase());
-          });
+      });
 
-          // Task thuộc dự án khi: đúng projectId; hoặc (task cũ không có projectId) khớp đủ ba trường store, year, code
-          const belongsToProject = (t: Task, p: any): boolean => {
-            if (t.projectId) return String(t.projectId) === String(p.id);
-            return (
-              String(t.projectCode || "").trim().toLowerCase() === String(p.code || "").trim().toLowerCase() &&
-              String(t.projectStore || "").trim().toLowerCase() === String(p.store || "").trim().toLowerCase() &&
-              String(t.projectYear ?? "").trim() === String(p.year ?? "").trim()
-            );
-          };
+      if (tasksBatchTimer.current) {
+        clearTimeout(tasksBatchTimer.current);
+      }
 
-          const currentProjects = useAppStore.getState().projects || [];
-          let projectsNeedUpdate = false;
-          const healedProjects = currentProjects.map((p) => {
-            const codeKey = String(p.code || "").trim().toLowerCase();
-            if (!touchedIds.has(String(p.id)) && !(codeKey && touchedCodes.has(codeKey))) return p;
-
-            const pTasks = finalTasks.filter((t) => !t.isDeleted && belongsToProject(t, p));
-            if (pTasks.length === 0) return p;
-
-            // Có thể mới tải một phần task: không bao giờ ghi số liệu nhỏ hơn lên server
-            if (pTasks.length < (p.taskCount || 0)) return p;
-
-            const computed = calculateProjectComputedDates(p, pTasks, useAppStore.getState().delegationGroups);
-
-            const hasDiscrepancy =
-              p.taskCount !== computed.taskCount ||
-              !p.taskSummaries ||
-              p.taskSummaries.length !== (computed.taskSummaries?.length || 0) ||
-              (p.computedTakStart || '') !== (computed.computedTakStart || '') ||
-              (p.computedTakCompl || '') !== (computed.computedTakCompl || '');
-            if (!hasDiscrepancy) return p;
-
-            projectsNeedUpdate = true;
-            syncProjectDatesToFirestore(p.id, computed).catch(() => {});
-
-            return {
-              ...p,
-              ...computed,
-            };
-          });
-          if (projectsNeedUpdate) {
-            useAppStore.getState().setProjects(healedProjects);
+      tasksBatchTimer.current = setTimeout(() => {
+        if (pendingTasksMap.current) {
+          const rawList = Array.from(pendingTasksMap.current.values());
+          const projects = useAppStore.getState().projects || [];
+          const { dedupedTasks, removedTaskIds } = deduplicateTasksInMemory(rawList, projects);
+          if (removedTaskIds.length > 0) {
+            removedTaskIds.forEach((dupId) => {
+              const dupTask = pendingTasksMap.current?.get(dupId);
+              pendingTasksMap.current?.delete(dupId);
+              pendingTasksChanged.current.delete(dupId);
+              if (dupTask) pendingTasksRemoved.current.set(dupId, dupTask);
+            });
           }
+          const { cleaned: unrolledTasks } = cleanOrphanTasks(dedupedTasks);
+          const finalTasks = rollupParentTaskDatesAndStatus(unrolledTasks, useAppStore.getState().delegationGroups);
+          finalTasks.sort((a, b) =>
+            a.projectCode !== b.projectCode
+              ? (a.projectCode || '').localeCompare(b.projectCode || '')
+              : (a.orderIndex || 0) - (b.orderIndex || 0)
+          );
+          useAppStore.getState().setTasks(finalTasks);
+
+          const healedProjects = healProjectsAfterTasksBatch({
+            currentProjects: useAppStore.getState().projects || [],
+            finalTasks,
+            delegationGroups: useAppStore.getState().delegationGroups || [],
+            changedTasks: pendingTasksChanged.current,
+            removedTasks: pendingTasksRemoved.current,
+            fromCache,
+            knownHydratedProjectCodes: knownHydratedProjectCodes.current,
+            tasksPool: tasksPool.current,
+          });
+          if (healedProjects) useAppStore.getState().setProjects(healedProjects);
+
+          const finalIds = new Set(finalTasks.map((t) => t.id));
+          const changed = Array.from(pendingTasksChanged.current.values()).filter((t) => finalIds.has(t.id));
+          const removedIds = Array.from(pendingTasksRemoved.current.keys());
+          pendingTasksChanged.current.clear();
+          pendingTasksRemoved.current.clear();
+          if (changed.length > 0) offloadPersistSnapshot('taka_tasks', changed);
+          removedIds.forEach((id) => deleteLocalRecord('taka_tasks', id).catch(() => {}));
+
+          const setNotifs = useAppStore.getState().setAllTasksForNotifs;
+          if (setNotifs) setNotifs(finalTasks);
+          pendingTasksMap.current = null;
         }
-        
-        const finalIds = new Set(finalTasks.map(t => t.id));
-        const changed = Array.from(pendingTasksChanged.current.values()).filter(t => finalIds.has(t.id));
-        const removed = Array.from(pendingTasksRemoved.current);
-        pendingTasksChanged.current.clear();
-        pendingTasksRemoved.current.clear();
-        if (changed.length > 0) offloadPersistSnapshot('taka_tasks', changed);
-        removed.forEach((id) => { deleteLocalRecord('taka_tasks', id).catch(() => {}); });
-
-        const setNotifs = useAppStore.getState().setAllTasksForNotifs;
-        if (setNotifs) setNotifs(finalTasks);
-        pendingTasksMap.current = null;
-      }
-    }, 200);
-  }, []);
-
-  // Sleep/Wake Recovery Listener
-  useEffect(() => {
-    const handleSleepWakeRecovery = () => {
-      // 1. KHÔNG hủy listener khi thức giấc.
-      // Hủy xong mà không effect nào tạo lại => mất realtime tasks/costs/delegations
-      // Socket chết do iOS treo đã có initNetworkRecovery (syncResilience) xử lý bằng deltaResync
-      
-      if (useAppStore.getState().isTasksRequested) {
-        hydrateTasksFromLocal(useAppStore.getState().globalYearFilter).catch(() => {});
-      }
-    };
-
-    window.addEventListener("taka_sleep_wake_recovery", handleSleepWakeRecovery);
-    return () => {
-      window.removeEventListener("taka_sleep_wake_recovery", handleSleepWakeRecovery);
-    };
-  }, []);
+      }, 200);
+    },
+    []
+  );
 
   // Cleanup on unmount
   useEffect(() => {
@@ -263,67 +174,48 @@ export function useTasksHydration({
   useEffect(() => {
     let isCancelled = false;
     let intervalId: NodeJS.Timeout | null = null;
-
-    if (!querySignature || isTasksRequested) {
-      return;
-    }
+    if (!querySignature || isTasksRequested) return;
 
     const fetchNotifs = async () => {
       if (isCancelled) return;
       try {
-        const loadedNotifTasks = await loadNotificationTasks();
-        if (isCancelled) return;
-        setAllTasksForNotifs(loadedNotifTasks);
+        const loadedNotifTasks = await loadNotificationTasks({ skipFirestoreFallback: true });
+        if (!isCancelled) setAllTasksForNotifs(loadedNotifTasks);
       } catch (e) {
-        console.warn("[useTasksHydration] Notification lightweight tasks query error:", e);
+        console.warn('[useTasksHydration] Notification lightweight tasks query error:', e);
       }
     };
-
     fetchNotifs();
-
-    const POLL_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4 hours
-    intervalId = setInterval(fetchNotifs, POLL_INTERVAL_MS);
-
+    intervalId = setInterval(fetchNotifs, 4 * 60 * 60 * 1000);
     return () => {
       isCancelled = true;
       if (intervalId) clearInterval(intervalId);
     };
   }, [querySignature, isTasksRequested, setAllTasksForNotifs]);
 
-  // Safety Net: Handle manual force full sync
-  useEffect(() => {
-    const handleForceSync = () => {
-      tasksPool.current.forEach((u) => {
-        try { u(); } catch {}
-      });
-      tasksPool.current.clear();
-      tasksTTLTimeouts.current.forEach((t) => clearTimeout(t));
-      tasksTTLTimeouts.current.clear();
-      knownHydratedProjectCodes.current.clear();
-      prevQuerySigTasks.current = "";
-    };
-
-    window.addEventListener('taka_force_full_sync', handleForceSync);
-    return () => {
-      window.removeEventListener('taka_force_full_sync', handleForceSync);
-    };
-  }, []);
-
   // Main Tasks Sync Logic
   useEffect(() => {
     if (!querySignature) return;
+    if (isTasksRequested) {
+      flushDeferredInvalidations('taka_tasks')
+        .then((synthetic) => {
+          if (synthetic.length > 0) applyIncomingDeltas(synthetic);
+        })
+        .catch(() => {});
+    }
 
     const activeProjectIds = isTasksRequested
       ? [...new Set([...expandedProjectIds, ...searchActiveProjectIds])]
       : [];
-    const currentSig = `${querySignature}_${activeProjectIds.join(",")}_${isTasksRequested}`;
+    const currentSig = `${querySignature}_${activeProjectIds.join(',')}_${isTasksRequested}_${activeProjectsSummarySig}_${wakeRefreshCounter.current}`;
 
     if (prevQuerySigTasks.current !== querySignature) {
-      if (prevQuerySigTasks.current !== "") {
+      if (prevQuerySigTasks.current !== '') {
         tasksPool.current.forEach((u) => u());
         tasksPool.current.clear();
         tasksTTLTimeouts.current.forEach((t) => clearTimeout(t));
         tasksTTLTimeouts.current.clear();
+        clearDeletedTasksTracker();
       }
       prevQuerySigTasks.current = querySignature;
     }
@@ -347,222 +239,180 @@ export function useTasksHydration({
     }
 
     let isCancelled = false;
+    const getCurrentPendingOrStoreTasks = () =>
+      pendingTasksMap.current
+        ? Array.from(pendingTasksMap.current.values())
+        : useAppStore.getState().tasks || [];
+
     const runTasksSync = async () => {
-      const currentProjects = useAppStore.getState().projects || [];
-      const keysToHydrate = extractKeysToHydrate(activeProjectIds, currentProjects);
+      const storeState = useAppStore.getState();
+      const currentProjects = storeState.projects || [];
+      const currentStoreFilter = storeState.globalStoreFilter;
+      const keysToHydrate = extractKeysToHydrate(activeProjectIds, currentProjects, globalYearFilter);
 
       await Promise.all([
-        hydrateTasksForProjects(Array.from(keysToHydrate)),
-        hydrateDelegationsForProjects(activeProjectIds),
+        hydrateTasksForProjects(Array.from(keysToHydrate), globalYearFilter, currentStoreFilter),
+        hydrateDelegationsForProjects(activeProjectIds, globalYearFilter, currentStoreFilter),
       ]);
       if (isCancelled) return;
       const markers = await getLoadedMarkers();
+      if (isCancelled) return;
 
       setIsTasksLoading(true);
 
-      const projectsByYear = groupActiveProjectsByYear(activeProjectIds, currentProjects, globalYearFilter);
+      const projectsByYear = groupActiveProjectsByYear(
+        activeProjectIds,
+        currentProjects,
+        globalYearFilter
+      );
 
       const neededKeys = new Set<string>();
-      let needTasksDeltaSync = false;
+      const currentTasksSnapshot = useAppStore.getState().tasks || [];
+      const tasksLookupIndex = buildProjectTasksLookupIndex(currentTasksSnapshot);
 
       projectsByYear.forEach((projs, year) => {
-        if (projs.length > 10) {
-          const yearKey = `year_${year}`;
-          neededKeys.add(yearKey);
+        const yearKey = `year_${year}`;
+        const isYearFresh = hasFreshMarker(markers, 'tasks_year', year);
+        const isArchivedPastYear = Number(year) < new Date().getFullYear() - 1;
 
+        if (tasksPool.current.has(yearKey)) {
+          neededKeys.add(yearKey);
           if (tasksTTLTimeouts.current.has(yearKey)) {
             clearTimeout(tasksTTLTimeouts.current.get(yearKey)!);
             tasksTTLTimeouts.current.delete(yearKey);
           }
+          setIsTasksLoading(false);
+          return;
+        }
 
-          projs.forEach((p) => {
+        const visibleSet = new Set(
+          (visibleActiveProjectIdsRef.current || []).map((id) => String(id))
+        );
+        const sortedProjs = [...projs].sort((a, b) => {
+          const aVis = visibleSet.has(a.id) || visibleSet.has(a.code) ? 1 : 0;
+          const bVis = visibleSet.has(b.id) || visibleSet.has(b.code) ? 1 : 0;
+          return bVis - aVis;
+        });
+
+        const unhydratedProjs: typeof sortedProjs = [];
+        let hydratedLocalTaskCount = 0;
+        let hasAnyNonZeroHydrated = false;
+        const isTargetedExpansion = sortedProjs.length <= 25 && !isArchivedPastYear;
+
+        sortedProjs.forEach((p) => {
+          const projKey = `proj_${p.id}`;
+          neededKeys.add(projKey);
+
+          if (tasksTTLTimeouts.current.has(projKey)) {
+            clearTimeout(tasksTTLTimeouts.current.get(projKey)!);
+            tasksTTLTimeouts.current.delete(projKey);
+          }
+
+          const localProjTasks = getLocalProjectTasksFromIndex(p, tasksLookupIndex);
+          const { alreadyActiveInPool, deltaManaged, isZeroTaskProject, coversAllSummaries } =
+            evaluateProjectTaskHydrationState({
+              p,
+              projKey,
+              localProjTasks,
+              markers,
+              isYearFresh,
+              isArchivedPastYear,
+              isTargetedExpansion,
+              deltaFirstTasks: DELTA_FIRST.tasks,
+              tasksPool: tasksPool.current,
+              knownHydratedProjectCodes: knownHydratedProjectCodes.current,
+            });
+
+          if (alreadyActiveInPool) return;
+
+          if (deltaManaged) {
+            if (coversAllSummaries || isZeroTaskProject) {
+              knownHydratedProjectCodes.current.add(String(p.id));
+              markProjectTasksHydrated(p.id);
+            }
+            const noop = () => {};
+            (noop as any).__isNoop = true;
+            if (isZeroTaskProject) (noop as any).__isZeroTaskNoop = true;
+            tasksPool.current.set(projKey, noop);
+            hydratedLocalTaskCount += localProjTasks.length;
+            if (!isZeroTaskProject) hasAnyNonZeroHydrated = true;
+          } else {
+            unhydratedProjs.push(p);
+          }
+        });
+
+        if (hydratedLocalTaskCount > 0 || hasAnyNonZeroHydrated) {
+          setCloudStatus('online');
+          const healed = healProjectsAfterTasksBatch({
+            currentProjects: useAppStore.getState().projects || [],
+            finalTasks: currentTasksSnapshot,
+            delegationGroups: useAppStore.getState().delegationGroups || [],
+            changedTasks: new Map(),
+            removedTasks: new Map(),
+            fromCache: true,
+            knownHydratedProjectCodes: knownHydratedProjectCodes.current,
+            tasksPool: tasksPool.current,
+          });
+          if (healed) {
+            useAppStore.getState().setProjects(healed);
+          }
+          usePerformanceStore
+            .getState()
+            .trackGetDoc(
+              `taka_tasks_${yearKey}_dexie`,
+              true,
+              hydratedLocalTaskCount,
+              `Dexie Local-First Tasks (0 Read, ${sortedProjs.length - unhydratedProjs.length} projects)`
+            );
+        }
+
+        if (unhydratedProjs.length === 0) {
+          setIsTasksLoading(false);
+          return;
+        }
+
+        if (unhydratedProjs.length > 50 && String(year).toLowerCase() !== 'all') {
+          neededKeys.add(yearKey);
+          unhydratedProjs.forEach((p) => {
             const pKey = `proj_${p.id}`;
+            neededKeys.delete(pKey);
             if (tasksPool.current.has(pKey)) {
-              const u = tasksPool.current.get(pKey);
-              if (u) u();
+              tasksPool.current.get(pKey)?.();
               tasksPool.current.delete(pKey);
               usePerformanceStore.getState().unregisterListener(`taka_tasks_${pKey}`);
             }
           });
-
-          if (!tasksPool.current.has(yearKey)) {
-            const currentTasks = useAppStore.getState().tasks || [];
-            const hasLocalYearTasks = currentTasks.some(
-              (t) => String(t.projectYear || "") === String(year)
-            );
-            const isClosedOrPastYear = Number(year) < new Date().getFullYear();
-
-            const deltaManaged =
-              (hasLocalYearTasks && isClosedOrPastYear) ||
-              (DELTA_FIRST.tasks && hasMarker(markers, 'tasks_year', year));
-            if (deltaManaged) {
-              tasksPool.current.set(yearKey, () => {});
-              setIsTasksLoading(false);
-              needTasksDeltaSync = true;
-              usePerformanceStore
-                .getState()
-                .trackGetDoc(
-                  `taka_tasks_${yearKey}`,
-                  true,
-                  currentTasks.length,
-                  "Dexie Local-First Tasks (0 Read full collection)"
-                );
-            } else {
-              const colRef = collection(db, "artifacts", APP_ID, "public", "data", "taka_tasks");
-              const qTasks = buildStoreAndYearQuery(
-                colRef,
-                "projectStore",
-                "projectYear",
-                year,
-                userRole,
-                allowedStores
-              );
-
-              usePerformanceStore.getState().registerListener(`taka_tasks_${yearKey}`);
-              const unsub = onSnapshot(
-                qTasks,
-                (snapshot) => {
-                  usePerformanceStore.getState().trackSnapshot(`taka_tasks_${yearKey}`, snapshot);
-                  setIsTasksLoading(false);
-                  const fromCache = snapshot.metadata.fromCache;
-                  let changesToApply: any[] = snapshot.docChanges();
-                  if (!fromCache) {
-                    const zombieRemovals = buildZombieTaskRemovalsForYear(
-                      snapshot.docs,
-                      useAppStore.getState().tasks || [],
-                      year,
-                      userRole,
-                      allowedStores
-                    );
-                    if (zombieRemovals.length > 0) changesToApply = [...changesToApply, ...zombieRemovals];
-                  }
-                  batchTasksUpdate(changesToApply, fromCache);
-                  setCloudStatus("online");
-
-                  if (DELTA_FIRST.tasks && !fromCache) {
-                    markLoaded('tasks_year', year).catch(() => {});
-                    const u = tasksPool.current.get(yearKey);
-                    tasksPool.current.set(yearKey, () => {});
-                    u?.();
-                    usePerformanceStore.getState().unregisterListener(`taka_tasks_${yearKey}`);
-                  }
-                },
-                (e) => {
-                  setIsTasksLoading(false);
-                  console.error("Tasks consolidated listener error:", e);
-                  setCloudStatus("offline");
-                }
-              );
-              tasksPool.current.set(yearKey, unsub);
-            }
-          }
-        } else {
-          const visibleSet = new Set((visibleActiveProjectIdsRef.current || []).map((id) => String(id)));
-          const sortedProjs = [...projs].sort((a, b) => {
-            const aVis = visibleSet.has(a.id) || visibleSet.has(a.code) ? 1 : 0;
-            const bVis = visibleSet.has(b.id) || visibleSet.has(b.code) ? 1 : 0;
-            return bVis - aVis;
+          attachYearTasksListener({
+            year,
+            yearKey,
+            projectsInYear: projs,
+            userRole,
+            allowedStores,
+            deltaFirstTasks: DELTA_FIRST.tasks,
+            tasksPool: tasksPool.current,
+            knownHydratedProjectCodes: knownHydratedProjectCodes.current,
+            getCurrentPendingOrStoreTasks,
+            batchTasksUpdate,
+            setIsTasksLoading,
+            setCloudStatus,
           });
-
-          sortedProjs.forEach((p) => {
+        } else {
+          unhydratedProjs.forEach((p) => {
             const projKey = `proj_${p.id}`;
-            const yearKey = `year_${year}`;
-
-            if (tasksPool.current.has(yearKey)) {
-              neededKeys.add(yearKey);
-              return;
-            }
-
-            neededKeys.add(projKey);
-
-            if (tasksTTLTimeouts.current.has(projKey)) {
-              clearTimeout(tasksTTLTimeouts.current.get(projKey)!);
-              tasksTTLTimeouts.current.delete(projKey);
-            }
-
-            if (!tasksPool.current.has(projKey)) {
-              const currentTasks = useAppStore.getState().tasks || [];
-              const localProjTasks = currentTasks.filter((t) => doesTaskBelongToProject(t, p));
-              const hasLocalProjTasks =
-                localProjTasks.length > 0 ||
-                knownHydratedProjectCodes.current.has(String(p.id));
-              const isClosedOrPastYear = Number(year) < new Date().getFullYear();
-              const isZeroTaskProject =
-                (p.taskCount || 0) === 0 &&
-                Array.isArray(p.taskSummaries) &&
-                p.taskSummaries.length === 0 &&
-                localProjTasks.length === 0;
-
-              const deltaManaged =
-                isZeroTaskProject ||
-                (hasLocalProjTasks && isClosedOrPastYear) ||
-                (DELTA_FIRST.tasks && (hasMarker(markers, 'tasks_proj', p.id) || hasMarker(markers, 'tasks_proj', p.code) || hasMarker(markers, 'tasks_year', year)));
-              if (deltaManaged) {
-                tasksPool.current.set(projKey, () => {});
-                setIsTasksLoading(false);
-                if (!isZeroTaskProject) needTasksDeltaSync = true;
-                usePerformanceStore
-                  .getState()
-                  .trackGetDoc(
-                    `taka_tasks_${projKey}`,
-                    true,
-                    localProjTasks.length,
-                    "Dexie Local-First Project Tasks (0 Read)"
-                  );
-              } else {
-                const qTasks = query(
-                  collection(db, "artifacts", APP_ID, "public", "data", "taka_tasks"),
-                  where("projectCode", "==", p.code)
-                );
-
-                usePerformanceStore.getState().registerListener(`taka_tasks_${projKey}`);
-                const unsub = onSnapshot(
-                  qTasks,
-                  (snapshot) => {
-                    knownHydratedProjectCodes.current.add(String(p.id));
-                    usePerformanceStore.getState().trackSnapshot(`taka_tasks_${projKey}`, snapshot);
-                    setIsTasksLoading(false);
-                    const fromCache = snapshot.metadata.fromCache;
-                    let compatibleChanges = filterCompatibleProjectChanges(snapshot.docChanges(), p);
-
-                    if (!fromCache) {
-                      const zombieRemovals = buildZombieTaskRemovalsForProject(
-                        snapshot.docs,
-                        useAppStore.getState().tasks || [],
-                        p
-                      );
-                      if (zombieRemovals.length > 0) compatibleChanges = [...compatibleChanges, ...zombieRemovals];
-                    }
-
-                    batchTasksUpdate(compatibleChanges, fromCache);
-                    setCloudStatus("online");
-
-                    if (DELTA_FIRST.tasks && !fromCache) {
-                      markLoaded('tasks_proj', p.id).catch(() => {});
-                      const u = tasksPool.current.get(projKey);
-                      tasksPool.current.set(projKey, () => {});
-                      u?.();
-                      usePerformanceStore.getState().unregisterListener(`taka_tasks_${projKey}`);
-                    }
-                  },
-                  (e) => {
-                    setIsTasksLoading(false);
-                    console.error("Tasks listener error:", e);
-                    setCloudStatus("offline");
-                  }
-                );
-                tasksPool.current.set(projKey, unsub);
-              }
-            }
+            attachProjectTasksListener({
+              p,
+              projKey,
+              deltaFirstTasks: DELTA_FIRST.tasks,
+              tasksPool: tasksPool.current,
+              knownHydratedProjectCodes: knownHydratedProjectCodes.current,
+              getCurrentPendingOrStoreTasks,
+              batchTasksUpdate,
+              setIsTasksLoading,
+              setCloudStatus,
+            });
           });
         }
       });
-
-      if (needTasksDeltaSync) {
-        pullAndApplyDeltas()
-          .then(() => setCloudStatus("online"))
-          .catch(() => {});
-      }
 
       Array.from(tasksPool.current.keys()).forEach((key) => {
         if (!neededKeys.has(key)) {
@@ -581,11 +431,37 @@ export function useTasksHydration({
     };
 
     runTasksSync().catch((err) => {
-      console.warn("[useTasksHydration] runTasksSync error:", err);
+      console.warn('[useTasksHydration] runTasksSync error:', err);
     });
+
+    const handleSleepWakeRecovery = (e?: Event) => {
+      const elapsedSleepMs = Number((e as CustomEvent)?.detail?.elapsedSleepMs || 0);
+      // Only reset pool if device slept longer than the 24h marker TTL; normal sleep/wake is handled by pullAndApplyDeltas
+      if (elapsedSleepMs > 24 * 60 * 60 * 1000) {
+        knownHydratedProjectCodes.current.clear();
+        tasksPool.current.forEach((u, key) => {
+          if ((u as any)?.__isNoop) {
+            tasksPool.current.delete(key);
+          }
+        });
+        wakeRefreshCounter.current += 1;
+        if (useAppStore.getState().isTasksRequested) {
+          setWakeTick((prev) => prev + 1);
+        }
+      }
+      if (useAppStore.getState().isTasksRequested) {
+        hydrateTasksFromLocal(useAppStore.getState().globalYearFilter).catch(() => {});
+        pullAndApplyDeltas(undefined, true).catch(() => {});
+      }
+    };
+
+    window.addEventListener('taka_sleep_wake_recovery', handleSleepWakeRecovery);
+    window.addEventListener('taka_network_recovered', handleSleepWakeRecovery);
 
     return () => {
       isCancelled = true;
+      window.removeEventListener('taka_sleep_wake_recovery', handleSleepWakeRecovery);
+      window.removeEventListener('taka_network_recovered', handleSleepWakeRecovery);
     };
   }, [
     querySignature,
@@ -594,9 +470,11 @@ export function useTasksHydration({
     isTasksRequested,
     expandedProjectIds,
     searchActiveProjectIds,
+    activeProjectsSummarySig,
     globalYearFilter,
     batchTasksUpdate,
     setIsTasksLoading,
     setCloudStatus,
+    wakeTick,
   ]);
 }

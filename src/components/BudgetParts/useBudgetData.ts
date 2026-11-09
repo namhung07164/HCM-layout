@@ -42,9 +42,11 @@ export function useBudgetData({
   const setDetailTabStoreFilter = useAppStore(state => state.setDetailTabStoreFilter);
   const setActiveTab = useAppStore(state => state.setActiveTab);
   const budgetTabSearchTerm = useAppStore(state => state.budgetTabSearchTerm);
+  const fixedProjectCode = useAppStore(state => state.fixedProjectCode);
 
   const [searchTerm, setSearchTerm] = useState(initialSearchTerm || budgetTabSearchTerm || '');
   const deferredSearchTerm = useDeferredValue(searchTerm);
+  const effectiveFilterTerm = deferredSearchTerm.trim() || (fixedProjectCode ? fixedProjectCode.trim() : '');
 
   useEffect(() => {
     if (initialSearchTerm) {
@@ -56,17 +58,17 @@ export function useBudgetData({
 
   const [collapsedInSearch, setCollapsedInSearch] = useState<Set<string>>(new Set());
   const [moneyFilter, setMoneyFilter] = useState(() => {
-    if ((initialSearchTerm || '').trim()) return 'all';
+    if ((initialSearchTerm || '').trim() || (fixedProjectCode || '').trim()) return 'all';
     return safeGetItemSession("taka_budget_money_filter") || 'has_money';
   });
   const lastSelectedMoneyFilterRef = useRef<string>(
     safeGetItemSession("taka_budget_money_filter") || 'has_money'
   );
   const lastSelectedLocationFilterRef = useRef<string[]>(globalLocationFilter);
-  const wasSearchingRef = useRef<boolean>(!!(initialSearchTerm || '').trim());
+  const wasSearchingRef = useRef<boolean>(!!((initialSearchTerm || '').trim() || (fixedProjectCode || '').trim()));
 
   useEffect(() => {
-    const isSearching = !!deferredSearchTerm.trim();
+    const isSearching = !!effectiveFilterTerm;
     if (!wasSearchingRef.current && isSearching) {
       if (moneyFilter !== 'all') {
         lastSelectedMoneyFilterRef.current = moneyFilter;
@@ -81,7 +83,7 @@ export function useBudgetData({
       setGlobalLocationFilter(lastSelectedLocationFilterRef.current || []);
       wasSearchingRef.current = false;
     }
-  }, [deferredSearchTerm]);
+  }, [effectiveFilterTerm]);
 
   const [visibleColumns, setVisibleColumns] = useState<string[]>(AVAILABLE_COLUMNS.map(c => c.id));
   const [colWidths, setColWidths] = useState<Record<string, number>>({
@@ -137,12 +139,15 @@ export function useBudgetData({
   const { handleExportBudget, handleImportBudget } = useBudgetCsvOps({ projects, filteredRoots });
 
   const getProjectFinancials = (p: Project): ProjectFinancials => {
-    const fin = p.financial || { totalApproved: p.budget || 0, totalActualPaid: p.actual || 0, totalForecastPaid: 0 };
+    const fin = p.financial || { totalApproved: p.budget || 0, totalActualPaid: 0, totalForecastPaid: 0 };
     const budget = fin.totalApproved || p.budget || 0;
-    const actual = fin.totalActualPaid;
-    const hasForc = fin.totalForecastPaid > 0;
+    const pCosts = costs.filter(c => !c.isDeleted && String(c.projectCode || (c as any).code || '').trim().toLowerCase() === String(p.code || '').trim().toLowerCase() && (
+      !c.projectYear || !p.year || String(c.projectYear).trim() === String(p.year).trim()
+    ));
+    const actual = pCosts.reduce((sum, c) => sum + (Number(c.actual) || 0), 0);
+    const hasForc = pCosts.some(c => c.costType === 'forc');
     const supportingFee = p.supportingFee || 0;
-    const remaining = budget - (actual + fin.totalForecastPaid) + supportingFee;
+    const remaining = budget - (actual + (fin.totalForecastPaid || 0)) + supportingFee;
     return { budget, actual, supportingFee, hasForc, remaining };
   };
 
@@ -182,8 +187,8 @@ export function useBudgetData({
 
       // Restrict candidate children to same fiscal year and store as selected parent
       if (selectedParentProject) {
-        const pYear = p.year ? String(p.year).trim() : (p.start ? String(p.start).substring(0, 4) : '');
-        const parentYear = selectedParentProject.year ? String(selectedParentProject.year).trim() : (selectedParentProject.start ? String(selectedParentProject.start).substring(0, 4) : '');
+        const pYear = p.year ? String(p.year).trim() : '';
+        const parentYear = selectedParentProject.year ? String(selectedParentProject.year).trim() : '';
         if (pYear && parentYear && pYear !== parentYear) return false;
 
         const pStore = String(p.store || '').trim().toUpperCase();
@@ -219,13 +224,11 @@ export function useBudgetData({
   const linkedChildrenCount = useMemo(() => {
     if (!selectedParentProject) return 0;
     const parentCode = String(selectedParentProject.code || '').trim().toUpperCase();
-    const parentYear = selectedParentProject.year ? String(selectedParentProject.year).trim() : (selectedParentProject.start ? String(selectedParentProject.start).substring(0, 4) : '');
+    const parentYear = selectedParentProject.year ? String(selectedParentProject.year).trim() : '';
     const parentStore = String(selectedParentProject.store || '').trim().toUpperCase();
-
     return projects.filter(p => {
       if (!p.parentId || String(p.parentId).trim().toUpperCase() !== parentCode) return false;
-      const cYear = p.year ? String(p.year).trim() : (p.start ? String(p.start).substring(0, 4) : '');
-      const cStore = String(p.store || '').trim().toUpperCase();
+      const cYear = p.year ? String(p.year).trim() : '', cStore = String(p.store || '').trim().toUpperCase();
       if (parentYear && cYear && cYear !== parentYear) return false;
       if (parentStore && cStore && cStore !== parentStore) return false;
       return true;
@@ -333,7 +336,7 @@ export function useBudgetData({
   };
 
   const toggleExpand = (id: string) => {
-    if (searchTerm.trim()) {
+    if (searchTerm.trim() || (fixedProjectCode && fixedProjectCode.trim())) {
       setCollapsedInSearch(prev => {
         const next = new Set(prev);
         if (next.has(id)) next.delete(id);
@@ -371,7 +374,7 @@ export function useBudgetData({
   const isAdmin = currentUser.role === 'admin';
   const role = currentUser.role as AppRole;
   const isArchiveYear = globalYearFilter !== 'all' && Number(globalYearFilter) < new Date().getFullYear();
-  const canWrite = (isAdmin || !!permissionMatrix[role]?.Write?.budget) && !isArchiveYear;
+  const canWrite = (isAdmin || !!currentUser?.canWrite || !!permissionMatrix[role]?.Write?.budget) && !isArchiveYear;
 
   const formatCurrency = (val: number | undefined) => {
     return formatCurrencyValue(val, currency, jpyRate, usdRate);
@@ -418,80 +421,31 @@ export function useBudgetData({
 
   const handleProjectLinkClick = (p: Project) => {
     if (!p) return;
+    useAppStore.getState().setFixedProjectCode(String(p.code || '').trim().toUpperCase());
     setDetailTabFilterCode(p.code);
     setDetailTabStoreFilter(p.store || "all");
-    if (p.year) {
-      setGlobalYearFilter(String(p.year));
-      safeSetItemSession("taka_detail_year", String(p.year));
-    } else {
-      setGlobalYearFilter("all");
-      safeSetItemSession("taka_detail_year", "all");
-    }
-    if (p.store) {
-      setGlobalStoreFilter(p.store);
-      safeSetItemLocal(`taka_store_filter_${currentUser.id}`, String(p.store));
-    } else {
-      setGlobalStoreFilter("all");
-      safeSetItemLocal(`taka_store_filter_${currentUser.id}`, "all");
-    }
+    const targetYear = p.year ? String(p.year) : "all";
+    setGlobalYearFilter(targetYear);
+    safeSetItemSession("taka_detail_year", targetYear);
+    const targetStore = p.store ? String(p.store) : "all";
+    setGlobalStoreFilter(p.store || "all");
+    safeSetItemLocal(`taka_store_filter_${currentUser.id}`, targetStore);
     setActiveTab("detail");
   };
 
   return {
-    currency,
-    jpyRate,
-    usdRate,
-    canWrite,
-    globalYearFilter,
-    setGlobalYearFilter,
-    effectiveStore,
-    setGlobalStoreFilter,
-    globalLocationFilter,
-    setGlobalLocationFilter,
-    searchTerm,
-    setSearchTerm,
-    deferredSearchTerm,
-    moneyFilter,
-    setMoneyFilter,
-    lastSelectedMoneyFilterRef,
-    collapsedInSearch,
-    expandedParents,
-    sortConfig,
-    visibleColumns,
-    colWidths,
-    visibleCount,
-    setVisibleCount,
-    years,
-    stores,
-    locationOptions,
-    filteredRoots,
-    totalGlobalBudget,
-    totalGlobalActual,
-    totalGlobalSupportingFee,
-    totalGlobalRemaining,
-    totalVarianceColor,
-    candidateParentProjects,
-    candidateChildProjects,
-    linkedChildrenCount,
-    selectedParentProject,
-    setSelectedParentProject,
-    isLinkModalOpen,
-    setIsLinkModalOpen,
-    parentSearchTerm,
-    setParentSearchTerm,
-    childSearchTerm,
-    setChildSearchTerm,
-    getProjectFinancials,
-    handleResize,
-    handleToggleColumn,
-    toggleExpand,
-    toggleAllParents,
-    handleSort,
-    handleBudgetScroll,
-    handleOpenLinkModal,
-    handleExportBudget,
-    handleImportBudget,
-    handleProjectLinkClick,
-    formatCurrency
+    currency, jpyRate, usdRate, canWrite,
+    globalYearFilter, setGlobalYearFilter, effectiveStore, setGlobalStoreFilter,
+    globalLocationFilter, setGlobalLocationFilter, searchTerm, setSearchTerm,
+    deferredSearchTerm, moneyFilter, setMoneyFilter, lastSelectedMoneyFilterRef,
+    collapsedInSearch, expandedParents, sortConfig, visibleColumns, colWidths,
+    visibleCount, setVisibleCount, years, stores, locationOptions, filteredRoots,
+    totalGlobalBudget, totalGlobalActual, totalGlobalSupportingFee, totalGlobalRemaining,
+    totalVarianceColor, candidateParentProjects, candidateChildProjects, linkedChildrenCount,
+    selectedParentProject, setSelectedParentProject, isLinkModalOpen, setIsLinkModalOpen,
+    parentSearchTerm, setParentSearchTerm, childSearchTerm, setChildSearchTerm,
+    getProjectFinancials, handleResize, handleToggleColumn, toggleExpand,
+    toggleAllParents, handleSort, handleBudgetScroll, handleOpenLinkModal,
+    handleExportBudget, handleImportBudget, handleProjectLinkClick, formatCurrency
   };
 }

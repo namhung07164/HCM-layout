@@ -6,8 +6,10 @@ import { computeTaskCode, computeAllTaskCodes } from '../../lib/ganttUtils';
 import { GanttBar } from './GanttBar';
 import { GanttBaseline } from './GanttBaseline';
 import { GanttTaskLeftColumns } from './GanttTaskLeftColumns';
-import { cn, formatGanttDate, renderGanttDateCell } from './GanttUtils';
+import { GanttTaskEditableColumns } from './GanttTaskEditableColumns';
+import { cn, formatGanttDate } from './GanttUtils';
 import { useIsRowFlashed } from '../../lib/changeFlashService';
+import { executeUnifiedTaskUpdate } from '../../lib/taskInlineUpdateService';
 
 export interface GanttTaskRowProps {
   t: Task;
@@ -129,14 +131,21 @@ export const GanttTaskRow = React.memo(function GanttTaskRow({
   const isDragging = draggingTaskIds.includes(t.id);
   const isFocused = initialFocusTaskId === t.id || ganttTabFocusTaskId === t.id;
 
-  const userRole = currentUser ? getUserDelegationRoleForTask(t, currentUser, delegationGroups || []) : null;
+  const userRole = currentUser && isHighlightDelegationOn
+    ? getUserDelegationRoleForTask(t, currentUser, delegationGroups || [])
+    : null;
   const highlightRole = isHighlightDelegationOn ? userRole : null;
 
   const planStatus = getTaskStatus(t.start, t.finish);
-  const linkedGroup = delegationGroupByTaskId?.get(t.id) || (delegationGroups || []).find((g: any) => g.taskId === t.id || g.parentTaskId === t.id);
+  const linkedGroup = delegationGroupByTaskId
+    ? delegationGroupByTaskId.get(t.id)
+    : (delegationGroups || []).find((g: any) => g.taskId === t.id || g.parentTaskId === t.id);
   const actStatusObj = resolveActualStatus(planStatus, linkedGroup?.subTasks || []);
-  const actPrg = computeActProgressPercent([t], delegationGroups || []);
-  const taskCode = taskCodeMap?.get(t.id) || t.taskCodePhu || computeTaskCode(projects, tasks, t);
+  const actPrg = linkedGroup ? computeActProgressPercent([t], [linkedGroup]) : computeActProgressPercent([t], []);
+  const taskCode =
+    taskCodeMap?.get(t.id) ||
+    t.taskCodePhu ||
+    (p.code ? `${p.code}#${(taskIndex ?? 0) + 1}` : computeTaskCode(projects, tasks, t));
 
   // Compute accurate lifecycle status taking into account runningStatus, delegation, approvals, progress, and dates
   let effectiveStatus = planStatus;
@@ -170,9 +179,11 @@ export const GanttTaskRow = React.memo(function GanttTaskRow({
     return childTasks
       .filter((ct) => {
         const plSt = getTaskStatus(ct.start, ct.finish);
-        const lg = delegationGroupByTaskId?.get(ct.id) || (delegationGroups || []).find((g: any) => g.taskId === ct.id || g.parentTaskId === ct.id);
+        const lg = delegationGroupByTaskId
+          ? delegationGroupByTaskId.get(ct.id)
+          : (delegationGroups || []).find((g: any) => g.taskId === ct.id || g.parentTaskId === ct.id);
         const actStObj = resolveActualStatus(plSt, lg?.subTasks || []);
-        const prg = computeActProgressPercent([ct], delegationGroups || []);
+        const prg = lg ? computeActProgressPercent([ct], [lg]) : computeActProgressPercent([ct], []);
         const running = (ct.runningStatus || '').toLowerCase();
         const actLabel = (actStObj.label || '').toLowerCase();
 
@@ -196,9 +207,10 @@ export const GanttTaskRow = React.memo(function GanttTaskRow({
 
         return false;
       })
-      .map((ct) => {
-        const ctPrg = computeActProgressPercent([ct], delegationGroups || []);
-        const ctCode = ct.taskCodePhu || taskCodeMap?.get(ct.id) || computeTaskCode(projects, tasks, ct);
+      .map((ct, idx) => {
+        const lg = delegationGroupByTaskId ? delegationGroupByTaskId.get(ct.id) : undefined;
+        const ctPrg = lg ? computeActProgressPercent([ct], [lg]) : computeActProgressPercent([ct], []);
+        const ctCode = ct.taskCodePhu || taskCodeMap?.get(ct.id) || (p.code ? `${p.code}#${idx + 1}` : '');
         return {
           id: String(ct.id),
           name: ct.name,
@@ -209,7 +221,7 @@ export const GanttTaskRow = React.memo(function GanttTaskRow({
           duration: ct.duration,
         };
       });
-  }, [hasChildren, childTasks, delegationGroups, projects, tasks]);
+  }, [hasChildren, childTasks, delegationGroupByTaskId, delegationGroups, p.code, taskCodeMap]);
 
   const extraVars = {
     actStatus: effectiveStatus,
@@ -236,6 +248,7 @@ export const GanttTaskRow = React.memo(function GanttTaskRow({
   return (
     <div
       id={`gantt-task-row-${t.id}`}
+      data-print-row="true"
       draggable={isEditMode && !isParentTask}
       onDragStart={(e) => {
         if (!isEditMode || isParentTask) {
@@ -243,7 +256,7 @@ export const GanttTaskRow = React.memo(function GanttTaskRow({
           return;
         }
         const target = e.target as HTMLElement;
-        if (target.closest('input, button, a, [role="button"]')) {
+        if (target.closest('input, button, a, [role="button"], [data-editable-cell="true"]')) {
           e.preventDefault();
           return;
         }
@@ -254,7 +267,7 @@ export const GanttTaskRow = React.memo(function GanttTaskRow({
       onDragLeave={(e) => isEditMode && handleTaskDragLeave(e, t.id)}
       onDrop={(e) => isEditMode && handleTaskDrop(e, t, p)}
       className={cn(
-        "flex h-10 min-h-[40px] border-b border-slate-100 dark:border-slate-800 transition-all duration-700 relative group",
+        "flex h-10 min-h-[40px] border-b border-slate-100 dark:border-slate-800 transition-colors duration-200 relative group",
         getRowVisibilityClass(`task-${t.id}`),
         isSelected ? "bg-blue-50/50 dark:bg-blue-950/30" : "hover:bg-slate-50/80 dark:hover:bg-slate-800/40",
         isEditMode && !isParentTask && "cursor-grab active:cursor-grabbing hover:bg-blue-50/70 dark:hover:bg-blue-900/30",
@@ -267,8 +280,8 @@ export const GanttTaskRow = React.memo(function GanttTaskRow({
     >
       {/* Left Side Columns Container */}
       <div
-        className="sticky left-0 z-20 bg-white dark:bg-[#1e1e20] flex border-r border-slate-200 dark:border-slate-800 shrink-0 h-full items-center overflow-hidden"
-        style={{ width: `${sideWidth}px` }}
+        className="sticky left-0 z-20 bg-white dark:bg-[#1e1e20] flex border-r border-slate-200 dark:border-slate-800 shrink-0 h-full items-center overflow-hidden box-border"
+        style={{ width: `${sideWidth}px`, minWidth: `${sideWidth}px`, maxWidth: `${sideWidth}px` }}
       >
         <div className="flex-1 min-w-0 h-full flex items-center overflow-hidden">
           <GanttTaskLeftColumns
@@ -297,51 +310,24 @@ export const GanttTaskRow = React.memo(function GanttTaskRow({
           />
         </div>
 
-        {showStart && (
-          <div
-            className="border-l border-slate-200 dark:border-[#444446] px-1 flex items-center justify-center shrink-0 h-full overflow-hidden"
-            style={{ width: startColWidth, minWidth: startColWidth, maxWidth: startColWidth }}
-          >
-            {renderGanttDateCell(t.start, "text-blue-600 dark:text-[#8ab4f8]")}
-          </div>
-        )}
-
-        {showFinish && (
-          <div
-            className="border-l border-slate-200 dark:border-[#444446] px-1 flex items-center justify-center shrink-0 h-full overflow-hidden"
-            style={{ width: finishColWidth, minWidth: finishColWidth, maxWidth: finishColWidth }}
-          >
-            {renderGanttDateCell(t.finish, "text-pink-600 dark:text-pink-400")}
-          </div>
-        )}
-
-        {showParty && (
-          <div
-            className="text-xs text-slate-700 dark:text-slate-300 font-medium border-l border-slate-200 dark:border-[#444446] p-1 flex items-center justify-center shrink-0 h-full"
-            style={{ width: partyColWidth, minWidth: partyColWidth, maxWidth: partyColWidth }}
-          >
-            {t.party || "-"}
-          </div>
-        )}
-
-        {showDuration && (
-          <div
-            className="font-mono text-[10px] sm:text-xs text-slate-700 dark:text-slate-300 border-l border-slate-200 dark:border-[#444446] p-1 flex items-center justify-center font-bold shrink-0 h-full"
-            style={{ width: durationColWidth, minWidth: durationColWidth, maxWidth: durationColWidth }}
-          >
-            {t.duration ? `${t.duration}d` : "-"}
-          </div>
-        )}
-
-        {showPredecessor && (
-          <div
-            className="font-mono text-[10px] sm:text-xs text-indigo-600 dark:text-indigo-400 font-semibold border-l border-slate-200 dark:border-[#444446] px-1 flex items-center justify-center shrink-0 h-full overflow-hidden"
-            style={{ width: predecessorColWidth, minWidth: predecessorColWidth, maxWidth: predecessorColWidth }}
-            title={t.predecessor || ""}
-          >
-            <span className="truncate">{t.predecessor || "-"}</span>
-          </div>
-        )}
+        <GanttTaskEditableColumns
+          t={t}
+          projects={projects}
+          tasks={tasks}
+          canWrite={canWrite}
+          isEditMode={isEditMode}
+          showStart={showStart}
+          startColWidth={startColWidth}
+          showFinish={showFinish}
+          finishColWidth={finishColWidth}
+          showParty={showParty}
+          partyColWidth={partyColWidth}
+          showDuration={showDuration}
+          durationColWidth={durationColWidth}
+          showPredecessor={Boolean(showPredecessor)}
+          predecessorColWidth={predecessorColWidth}
+          onUpdateTask={(task, updates) => executeUnifiedTaskUpdate(task, updates, currentUser)}
+        />
       </div>
 
       {/* Right Timeline Area */}
@@ -370,8 +356,72 @@ export const GanttTaskRow = React.memo(function GanttTaskRow({
           setActiveTooltip={setActiveTooltip}
           isEditMode={isEditMode}
           getBarColor={getBarColor}
+          onUpdateTaskDates={(_id, newStart, newFinish) =>
+            executeUnifiedTaskUpdate(t, { start: newStart, finish: newFinish }, currentUser)
+          }
         />
       </div>
     </div>
+  );
+}, (prev, next) => {
+  const tId = String(prev.t.id);
+  const myTooltipId = `task-${prev.t.id}`;
+  const prevTooltipActive = prev.activeTooltip === myTooltipId;
+  const nextTooltipActive = next.activeTooltip === myTooltipId;
+  if (prevTooltipActive !== nextTooltipActive) return false;
+
+  const prevSelected = prev.selectedTaskSet.has(tId) || prev.selectedTaskSet.has(prev.t.id);
+  const nextSelected = next.selectedTaskSet.has(tId) || next.selectedTaskSet.has(next.t.id);
+  if (prevSelected !== nextSelected) return false;
+
+  const prevDragging = prev.draggingTaskIds.includes(prev.t.id);
+  const nextDragging = next.draggingTaskIds.includes(next.t.id);
+  if (prevDragging !== nextDragging) return false;
+
+  const prevTarget = prev.dragOverTaskId === prev.t.id;
+  const nextTarget = next.dragOverTaskId === next.t.id;
+  if (prevTarget !== nextTarget) return false;
+  if (nextTarget && prev.dropPosition !== next.dropPosition) return false;
+
+  const prevFocused = prev.initialFocusTaskId === prev.t.id || prev.ganttTabFocusTaskId === prev.t.id;
+  const nextFocused = next.initialFocusTaskId === next.t.id || next.ganttTabFocusTaskId === next.t.id;
+  if (prevFocused !== nextFocused) return false;
+
+  const prevCode = prev.taskCodeMap?.get(prev.t.id);
+  const nextCode = next.taskCodeMap?.get(next.t.id);
+  if (prevCode !== nextCode) return false;
+
+  const prevDelGroup = prev.delegationGroupByTaskId?.get(prev.t.id);
+  const nextDelGroup = next.delegationGroupByTaskId?.get(next.t.id);
+  if (prevDelGroup !== nextDelGroup) return false;
+
+  return (
+    prev.t === next.t &&
+    prev.p === next.p &&
+    prev.taskIndex === next.taskIndex &&
+    prev.isChild === next.isChild &&
+    prev.parentTask === next.parentTask &&
+    prev.hasChildren === next.hasChildren &&
+    prev.childCount === next.childCount &&
+    prev.childTasks === next.childTasks &&
+    prev.isModularExpanded === next.isModularExpanded &&
+    prev.toggleModularParent === next.toggleModularParent &&
+    prev.isEditMode === next.isEditMode &&
+    prev.isHighlightDelegationOn === next.isHighlightDelegationOn &&
+    prev.canWrite === next.canWrite &&
+    prev.isHideMode === next.isHideMode &&
+    prev.sideWidth === next.sideWidth &&
+    prev.showStart === next.showStart &&
+    prev.startColWidth === next.startColWidth &&
+    prev.showFinish === next.showFinish &&
+    prev.finishColWidth === next.finishColWidth &&
+    prev.showParty === next.showParty &&
+    prev.partyColWidth === next.partyColWidth &&
+    prev.showDuration === next.showDuration &&
+    prev.durationColWidth === next.durationColWidth &&
+    prev.showPredecessor === next.showPredecessor &&
+    prev.predecessorColWidth === next.predecessorColWidth &&
+    prev.dayWidth === next.dayWidth &&
+    prev.startDate?.getTime() === next.startDate?.getTime()
   );
 });

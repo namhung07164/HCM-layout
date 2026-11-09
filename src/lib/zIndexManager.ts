@@ -14,19 +14,38 @@ export const Z_INDEX_VALUES = {
   DRAWER: 200,
   FLOATING_CONTROL: 500,
   LAYOUT_TOOLTIP: 20000,
-  MODAL_BASE: 100000,
-  MODAL_NESTED: 120000,
   QUICK_NAV: 150000,
   MINI_GANTT: 150000,
-  CONFIRM_ALERT: 160000,
-  COMMAND_PALETTE: 170000,
-  LIGHTBOX: 180000,
-  MODAL_MODULAR: 185000,
-  TOAST: 200000,
-  MAX: 999999
+  MODAL_BASE: 200000,
+  MODAL_NESTED: 220000,
+  MODAL_MODULAR: 250000,
+  CONFIRM_ALERT: 300000,
+  COMMAND_PALETTE: 350000,
+  LIGHTBOX: 400000,
+  TOAST: 99999999,
+  MAX: 999999999
 } as const;
 
 export type ZIndexLayer = keyof typeof Z_INDEX_VALUES;
+
+export const Z_INDEX_CLASSES: Record<ZIndexLayer, string> = {
+  BASE: 'z-0',
+  STICKY_HEADER: 'z-[40]',
+  DROPDOWN: 'z-[100]',
+  DRAWER: 'z-[200]',
+  FLOATING_CONTROL: 'z-[500]',
+  LAYOUT_TOOLTIP: 'z-[20000]',
+  QUICK_NAV: 'z-[150000]',
+  MINI_GANTT: 'z-[150000]',
+  MODAL_BASE: 'z-[200000]',
+  MODAL_NESTED: 'z-[220000]',
+  MODAL_MODULAR: 'z-[250000]',
+  CONFIRM_ALERT: 'z-[300000]',
+  COMMAND_PALETTE: 'z-[350000]',
+  LIGHTBOX: 'z-[400000]',
+  TOAST: 'z-[99999999]',
+  MAX: 'z-[999999999]',
+};
 
 /**
  * Returns numeric z-index value with optional relative offset
@@ -39,8 +58,18 @@ export function getZIndexValue(layer: ZIndexLayer, offset: number = 0): number {
  * Returns Tailwind arbitrary z-index class string, e.g. "z-[150000]"
  */
 export function getZIndexClass(layer: ZIndexLayer, offset: number = 0): string {
+  if (offset === 0 && Z_INDEX_CLASSES[layer]) {
+    return Z_INDEX_CLASSES[layer];
+  }
   const val = getZIndexValue(layer, offset);
   return `z-[${val}]`;
+}
+
+/**
+ * Returns inline React CSS style object for z-index
+ */
+export function getZIndexStyle(layer: ZIndexLayer, offset: number = 0): React.CSSProperties {
+  return { zIndex: getZIndexValue(layer, offset) };
 }
 
 /**

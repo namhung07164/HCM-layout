@@ -1,32 +1,14 @@
 import React, { useMemo } from 'react';
 import {
-  FolderPlus,
-  PlusCircle,
-  Sun,
-  Moon,
-  Maximize2,
-  Minimize2,
-  CalendarCheck,
-  Printer,
-  DollarSign,
-  ImageDown,
-  LayoutDashboard,
-  Calendar,
-  BarChartHorizontal,
-  List,
-  PieChart,
-  Shield,
-  FileText,
-  Settings,
-  HelpCircle,
-  Building2,
-  Tag,
-  AlertCircle,
+  FolderPlus, PlusCircle, Sun, Moon, Maximize2, Minimize2, CalendarCheck, Printer,
+  DollarSign, ImageDown, LayoutDashboard, Calendar, BarChartHorizontal, List,
+  PieChart, Shield, FileText, Settings, HelpCircle, Building2, Tag, AlertCircle, Zap,
 } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
 import { useEnrichedData } from '../../hooks/useEnrichedData';
+import { matchesAdvancedSearch } from '../../lib/utils';
 import { TabId, AppRole } from '../../types';
-import { PaletteItem, CommandCategory, CommandPaletteModalProps } from './commandPaletteTypes';
+import { PaletteItem, CommandCategory } from './commandPaletteTypes';
 
 interface UseCommandPaletteItemsProps {
   searchQuery: string;
@@ -39,13 +21,8 @@ interface UseCommandPaletteItemsProps {
 }
 
 export function useCommandPaletteItems({
-  searchQuery,
-  selectedCategory,
-  onClose,
-  onTabChange,
-  onToggleTheme,
-  onToggleFocusMode,
-  onPrintPreviewToggle,
+  searchQuery, selectedCategory, onClose, onTabChange,
+  onToggleTheme, onToggleFocusMode, onPrintPreviewToggle,
 }: UseCommandPaletteItemsProps) {
   const currentUser = useAppStore((state) => state.currentUser);
   const permissionMatrix = useAppStore((state) => state.permissionMatrix);
@@ -116,6 +93,25 @@ export function useCommandPaletteItems({
           setPrefillProjectCode(safeP?.code || '');
           setPrefillProjectYear(safeP?.year || null);
           setIsTaskModalOpen(true);
+          onClose();
+        },
+      });
+
+      items.push({
+        id: 'action-stem-workbench',
+        category: 'actions',
+        title: '⚡ Lắp ghép từ Thư viện (STEM Task Library Builder)',
+        subtitle: 'Open 3-Zone Visual STEM Workbench (F&B, Fashion, Pop-up, Reinstatement)',
+        icon: Zap,
+        iconColor: 'text-amber-500 bg-amber-50 dark:bg-amber-950/50',
+        shortcut: 'L',
+        onSelect: () => {
+          const safeP = projects && projects.length > 0 ? projects[0] : null;
+          window.dispatchEvent(
+            new CustomEvent('taka_open_stem_workbench', {
+              detail: { projectId: safeP?.id, projectCode: safeP?.code },
+            })
+          );
           onClose();
         },
       });
@@ -196,6 +192,54 @@ export function useCommandPaletteItems({
       },
     });
 
+    // Financial Data Health Inspector
+    items.push({
+      id: 'action-cost-health',
+      category: 'actions',
+      title: 'Inspect Financial Data Health & Orphaned Costs',
+      subtitle: 'Audit orphaned cost records, overpaid items (Paid > Actual), and over-budget projects',
+      icon: Shield,
+      iconColor: 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/50',
+      onSelect: () => {
+        onTabChange('cost');
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('taka-open-cost-health'));
+        }, 80);
+        onClose();
+      },
+    });
+
+    // Store & Year Quick Filters
+    (['HCM', 'HN', 'all'] as const).forEach((st) => {
+      items.push({
+        id: `action-store-${st}`,
+        category: 'actions',
+        title: `Switch Store Filter: ${st === 'all' ? 'All Stores' : st}`,
+        subtitle: `Filter workspace projects, tasks, and costs to ${st === 'all' ? 'All Stores' : st}`,
+        icon: Building2,
+        iconColor: 'text-blue-600 bg-blue-50 dark:bg-blue-950/50',
+        onSelect: () => {
+          useAppStore.getState().setGlobalStoreFilter(st);
+          onClose();
+        },
+      });
+    });
+
+    (['2026', '2027', 'all'] as const).forEach((yr) => {
+      items.push({
+        id: `action-year-${yr}`,
+        category: 'actions',
+        title: `Switch Year Filter: ${yr === 'all' ? 'All Years' : yr}`,
+        subtitle: `Filter workspace to financial year ${yr === 'all' ? 'All Years' : yr}`,
+        icon: Calendar,
+        iconColor: 'text-indigo-600 bg-indigo-50 dark:bg-indigo-950/50',
+        onSelect: () => {
+          useAppStore.getState().setGlobalYearFilter(yr);
+          onClose();
+        },
+      });
+    });
+
     // Export PNG
     items.push({
       id: 'action-export-png',
@@ -245,6 +289,7 @@ export function useCommandPaletteItems({
       shortcut?: string;
     }> = [
       { id: 'general', label: 'General Tab', desc: 'Project overview and master summary table', icon: LayoutDashboard, shortcut: '1' },
+      { id: 'myWork', label: 'My Work Tab', desc: 'Single-column personal focus stream & 1-click approvals', icon: CalendarCheck },
       { id: 'calendar', label: 'Calendar Tab', desc: 'Monthly project & task delivery schedule', icon: Calendar, shortcut: '2' },
       { id: 'gantt', label: 'Gantt Chart Tab', desc: 'Interactive timeline with dependencies & today pin', icon: BarChartHorizontal, shortcut: '3' },
       { id: 'detail', label: 'Task Detail Tab', desc: 'Granular task list with inline status & progress', icon: List, shortcut: '4' },
@@ -298,9 +343,18 @@ export function useCommandPaletteItems({
     }));
   }, [locations, setLayoutTabFilters, onTabChange, onClose]);
 
-  // 4. Build Projects Items
+  // 4. Build Projects Items with 1-Click Direct Tab Jumps (Tasks, Gantt, Cost, Budget, Layout)
   const projectItems: PaletteItem[] = useMemo(() => {
     if (!projects || projects.length === 0) return [];
+    const applyProjectScope = (p: any) => {
+      const st = useAppStore.getState();
+      const code = String(p.code || '').trim();
+      st.setFixedProjectCode(code.toUpperCase());
+      st.setDetailTabFilterCode(code);
+      if (p.store) st.setGlobalStoreFilter(p.store);
+      if (p.year) st.setGlobalYearFilter(String(p.year));
+    };
+
     return projects.map((p) => {
       const isHCM = (p.store || '').toUpperCase() === 'HCM';
       const desc = p.detail || (p as any).description || p.note || '';
@@ -311,7 +365,7 @@ export function useCommandPaletteItems({
         subtitle: `${p.year || ''} • ${p.store || 'HCM'} • Floor ${p.location || 'N/A'}${
           desc ? ` • ${desc.length > 80 ? desc.slice(0, 80) + '...' : desc}` : ''
         }`,
-        code: `${p.code || ''} ${p.linkCodes || ''} ${desc}`,
+        code: `${p.code || ''}`,
         badge: p.store || 'HCM',
         badgeColor: isHCM
           ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/60 dark:text-blue-300'
@@ -324,9 +378,55 @@ export function useCommandPaletteItems({
           setQuickNavTarget({ project: p });
           onClose();
         },
+        quickActions: [
+          {
+            label: 'Tasks',
+            onClick: () => {
+              applyProjectScope(p);
+              onTabChange('detail');
+              onClose();
+            },
+          },
+          {
+            label: 'Gantt',
+            onClick: () => {
+              applyProjectScope(p);
+              onTabChange('gantt');
+              onClose();
+            },
+          },
+          {
+            label: 'Cost',
+            colorClass:
+              'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800 hover:bg-emerald-600 hover:text-white',
+            onClick: () => {
+              applyProjectScope(p);
+              onTabChange('cost');
+              onClose();
+            },
+          },
+          {
+            label: 'Budget',
+            onClick: () => {
+              applyProjectScope(p);
+              onTabChange('budget');
+              onClose();
+            },
+          },
+          {
+            label: 'Layout',
+            onClick: () => {
+              if (p.store) useAppStore.getState().setGlobalStoreFilter(p.store);
+              if (p.year) useAppStore.getState().setGlobalYearFilter(String(p.year));
+              setLayoutTabFilters({ location: p.location || 'L1', projectCode: p.code || '' });
+              onTabChange('layout');
+              onClose();
+            },
+          },
+        ],
       };
     });
-  }, [projects, setQuickNavTarget, onClose]);
+  }, [projects, setQuickNavTarget, setLayoutTabFilters, onTabChange, onClose]);
 
   // 5. Build Tasks Items
   const taskItems: PaletteItem[] = useMemo(() => {
@@ -383,13 +483,9 @@ export function useCommandPaletteItems({
     }
 
     return pool
-      .filter((item) => {
-        const titleMatch = item.title.toLowerCase().includes(q);
-        const subMatch = (item.subtitle || '').toLowerCase().includes(q);
-        const codeMatch = (item.code || '').toLowerCase().includes(q);
-        const badgeMatch = (item.badge || '').toLowerCase().includes(q);
-        return titleMatch || subMatch || codeMatch || badgeMatch;
-      })
+      .filter((item) =>
+        matchesAdvancedSearch(q, [item.title, item.subtitle, item.code, item.badge])
+      )
       .slice(0, 30);
   }, [searchQuery, selectedCategory, actionItems, navItems, floorItems, projectItems, taskItems]);
 

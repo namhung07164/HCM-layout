@@ -23,31 +23,20 @@ export function normalizeYearString(year?: string | number | null): string {
 }
 
 /**
- * Normalizes a task name for reliable duplicate comparison by:
- * 1. Lowercasing and trimming
- * 2. Collapsing multiple spaces into a single space
- * 3. Stripping project code and task numbering prefixes (e.g. "B1-B110-1#1 ", "#1 ", "1. ", "1 - ")
+ * Normalizes a task name for reliable duplicate comparison.
+ * Treats task name as an absolute value:
+ * 1. Trims leading and trailing whitespace
+ * 2. Lowercases
+ * 3. Collapses multiple consecutive spaces to a single space
+ * NEVER strips projectCode, numbers, or dashes ("-") so that
+ * tasks like "FFD", "FFD-1", and "1" are recognized as distinct absolute names.
  */
-export function normalizeTaskNameForComparison(name?: string | null, projectCode?: string | null): string {
+export function normalizeTaskNameForComparison(name?: string | null, _projectCode?: string | null): string {
   if (!name) return '';
-  let str = String(name).trim().toLowerCase();
-  
-  // Collapse whitespace
-  str = str.replace(/\s+/g, ' ');
-  
-  if (projectCode) {
-    const pCode = String(projectCode).trim().toLowerCase();
-    // Strip projectCode prefix if present, e.g. "b1-b110-1#1 ", "b1-b110-1-1 ", "b1-b110-1: "
-    const escapedCode = pCode.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const pCodeRegex = new RegExp(`^${escapedCode}[#\\-\\:\\/\\s\\.]*(\\d+)?([\\s\\:\\-\\.\\)]+)?`, 'i');
-    str = str.replace(pCodeRegex, '').trim();
-  }
-  
-  // Strip leading task index patterns like "#1 ", "1. ", "1) ", "1 - ", "1: "
-  str = str.replace(/^#?\d+[\s\.\-\)\:]+/, '').trim();
-  
-  return str;
+  return String(name).trim().toLowerCase().replace(/\s+/g, ' ');
 }
+
+const EMPTY_PROJECTS: Project[] = [];
 
 /**
  * Builds a canonical project key for a task or project.
@@ -56,7 +45,7 @@ export function buildCanonicalProjectKey(
   projectCode?: string | null,
   year?: string | number | null,
   store?: string | null,
-  projects: Project[] = [],
+  projects: Project[] = EMPTY_PROJECTS,
   projectLookupMap?: Map<string, Project>,
   projectId?: string | null
 ): string {
@@ -72,20 +61,28 @@ export function buildCanonicalProjectKey(
 
   let matchedProj: Project | undefined = undefined;
   if (projectLookupMap) {
+    let candidate: Project | undefined;
     if (normYear && normStore && projectLookupMap.has(`${pCode}__${normYear}__${normStore}`)) {
-      matchedProj = projectLookupMap.get(`${pCode}__${normYear}__${normStore}`);
-    } else if (normStore && projectLookupMap.has(`${pCode}____${normStore}`)) {
-      matchedProj = projectLookupMap.get(`${pCode}____${normStore}`);
-    } else if (normYear && projectLookupMap.has(`${pCode}__${normYear}__`)) {
-      matchedProj = projectLookupMap.get(`${pCode}__${normYear}__`);
-    } else {
-      matchedProj = projectLookupMap.get(pCode);
+      candidate = projectLookupMap.get(`${pCode}__${normYear}__${normStore}`);
+    } else if (!normYear && normStore && projectLookupMap.has(`${pCode}____${normStore}`)) {
+      candidate = projectLookupMap.get(`${pCode}____${normStore}`);
+    } else if (normYear && !normStore && projectLookupMap.has(`${pCode}__${normYear}__`)) {
+      candidate = projectLookupMap.get(`${pCode}__${normYear}__`);
+    } else if (!normYear && !normStore) {
+      candidate = projectLookupMap.get(pCode);
+    }
+    if (candidate) {
+      const cStore = normalizeStoreCode(candidate.store);
+      const cYear = normalizeYearString(candidate.year);
+      if ((!normStore || !cStore || normStore === cStore) && (!normYear || !cYear || normYear === cYear)) {
+        matchedProj = candidate;
+      }
     }
   } else if (projects && projects.length > 0) {
     matchedProj = projects.find(p => {
       const pCodeMatch = String(p.code || '').trim().toLowerCase() === pCode ||
-                         String(p.no || '').trim().toLowerCase() === pCode ||
-                         String(p.id || '').trim().toLowerCase() === pCode;
+                         String(p.id || '').trim().toLowerCase() === pCode ||
+                         String(p.no || '').trim().toLowerCase() === pCode;
       if (!pCodeMatch) return false;
       const pStore = normalizeStoreCode(p.store);
       const pYear = normalizeYearString(p.year);
@@ -96,18 +93,24 @@ export function buildCanonicalProjectKey(
   }
 
   const canonicalCode = matchedProj ? String(matchedProj.code || pCode).trim().toLowerCase() : pCode;
-  const canonicalYear = normalizeYearString(matchedProj?.year || normYear);
-  const canonicalStore = normalizeStoreCode(matchedProj?.store || normStore);
+  const canonicalYear = normYear || normalizeYearString(matchedProj?.year);
+  const canonicalStore = normStore || normalizeStoreCode(matchedProj?.store);
 
   return `${canonicalCode}__${canonicalYear}__${canonicalStore}`;
 }
+
+const _dedupWeakCache = new WeakMap<Task[], {
+  dedupedTasks: Task[];
+  duplicateCount: number;
+  removedTaskIds: string[];
+}>();
 
 /**
  * Deduplicates a list of tasks in-memory.
  * If multiple tasks exist with the same project and same task name (case-insensitive or normalized)
  * or same task code, it merges them keeping the most complete / latest updated task.
  */
-export function deduplicateTasksInMemory(tasks: Task[], projects: Project[] = []): {
+export function deduplicateTasksInMemory(tasks: Task[], projects: Project[] = EMPTY_PROJECTS): {
   dedupedTasks: Task[];
   duplicateCount: number;
   removedTaskIds: string[];
@@ -117,6 +120,10 @@ export function deduplicateTasksInMemory(tasks: Task[], projects: Project[] = []
   }
   if (tasks.length === 1) {
     return { dedupedTasks: tasks, duplicateCount: 0, removedTaskIds: [] };
+  }
+  if (!projects || projects.length <= 1) {
+    const cached = _dedupWeakCache.get(tasks);
+    if (cached) return cached;
   }
 
   // Pre-index projects into Map for O(1) canonical key resolution
@@ -131,52 +138,140 @@ export function deduplicateTasksInMemory(tasks: Task[], projects: Project[] = []
       if (pYear) projectLookupMap.set(`${pCode}__${pYear}__`, p);
       if (!projectLookupMap.has(pCode)) projectLookupMap.set(pCode, p);
     }
+    const pNo = String(p.no || '').trim().toLowerCase();
+    if (pNo) {
+      if (pYear && pStore) projectLookupMap.set(`${pNo}__${pYear}__${pStore}`, p);
+      if (pStore) projectLookupMap.set(`${pNo}____${pStore}`, p);
+      if (pYear) projectLookupMap.set(`${pNo}__${pYear}__`, p);
+      if (!projectLookupMap.has(pNo)) projectLookupMap.set(pNo, p);
+    }
     if (p.id) projectLookupMap.set(String(p.id).trim().toLowerCase(), p);
   });
 
   const seenMap = new Map<string, Task>();
   const seenNormMap = new Map<string, string>(); // normKey -> taskId
-  const seenCodeMap = new Map<string, string>(); // codeKey -> taskId
+  const idRedirectMap = new Map<string, string>(); // duplicateId -> survivingId
   const removedTaskIds: string[] = [];
   let duplicateCount = 0;
 
-  // Sort tasks so the most recently updated, non-deleted, or feature-rich task comes first
+  // Pre-compute updatedAt numeric timestamps, canonical project keys, and parent lookup maps in O(N)
+  const updatedTimeCache = new WeakMap<Task, number>();
+  const projKeyCache = new WeakMap<Task, string>();
+  const taskByIdLower = new Map<string, Task>();
+  const taskByScopedCode = new Map<string, Task>();
+  const taskNameByIdMap = new Map<string, string>();
+
+  for (let i = 0; i < tasks.length; i++) {
+    const t = tasks[i];
+    if (!t || t.isDeleted) continue;
+    const tProjIdStr = t.projectId ? String(t.projectId).trim().toLowerCase() : '';
+    const pKey = buildCanonicalProjectKey(t.projectCode, t.projectYear, t.projectStore, projects, projectLookupMap, tProjIdStr);
+    projKeyCache.set(t, pKey);
+
+    if (t.id) {
+      const idL = String(t.id).trim().toLowerCase();
+      if (!taskByIdLower.has(idL) || !(t as any)._isVirtualSummary) {
+        taskByIdLower.set(idL, t);
+      }
+      if (t.name) {
+        taskNameByIdMap.set(idL, normalizeTaskNameForComparison(t.name));
+      }
+    }
+    if (pKey) {
+      if (t.taskCodePhu) {
+        const rawC = String(t.taskCodePhu).trim().toLowerCase().replace(/^\d+\s+/, '');
+        if (rawC) {
+          taskByScopedCode.set(`${pKey}:::${rawC}`, t);
+          if (rawC.includes('-')) {
+            taskByScopedCode.set(`${pKey}:::${rawC.replace(/-(\d+)$/, '#$1')}`, t);
+          }
+          const m = rawC.match(/#(\d+)$/) || rawC.match(/-(\d+)$/) || rawC.match(/^(\d+)$/);
+          if (m) {
+            taskByScopedCode.set(`${pKey}:::#${m[1]}`, t);
+            taskByScopedCode.set(`${pKey}:::${m[1]}`, t);
+          }
+        }
+      }
+      if (t.orderIndex !== undefined && t.orderIndex !== null && !Number.isNaN(Number(t.orderIndex))) {
+        const ordNum = Number(t.orderIndex) + 1;
+        if (!taskByScopedCode.has(`${pKey}:::#${ordNum}`)) taskByScopedCode.set(`${pKey}:::#${ordNum}`, t);
+        if (!taskByScopedCode.has(`${pKey}:::${ordNum}`)) taskByScopedCode.set(`${pKey}:::${ordNum}`, t);
+      }
+    }
+    if (t.updatedAt) {
+      const parsed = Date.parse(t.updatedAt);
+      updatedTimeCache.set(t, Number.isNaN(parsed) ? 0 : parsed);
+    }
+  }
+
+  // Identify valid parent references and active parent tasks in O(N)
+  const validParentByTask = new WeakMap<Task, Task>();
+  const activeParentIdsLower = new Set<string>();
+  for (let i = 0; i < tasks.length; i++) {
+    const t = tasks[i];
+    if (!t || t.isDeleted) continue;
+    const rawPar = t.parentTaskId || (t as any).parentId;
+    if (!rawPar) continue;
+    const parLower = String(rawPar).trim().toLowerCase();
+    if (!parLower) continue;
+    const pKey = projKeyCache.get(t) || '';
+    let matchedPar = taskByIdLower.get(parLower);
+    if (matchedPar && pKey && projKeyCache.get(matchedPar) && projKeyCache.get(matchedPar) !== pKey) {
+      matchedPar = undefined;
+    }
+    if (!matchedPar && pKey) {
+      matchedPar =
+        taskByScopedCode.get(`${pKey}:::${parLower}`) ||
+        taskByScopedCode.get(`${pKey}:::${parLower.replace(/-(\d+)$/, '#$1')}`);
+      if (!matchedPar) {
+        const m = parLower.match(/#\s*(\d+)$/) || parLower.match(/^(\d+)$/);
+        if (m) {
+          matchedPar = taskByScopedCode.get(`${pKey}:::#${m[1]}`) || taskByScopedCode.get(`${pKey}:::${m[1]}`);
+        }
+      }
+    }
+    if (matchedPar && matchedPar.id && String(matchedPar.id).trim().toLowerCase() !== String(t.id || '').trim().toLowerCase()) {
+      validParentByTask.set(t, matchedPar);
+      activeParentIdsLower.add(String(matchedPar.id).trim().toLowerCase());
+    }
+  }
+
+  // Sort tasks so parents are deduplicated before subtasks, and subtasks with valid parents win over orphaned duplicates
   const sorted = [...tasks].sort((a, b) => {
-    // Prefer non-deleted
     if (a.isDeleted && !b.isDeleted) return 1;
     if (!a.isDeleted && b.isDeleted) return -1;
-    // Prefer task with more comments
+    const aVirt = Boolean((a as any)._isVirtualSummary);
+    const bVirt = Boolean((b as any)._isVirtualSummary);
+    if (aVirt !== bVirt) return aVirt ? 1 : -1;
+    const aIdL = String(a.id || '').trim().toLowerCase();
+    const bIdL = String(b.id || '').trim().toLowerCase();
+    const aIsParent = activeParentIdsLower.has(aIdL);
+    const bIsParent = activeParentIdsLower.has(bIdL);
+    if (aIsParent !== bIsParent) return aIsParent ? -1 : 1;
+    const aHasValidParent = validParentByTask.has(a);
+    const bHasValidParent = validParentByTask.has(b);
+    if (aHasValidParent !== bHasValidParent) return aHasValidParent ? -1 : 1;
     const aComments = a.comments?.length || 0;
     const bComments = b.comments?.length || 0;
     if (aComments !== bComments) return bComments - aComments;
-    // Prefer task with notes
     const aNotes = a.notes?.length || 0;
     const bNotes = b.notes?.length || 0;
     if (aNotes !== bNotes) return bNotes - aNotes;
-    // Prefer task with delegation
     if (a.delegation && !b.delegation) return -1;
     if (!a.delegation && b.delegation) return 1;
-    // Prefer task with predecessor
     if (a.predecessor && !b.predecessor) return -1;
     if (!a.predecessor && b.predecessor) return 1;
-    // Prefer task with party
     if (a.party && !b.party) return -1;
     if (!a.party && b.party) return 1;
-    // Prefer latest updatedAt
-    const aTime = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
-    const bTime = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+    const aTime = updatedTimeCache.get(a) || 0;
+    const bTime = updatedTimeCache.get(b) || 0;
     if (bTime !== aTime) return bTime - aTime;
-    // Tie-break: use ID to ensure all devices pick the same task, independent of load order
     return String(a.id).localeCompare(String(b.id));
   });
 
   sorted.forEach(task => {
-    if (task.isDeleted) {
-      // Don't index deleted tasks into seenMap
-      return;
-    }
+    if (task.isDeleted) return;
 
-    // Filter out completely empty/corrupt ghost tasks (no name, no start, no finish)
     if ((!task.name || !String(task.name).trim()) && (!task.start || !String(task.start).trim()) && (!task.finish || !String(task.finish).trim())) {
       duplicateCount++;
       if (task.id) removedTaskIds.push(task.id);
@@ -189,113 +284,160 @@ export function deduplicateTasksInMemory(tasks: Task[], projects: Project[] = []
       return;
     }
 
-    // Check by exact task ID first
     if (seenMap.has(taskIdStr)) {
       duplicateCount++;
       removedTaskIds.push(task.id);
       return;
     }
 
-    const tName = String(task.name || '').trim().toLowerCase();
-    const taskProjIdStr = task.projectId ? String(task.projectId).trim().toLowerCase() : '';
-    const prjKey = buildCanonicalProjectKey(task.projectCode, task.projectYear, task.projectStore, projects, projectLookupMap, taskProjIdStr);
-    const pCode = String(task.projectCode || '').trim().toLowerCase();
-    const rawTaskCode = task.taskCodePhu ? String(task.taskCodePhu).trim().toLowerCase() : '';
-    const parentIdStr = task.parentTaskId ? String(task.parentTaskId).trim().toLowerCase() : '';
-    const startStr = task.start ? String(task.start).trim() : '';
-    const finishStr = task.finish ? String(task.finish).trim() : '';
+    const projKey = projKeyCache.get(task) || buildCanonicalProjectKey(task.projectCode, task.projectYear, task.projectStore, projects, projectLookupMap, task.projectId ? String(task.projectId).trim().toLowerCase() : '');
+    const cleanCodePhu = String(task.taskCodePhu || '').trim().toLowerCase().replace(/^\d+\s+/, '');
+    const exactName = normalizeTaskNameForComparison(task.name);
+    const startStr = String(task.start || '').trim();
+    const finishStr = String(task.finish || '').trim();
 
-    const codeKey = prjKey && rawTaskCode ? `${prjKey}:::code:::${rawTaskCode}` : '';
-    // Require exact match on project, parent, name, start, and finish to prevent falsely merging distinct tasks!
-    const exactTaskKey = prjKey && tName ? `${prjKey}:::parent:${parentIdStr}:::name:${tName}:::start:${startStr}:::finish:${finishStr}` : '';
+    const validPar = validParentByTask.get(task);
+    const rawParLower = validPar?.id ? String(validPar.id).trim().toLowerCase() : '';
+    const resolvedParentLower = rawParLower ? (idRedirectMap.get(rawParLower) || rawParLower) : '';
+    const parentIdentity = resolvedParentLower
+      ? (taskNameByIdMap.get(resolvedParentLower) || taskNameByIdMap.get(rawParLower) || resolvedParentLower)
+      : 'root';
 
-    let matchedExistingId: string | undefined = undefined;
+    const taskUniqueSignature = `${projKey}__${cleanCodePhu || 'nocode'}__${exactName}__${startStr}__${finishStr}`;
+    const taskContentSignature = `${projKey}__parent:${parentIdentity}__${exactName}__${startStr}__${finishStr}`;
+    const taskNameDatesSignature = `${projKey}__namedates:${exactName}__${startStr}__${finishStr}`;
 
-    if (exactTaskKey && seenNormMap.has(exactTaskKey)) {
-      matchedExistingId = seenNormMap.get(exactTaskKey);
-    } else if (codeKey && seenCodeMap.has(codeKey)) {
-      const candId = seenCodeMap.get(codeKey);
-      const cand = candId ? seenMap.get(candId) : undefined;
-      const candName = String(cand?.name || '').trim().toLowerCase();
-      // Position-based subtask codes can temporarily overlap between different tasks: only treat as duplicate if names match
-      if (cand && candName === tName) matchedExistingId = candId;
-    }
+    const matchedExistingId = (projKey && exactName)
+      ? ((cleanCodePhu ? seenNormMap.get(taskUniqueSignature) : undefined) ||
+         seenNormMap.get(taskContentSignature) ||
+         seenNormMap.get(taskNameDatesSignature))
+      : undefined;
+
+    const keepAsDistinctTask = () => {
+      seenMap.set(task.id, task);
+      if (projKey && exactName) {
+        if (cleanCodePhu) seenNormMap.set(taskUniqueSignature, task.id);
+        seenNormMap.set(taskContentSignature, task.id);
+        if (!seenNormMap.has(taskNameDatesSignature)) {
+          seenNormMap.set(taskNameDatesSignature, task.id);
+        }
+      }
+    };
 
     if (matchedExistingId && seenMap.has(matchedExistingId)) {
       const existing = seenMap.get(matchedExistingId)!;
-      // Absolute guard 1: If both tasks have explicit projectIds that do NOT match, they are NEVER duplicates!
       if (task.projectId && existing.projectId && String(task.projectId) !== String(existing.projectId)) {
-        seenMap.set(task.id, task);
+        keepAsDistinctTask();
         return;
       }
 
-      // Absolute guard 2: Tasks with distinctly different names are NEVER duplicates!
-      const normA = normalizeTaskNameForComparison(task.name, task.projectCode);
-      const normB = normalizeTaskNameForComparison(existing.name, existing.projectCode);
-      if (normA && normB && normA !== normB) {
-        seenMap.set(task.id, task);
+      const tYear = task.projectYear !== undefined && task.projectYear !== null ? String(task.projectYear).trim() : '';
+      const eYear = existing.projectYear !== undefined && existing.projectYear !== null ? String(existing.projectYear).trim() : '';
+      const tStore = task.projectStore ? String(task.projectStore).trim().toUpperCase() : '';
+      const eStore = existing.projectStore ? String(existing.projectStore).trim().toUpperCase() : '';
+      if ((tYear && eYear && tYear !== eYear) || (tStore && eStore && tStore !== eStore)) {
+        keepAsDistinctTask();
+        return;
+      }
+
+      const existingIdLower = String(existing.id || '').trim().toLowerCase();
+      const taskIdLower = taskIdStr.toLowerCase();
+      const existingCleanCodePhu = String(existing.taskCodePhu || '').trim().toLowerCase().replace(/^\d+\s+/, '');
+      const tSubMatch = cleanCodePhu.match(/#\s*(\d+)\s*$/);
+      const eSubMatch = existingCleanCodePhu.match(/#\s*(\d+)\s*$/);
+      const tSubNum = tSubMatch ? parseInt(tSubMatch[1], 10) : (task.orderIndex !== undefined && task.orderIndex !== null && !isNaN(Number(task.orderIndex)) ? Number(task.orderIndex) + 1 : null);
+      const eSubNum = eSubMatch ? parseInt(eSubMatch[1], 10) : (existing.orderIndex !== undefined && existing.orderIndex !== null && !isNaN(Number(existing.orderIndex)) ? Number(existing.orderIndex) + 1 : null);
+
+      // Never merge two tasks that have distinct taskCodePhu or distinct subtask number / orderIndex
+      if ((cleanCodePhu && existingCleanCodePhu && cleanCodePhu !== existingCleanCodePhu) || (tSubNum !== null && eSubNum !== null && tSubNum !== eSubNum)) {
+        keepAsDistinctTask();
+        return;
+      }
+
+      const hasDistinctRealIds = Boolean(taskIdLower && !taskIdLower.startsWith('ts_') && existingIdLower && !existingIdLower.startsWith('ts_') && taskIdLower !== existingIdLower);
+      const isEitherVirtual = Boolean((task as any)._isVirtualSummary || (existing as any)._isVirtualSummary);
+      if (hasDistinctRealIds && (isEitherVirtual || Boolean(cleanCodePhu) !== Boolean(existingCleanCodePhu))) {
+        keepAsDistinctTask();
+        return;
+      }
+
+      const existingValidPar = validParentByTask.get(existing);
+      const eRawParLower = existingValidPar?.id ? String(existingValidPar.id).trim().toLowerCase() : '';
+      const eResolvedParLower = eRawParLower ? (idRedirectMap.get(eRawParLower) || eRawParLower) : '';
+
+      // Never merge a child task into its own parent, or tasks under different parent hierarchy nodes, or active parents
+      if (
+        resolvedParentLower === existingIdLower ||
+        eResolvedParLower === taskIdLower ||
+        resolvedParentLower !== eResolvedParLower ||
+        activeParentIdsLower.has(taskIdLower) ||
+        activeParentIdsLower.has(existingIdLower)
+      ) {
+        keepAsDistinctTask();
         return;
       }
 
       // Duplicate task found!
       duplicateCount++;
       removedTaskIds.push(task.id);
-      
-      // Merge comments, notes, delegation, party, predecessor, attachments from duplicate into surviving task
-      if ((!existing.comments || existing.comments.length === 0) && task.comments && task.comments.length > 0) {
-        existing.comments = task.comments;
-      }
-      if ((!existing.notes || existing.notes.length === 0) && task.notes && task.notes.length > 0) {
-        existing.notes = task.notes;
-      }
-      if (!existing.party && task.party) {
-        existing.party = task.party;
-      }
-      if (!existing.predecessor && task.predecessor) {
-        existing.predecessor = task.predecessor;
-      }
-      if (!existing.delegation && task.delegation) {
-        existing.delegation = task.delegation;
-      }
-      if (!existing.taskCodePhu && task.taskCodePhu) {
-        existing.taskCodePhu = task.taskCodePhu;
-      }
-      if (!existing.parentTaskId && task.parentTaskId) {
-        existing.parentTaskId = task.parentTaskId;
+      idRedirectMap.set(taskIdLower, existingIdLower);
+      idRedirectMap.set(taskIdStr, String(existing.id).trim());
+
+      if ((!existing.comments || existing.comments.length === 0) && task.comments && task.comments.length > 0) existing.comments = task.comments;
+      if ((!existing.notes || existing.notes.length === 0) && task.notes && task.notes.length > 0) existing.notes = task.notes;
+      if (!existing.party && task.party) existing.party = task.party;
+      if (!existing.predecessor && task.predecessor) existing.predecessor = task.predecessor;
+      if (!existing.delegation && task.delegation) existing.delegation = task.delegation;
+      if (!existing.taskCodePhu && task.taskCodePhu) existing.taskCodePhu = task.taskCodePhu;
+      if (!existingValidPar && validPar && validPar.id) {
+        existing.parentTaskId = validPar.id;
+        validParentByTask.set(existing, validPar);
       }
     } else {
-      seenMap.set(task.id, task);
-      if (codeKey) seenCodeMap.set(codeKey, task.id);
-      if (exactTaskKey) seenNormMap.set(exactTaskKey, task.id);
+      keepAsDistinctTask();
     }
   });
 
-  return {
-    dedupedTasks: Array.from(seenMap.values()),
-    duplicateCount,
-    removedTaskIds
-  };
+  const inputOrderMap = new Map<string, number>();
+  for (let i = 0; i < tasks.length; i++) {
+    const tid = tasks[i]?.id ? String(tasks[i].id).trim() : '';
+    if (tid && !inputOrderMap.has(tid)) inputOrderMap.set(tid, i);
+  }
+  const dedupedTasks = Array.from(seenMap.values()).sort(
+    (a, b) => (inputOrderMap.get(String(a.id).trim()) ?? 0) - (inputOrderMap.get(String(b.id).trim()) ?? 0)
+  );
+  for (let i = 0; i < dedupedTasks.length; i++) {
+    const t = dedupedTasks[i];
+    const validPar = validParentByTask.get(t);
+    if (validPar && validPar.id) {
+      const redirected = idRedirectMap.get(String(validPar.id).trim()) || String(validPar.id).trim();
+      if (t.parentTaskId !== redirected) dedupedTasks[i] = { ...t, parentTaskId: redirected };
+    } else if (t.parentTaskId) {
+      const redirected = idRedirectMap.get(String(t.parentTaskId).trim());
+      if (redirected && redirected !== t.parentTaskId) dedupedTasks[i] = { ...t, parentTaskId: redirected };
+    }
+  }
+
+  const result = { dedupedTasks, duplicateCount, removedTaskIds };
+  _dedupWeakCache.set(tasks, result);
+  _dedupWeakCache.set(dedupedTasks, { dedupedTasks, duplicateCount: 0, removedTaskIds: [] });
+  return result;
 }
 
 let _lastDedupInputTasksRef: Task[] | null = null;
 let _lastDedupInputProjectsRef: Project[] | null = null;
 let _cachedDedupTasksResult: Task[] = [];
 
-/**
- * Convenient helper returning just the deduplicated array of tasks.
- * Includes reference-equality caching to prevent redundant sorting and map allocations.
- */
-export function deduplicateTasks(tasks: Task[], projects: Project[] = []): Task[] {
+export function deduplicateTasks(tasks: Task[], projects: Project[] = EMPTY_PROJECTS): Task[] {
   if (!tasks || tasks.length === 0) return [];
   if (tasks.length === 1) return tasks;
-
-  if (_lastDedupInputTasksRef === tasks && _lastDedupInputProjectsRef === projects && _lastDedupInputTasksRef !== null) {
+  const normalizedProjects = projects && projects.length > 0 ? projects : EMPTY_PROJECTS;
+  if (_lastDedupInputTasksRef === tasks && _lastDedupInputProjectsRef === normalizedProjects && _lastDedupInputTasksRef !== null) {
     return _cachedDedupTasksResult;
   }
-
   _lastDedupInputTasksRef = tasks;
-  _lastDedupInputProjectsRef = projects;
-  _cachedDedupTasksResult = deduplicateTasksInMemory(tasks, projects).dedupedTasks;
+  _lastDedupInputProjectsRef = normalizedProjects;
+  _cachedDedupTasksResult = deduplicateTasksInMemory(tasks, normalizedProjects).dedupedTasks;
   return _cachedDedupTasksResult;
 }
 

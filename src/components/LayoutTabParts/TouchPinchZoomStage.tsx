@@ -1,10 +1,4 @@
-import React, {
-  useRef,
-  useEffect,
-  useCallback,
-  useImperativeHandle,
-  forwardRef,
-} from 'react';
+import React, { useRef, useEffect, useCallback, useImperativeHandle, forwardRef } from 'react';
 
 export interface TouchPinchZoomStageHandle {
   zoomIn: (step?: number) => void;
@@ -20,6 +14,8 @@ export interface TouchPinchZoomStageProps {
   minScale?: number;
   maxScale?: number;
   onScaleChange?: (scale: number) => void;
+  onSwipeUp?: () => void;
+  onSwipeDown?: () => void;
   captureOverlay?: boolean;
   allowNativeTouch?: boolean;
   alwaysPan?: boolean;
@@ -27,61 +23,34 @@ export interface TouchPinchZoomStageProps {
   contentClassName?: string;
 }
 
-export const TouchPinchZoomStage = forwardRef<
-  TouchPinchZoomStageHandle,
-  TouchPinchZoomStageProps
->(function TouchPinchZoomStage(
-  {
-    children,
-    initialScale = 1,
-    minScale = 0.5,
-    maxScale = 8,
-    onScaleChange,
-    captureOverlay = false,
-    allowNativeTouch = false,
-    alwaysPan = true,
-    className = '',
-    contentClassName = '',
-  },
-  ref
-) {
+export const TouchPinchZoomStage = forwardRef<TouchPinchZoomStageHandle, TouchPinchZoomStageProps>(
+  function TouchPinchZoomStage(
+    {
+      children, initialScale = 1, minScale = 0.5, maxScale = 8,
+      onScaleChange, onSwipeUp, onSwipeDown, captureOverlay = false,
+      allowNativeTouch = false, alwaysPan = true, className = '', contentClassName = '',
+    },
+    ref
+  ) {
   const containerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
-
-  const stateRef = useRef<{ scale: number; x: number; y: number }>({
-    scale: initialScale,
-    x: 0,
-    y: 0,
-  });
-
+  const stateRef = useRef<{ scale: number; x: number; y: number }>({ scale: initialScale, x: 0, y: 0 });
   const rafIdRef = useRef<number | null>(null);
   const lastReportedScaleRef = useRef<number>(initialScale);
   const scaleReportTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const pinchStartRef = useRef<{
-    startDist: number;
-    startScale: number;
-    startX: number;
-    startY: number;
-    startMidX: number;
-    startMidY: number;
+    startDist: number; startScale: number; startX: number; startY: number; startMidX: number; startMidY: number;
   } | null>(null);
 
   const panStartRef = useRef<{
-    clientX: number;
-    clientY: number;
-    startX: number;
-    startY: number;
-    moved: boolean;
+    clientX: number; clientY: number; startX: number; startY: number; moved: boolean;
   } | null>(null);
 
   const isMouseDraggingRef = useRef(false);
   const lastTapRef = useRef<{ time: number; x: number; y: number }>({ time: 0, x: 0, y: 0 });
 
-  const clampScale = useCallback(
-    (s: number) => Math.max(minScale, Math.min(maxScale, s)),
-    [minScale, maxScale]
-  );
+  const clampScale = useCallback((s: number) => Math.max(minScale, Math.min(maxScale, s)), [minScale, maxScale]);
 
   const notifyScale = useCallback(
     (s: number, immediate = false) => {
@@ -109,10 +78,24 @@ export const TouchPinchZoomStage = forwardRef<
     [onScaleChange]
   );
 
+  const allowNativeTouchRef = useRef(allowNativeTouch);
+  allowNativeTouchRef.current = allowNativeTouch;
+  const onSwipeUpRef = useRef(onSwipeUp);
+  onSwipeUpRef.current = onSwipeUp;
+  const onSwipeDownRef = useRef(onSwipeDown);
+  onSwipeDownRef.current = onSwipeDown;
+
   const applyTransformDOM = useCallback((animate = false) => {
     const el = contentRef.current;
     if (!el) return;
     const { scale, x, y } = stateRef.current;
+    const isIdentity =
+      Math.abs(scale - 1) < 0.005 && Math.abs(x) < 0.5 && Math.abs(y) < 0.5;
+    if (allowNativeTouchRef.current || isIdentity) {
+      el.style.transition = animate ? 'transform 160ms cubic-bezier(0.22, 1, 0.36, 1)' : 'none';
+      el.style.transform = 'none';
+      return;
+    }
     el.style.transition = animate ? 'transform 160ms cubic-bezier(0.22, 1, 0.36, 1)' : 'none';
     el.style.transform = `translate3d(${x.toFixed(2)}px, ${y.toFixed(2)}px, 0) scale(${scale.toFixed(4)})`;
   }, []);
@@ -128,6 +111,9 @@ export const TouchPinchZoomStage = forwardRef<
   const setTransformAnimated = useCallback(
     (nextScale: number, nextX: number, nextY: number) => {
       const clamped = clampScale(nextScale);
+      if (clamped > 1.01) {
+        allowNativeTouchRef.current = false;
+      }
       stateRef.current = {
         scale: clamped,
         x: clamped <= 1.01 ? 0 : nextX,
@@ -172,8 +158,20 @@ export const TouchPinchZoomStage = forwardRef<
   }, [initialScale, clampScale, applyTransformDOM, notifyScale]);
 
   useEffect(() => {
+    allowNativeTouchRef.current = allowNativeTouch;
+    if (allowNativeTouch) {
+      stateRef.current = { scale: 1, x: 0, y: 0 };
+      applyTransformDOM(false);
+      notifyScale(1, true);
+    } else {
+      applyTransformDOM(true);
+      notifyScale(stateRef.current.scale, true);
+    }
+  }, [allowNativeTouch, applyTransformDOM, notifyScale]);
+
+  useEffect(() => {
     const container = containerRef.current;
-    if (!container) return;
+    if (!container || allowNativeTouch) return;
 
     const getCenter = () => {
       const rect = container.getBoundingClientRect();
@@ -229,16 +227,23 @@ export const TouchPinchZoomStage = forwardRef<
         scheduleRender();
         notifyScale(newScale, false);
       } else if (!allowNativeTouch && e.touches.length === 1 && panStartRef.current) {
-        const canPan = alwaysPan || stateRef.current.scale > 1.02 || captureOverlay;
+        const hasSwipePaging = Boolean(onSwipeUpRef.current || onSwipeDownRef.current);
+        const isUnzoomed = stateRef.current.scale <= 1.05;
+        const canPan = alwaysPan || stateRef.current.scale > 1.02 || captureOverlay || hasSwipePaging;
         if (!canPan) return;
         const t = e.touches[0];
         const dx = t.clientX - panStartRef.current.clientX;
         const dy = t.clientY - panStartRef.current.clientY;
-        if (Math.abs(dx) > 3 || Math.abs(dy) > 3) panStartRef.current.moved = true;
+        if (Math.abs(dx) > 4 || Math.abs(dy) > 4) panStartRef.current.moved = true;
         if (panStartRef.current.moved) {
           if (e.cancelable) e.preventDefault();
-          stateRef.current.x = panStartRef.current.startX + dx;
-          stateRef.current.y = panStartRef.current.startY + dy;
+          if (hasSwipePaging && isUnzoomed) {
+            stateRef.current.x = 0;
+            stateRef.current.y = dy * 0.28;
+          } else {
+            stateRef.current.x = panStartRef.current.startX + dx;
+            stateRef.current.y = panStartRef.current.startY + dy;
+          }
           scheduleRender();
         }
       }
@@ -263,7 +268,8 @@ export const TouchPinchZoomStage = forwardRef<
 
       if (e.touches.length === 0) {
         const wasPinching = Boolean(pinchStartRef.current);
-        const wasMoved = panStartRef.current?.moved ?? false;
+        const panSnapshot = panStartRef.current;
+        const wasMoved = panSnapshot?.moved ?? false;
         pinchStartRef.current = null;
         panStartRef.current = null;
 
@@ -272,6 +278,20 @@ export const TouchPinchZoomStage = forwardRef<
             setTransformAnimated(1, 0, 0);
           } else {
             notifyScale(stateRef.current.scale, true);
+          }
+          return;
+        }
+
+        const hasSwipePaging = Boolean(onSwipeUpRef.current || onSwipeDownRef.current);
+        if (hasSwipePaging && wasMoved && panSnapshot && stateRef.current.scale <= 1.05 && e.changedTouches.length === 1) {
+          const endTouch = e.changedTouches[0];
+          const dx = endTouch.clientX - panSnapshot.clientX;
+          const dy = endTouch.clientY - panSnapshot.clientY;
+          setTransformAnimated(1, 0, 0);
+          if (dy < -38 && Math.abs(dy) >= Math.abs(dx)) {
+            onSwipeUpRef.current?.();
+          } else if (dy > 38 && Math.abs(dy) >= Math.abs(dx)) {
+            onSwipeDownRef.current?.();
           }
           return;
         }
@@ -413,24 +433,19 @@ export const TouchPinchZoomStage = forwardRef<
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseUp}
       onDoubleClick={handleDoubleClick}
-      className={`relative w-full h-full overflow-hidden flex items-center justify-center select-none ${
-        allowNativeTouch ? '' : 'cursor-grab active:cursor-grabbing'
+      className={`relative w-full h-full flex items-center justify-center ${
+        allowNativeTouch ? 'overflow-auto select-auto' : 'overflow-hidden select-none cursor-grab active:cursor-grabbing'
       } ${className}`}
       style={{
-        touchAction: allowNativeTouch ? 'pan-x pan-y' : 'none',
-        WebkitUserSelect: 'none',
-        userSelect: 'none',
+        touchAction: allowNativeTouch ? 'auto' : 'none',
+        WebkitUserSelect: allowNativeTouch ? 'auto' : 'none',
+        userSelect: allowNativeTouch ? 'auto' : 'none',
       }}
     >
       <div
         ref={contentRef}
         className={`w-full h-full flex items-center justify-center ${contentClassName}`}
-        style={{
-          transformOrigin: 'center center',
-          willChange: 'transform',
-          backfaceVisibility: 'hidden',
-          WebkitBackfaceVisibility: 'hidden',
-        }}
+        style={{ transformOrigin: 'center center' }}
       >
         {children}
       </div>
@@ -445,3 +460,4 @@ export const TouchPinchZoomStage = forwardRef<
     </div>
   );
 });
+

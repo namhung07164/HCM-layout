@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAppStore } from '../../store/useAppStore';
 import { useDataStore } from '../PictureMapping/DataContext';
 import { preloadFloorImages } from '../../lib/imageDBCache';
-import { resolveR2UrlToHttp } from '../PictureMapping/lib/r2Upload';
 import { useOffscreenImage } from '../../hooks/useOffscreenImage';
 
 interface UseLayoutFloorDataProps {
@@ -72,16 +71,23 @@ export function useLayoutFloorData({
           part.mapVersions.forEach((v: any) => {
             if (v?.id) {
               const existing = versionsMap.get(v.id) || {};
-              const resolvedBg = (existing.backgroundUrl && !existing.backgroundUrl.startsWith('r2://'))
+              const isLocalUpload =
+                existing.backgroundUrl &&
+                (existing.backgroundUrl.startsWith('blob:') || existing.backgroundUrl.startsWith('data:'));
+              const resolvedBg = isLocalUpload
                 ? existing.backgroundUrl
-                : (v.backgroundUrl && !v.backgroundUrl.startsWith('r2://'))
+                : v.backgroundUrl && !v.backgroundUrl.startsWith('r2://')
                   ? v.backgroundUrl
-                  : (existing.backgroundUrl || v.backgroundUrl);
-              versionsMap.set(v.id, { 
-                ...v, 
-                ...existing, 
+                  : existing.backgroundUrl && !existing.backgroundUrl.startsWith('r2://')
+                    ? existing.backgroundUrl
+                    : v.backgroundUrl || existing.backgroundUrl;
+              versionsMap.set(v.id, {
+                ...v,
+                ...existing,
+                groups: Array.isArray(existing.groups) && existing.groups.length > 0 ? existing.groups : (v.groups || []),
                 backgroundUrl: resolvedBg,
-                location: existing.location || v.location || key.split('_')[1] 
+                r2Key: (v as any).r2Key || (existing as any).r2Key,
+                location: existing.location || v.location || key.split('_')[1],
               });
             }
           });
@@ -94,23 +100,33 @@ export function useLayoutFloorData({
       config.versions.forEach((v: any) => {
         if (v?.id) {
           const existing = versionsMap.get(v.id) || {};
-          const resolvedBg = (existing.backgroundUrl && !existing.backgroundUrl.startsWith('r2://'))
+          const isLocalUpload =
+            existing.backgroundUrl &&
+            (existing.backgroundUrl.startsWith('blob:') || existing.backgroundUrl.startsWith('data:'));
+          const resolvedBg = isLocalUpload
             ? existing.backgroundUrl
-            : (v.backgroundUrl && !v.backgroundUrl.startsWith('r2://'))
+            : v.backgroundUrl && !v.backgroundUrl.startsWith('r2://')
               ? v.backgroundUrl
-              : (existing.backgroundUrl || v.backgroundUrl);
-          versionsMap.set(v.id, { 
-            ...v, 
-            ...existing, 
+              : existing.backgroundUrl && !existing.backgroundUrl.startsWith('r2://')
+                ? existing.backgroundUrl
+                : v.backgroundUrl || existing.backgroundUrl;
+          versionsMap.set(v.id, {
+            ...v,
+            ...existing,
+            groups: Array.isArray(existing.groups) && existing.groups.length > 0 ? existing.groups : (v.groups || []),
             backgroundUrl: resolvedBg,
-            store: existing.store || v.store || 'HCM' 
+            r2Key: (v as any).r2Key || (existing as any).r2Key,
+            store: existing.store || v.store || 'HCM',
           });
         }
       });
     }
 
     const finalVersions = Array.from(versionsMap.values());
-    const key = `${storeFilter}_${finalVersions.map(v => `${v?.id || ''}_${v?.backgroundUrl || ''}`).join('|')}`;
+    const key = `${storeFilter}_${finalVersions.map(v => {
+      const gSig = (v?.groups || []).map((g: any) => `${g.id}:${g.color}:${g.opacity}:${g.hatchPattern || ''}:${g.symbol || ''}:${g.paintCategory || g.category || ''}:${(g.rules || []).length}`).join(',');
+      return `${v?.id || ''}_${v?.backgroundUrl || ''}_${gSig}`;
+    }).join('|')}`;
     if (key === prevAvailVersionsKeyRef.current) {
       return prevAvailVersionsRef.current;
     }
@@ -118,18 +134,6 @@ export function useLayoutFloorData({
     prevAvailVersionsRef.current = finalVersions;
     return finalVersions;
   }, [getAllStoreVersions, storeFilter, localStoreLocationData, config]);
-
-  // Pre-cache all floor maps for this store into IndexedDB
-  useEffect(() => {
-    if (availableStoreVersions.length > 0) {
-      const urls = availableStoreVersions
-        .map(v => v?.backgroundUrl)
-        .filter((u): u is string => typeof u === 'string' && u.length > 0 && !u.startsWith('r2://'));
-      if (urls.length > 0) {
-        preloadFloorImages(urls);
-      }
-    }
-  }, [availableStoreVersions]);
 
   // 2. Filter versions specific to targetLoc (e.g. L2) and year from Picture Mapping / global setting
   const prevLocationVersionsRef = useRef<any[]>([]);
@@ -164,7 +168,10 @@ export function useLayoutFloorData({
       }
     }
 
-    const key = `${targetLoc}_${activeYear}_${result.map(v => v?.id || '').join('|')}`;
+    const key = `${targetLoc}_${activeYear}_${result.map(v => {
+      const gSig = (v?.groups || []).map((g: any) => `${g.id}:${g.color}:${g.opacity}:${g.hatchPattern || ''}:${g.symbol || ''}:${g.paintCategory || g.category || ''}:${(g.rules || []).length}`).join(',');
+      return `${v?.id || ''}_${gSig}`;
+    }).join('|')}`;
     if (key === prevLocationVersionsKeyRef.current) {
       return prevLocationVersionsRef.current;
     }
@@ -209,13 +216,15 @@ export function useLayoutFloorData({
     }
 
     // Resolve backgroundUrl if empty or r2://
-    let bgUrl = v.backgroundUrl || '';
+    let bgUrl = v.backgroundUrl || ((v as any).r2Key ? `r2://${(v as any).r2Key}` : '');
     if (!bgUrl || bgUrl.startsWith('r2://')) {
       // Scan all cloud partitions and versions for resolved signed URL
       if (cloudPart?.mapVersions) {
         const matchingCloudV = cloudPart.mapVersions.find((cv: any) => cv.id === v.id || cv.name === v.name);
         if (matchingCloudV?.backgroundUrl && !matchingCloudV.backgroundUrl.startsWith('r2://')) {
           bgUrl = matchingCloudV.backgroundUrl;
+        } else if (!bgUrl && (matchingCloudV as any)?.r2Key) {
+          bgUrl = `r2://${(matchingCloudV as any).r2Key}`;
         }
       }
       if ((!bgUrl || bgUrl.startsWith('r2://')) && config?.storeLocationData) {
@@ -224,6 +233,8 @@ export function useLayoutFloorData({
           if (matchingCloudV?.backgroundUrl && !matchingCloudV.backgroundUrl.startsWith('r2://')) {
             bgUrl = matchingCloudV.backgroundUrl;
             break;
+          } else if (!bgUrl && (matchingCloudV as any)?.r2Key) {
+            bgUrl = `r2://${(matchingCloudV as any).r2Key}`;
           }
         }
       }
@@ -333,8 +344,23 @@ export function useLayoutFloorData({
         return;
       }
 
+      // Check Normalized Code Collision (e.g. "333-2" vs "L3-333-2" on same floor):
+      const normCode = lowerName.replace(/^(l\d+|b\d+|md-[lb]\d+)[-_]/i, '').trim();
+      if (normCode && normCode !== lowerName && seenUnitNames.has(normCode)) {
+        const prevId = seenUnitNames.get(normCode)!;
+        const prev = unitsMap.get(prevId);
+        if (prev && (!prev.type && taggedUnit.type)) {
+          unitsMap.delete(prevId);
+          unitsMap.set(id, taggedUnit);
+          seenUnitNames.set(normCode, id);
+          if (coordKey) seenCoordinates.set(coordKey, id);
+        }
+        return;
+      }
+
       if (coordKey) seenCoordinates.set(coordKey, id);
       if (lowerName) seenUnitNames.set(lowerName, id);
+      if (normCode) seenUnitNames.set(normCode, id);
       unitsMap.set(id, taggedUnit);
     });
 
@@ -349,28 +375,23 @@ export function useLayoutFloorData({
   const version = r2Version;
   const units = r2Units;
 
-  const [resolvedBgUrl, setResolvedBgUrl] = useState<string>('');
+  const activeBgUrl = version?.backgroundUrl || '';
+  const [bgImage] = useOffscreenImage(activeBgUrl, 'anonymous');
 
+  // Pre-cache other floor maps for this store into Persistent Disk Cache only AFTER the active floor image has loaded
   useEffect(() => {
-    let isMounted = true;
-    const rawUrl = version?.backgroundUrl || '';
-    if (!rawUrl) {
-      setResolvedBgUrl(prev => prev === '' ? prev : '');
-      return;
+    if (bgImage && availableStoreVersions.length > 0) {
+      const urls = availableStoreVersions
+        .map(v => v?.backgroundUrl || ((v as any)?.r2Key ? `r2://${(v as any).r2Key}` : ''))
+        .filter((u): u is string => typeof u === 'string' && u.length > 0 && !u.startsWith('data:'));
+      if (urls.length > 0) {
+        preloadFloorImages(urls, activeBgUrl);
+      }
     }
-    if (rawUrl.startsWith('r2://') || (!rawUrl.startsWith('http://') && !rawUrl.startsWith('https://') && !rawUrl.startsWith('data:') && !rawUrl.startsWith('blob:'))) {
-      resolveR2UrlToHttp(rawUrl).then(url => {
-        if (isMounted) setResolvedBgUrl(prev => prev === (url || rawUrl) ? prev : (url || rawUrl));
-      }).catch(() => {
-        if (isMounted) setResolvedBgUrl(prev => prev === rawUrl ? prev : rawUrl);
-      });
-    } else {
-      setResolvedBgUrl(prev => prev === rawUrl ? prev : rawUrl);
-    }
-    return () => { isMounted = false; };
-  }, [version?.backgroundUrl]);
+  }, [bgImage, availableStoreVersions, activeBgUrl]);
 
-  const [bgImage] = useOffscreenImage(resolvedBgUrl || version?.backgroundUrl || '', 'anonymous');
+  // O(1) In-Memory Cache for hasStoredUnitImages to eliminate 1,000+ synchronous localStorage.getItem + JSON.parse calls per canvas render
+  const unitImagesCheckCacheRef = useRef<Map<string, boolean>>(new Map());
 
   // Helper to accurately check if unit has user-attached images in localStorage partitioned by store
   const hasStoredUnitImages = useCallback((key: string | undefined | null, overrideStore?: string): boolean => {
@@ -378,10 +399,16 @@ export function useLayoutFloorData({
     try {
       const activeStore = (overrideStore || (storeFilter === 'HN' ? 'HN' : 'HCM')).toUpperCase();
       const storeKey = `taka_unit_images_${activeStore}_${key}`;
+      const cached = unitImagesCheckCacheRef.current.get(storeKey);
+      if (cached !== undefined) return cached;
+
       const raw = localStorage.getItem(storeKey);
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length > 0) return true;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          unitImagesCheckCacheRef.current.set(storeKey, true);
+          return true;
+        }
       }
       // Migrate legacy un-prefixed key for HN if present
       if (activeStore === 'HN') {
@@ -393,11 +420,13 @@ export function useLayoutFloorData({
               const tagged = parsed.map((item: any) => ({ ...item, store: 'HN' }));
               localStorage.setItem(storeKey, JSON.stringify(tagged));
               localStorage.removeItem(`taka_unit_images_${key}`);
+              unitImagesCheckCacheRef.current.set(storeKey, true);
               return true;
             }
           } catch {}
         }
       }
+      unitImagesCheckCacheRef.current.set(storeKey, false);
       return false;
     } catch {
       return false;
@@ -408,6 +437,7 @@ export function useLayoutFloorData({
   const [unitImagesRev, setUnitImagesRev] = useState(0);
   useEffect(() => {
     const handleStorageChange = () => {
+      unitImagesCheckCacheRef.current.clear();
       setUnitImagesRev(prev => prev + 1);
     };
     window.addEventListener('taka_unit_images_changed', handleStorageChange);
@@ -445,7 +475,7 @@ export function useLayoutFloorData({
     locationVersions,
     availableStoreVersions,
     bgImage,
-    resolvedBgUrl,
+    resolvedBgUrl: activeBgUrl,
     unitImagesRev,
     hasStoredUnitImages,
     selectedVersionId,

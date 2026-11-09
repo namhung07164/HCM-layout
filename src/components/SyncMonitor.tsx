@@ -3,7 +3,7 @@ import { useAppStore } from '../store/useAppStore';
 import { safeGetItemLocal } from '../lib/storage';
 import { Wifi, WifiOff, Database, ShieldAlert, RefreshCw, Trash2 } from 'lucide-react';
 import { getPendingUpdates, clearPendingUpdates } from '../lib/syncQueue';
-import { getLastDeltaSyncTime, getRestoreCutoffTimestamp, forceFullServerSync } from '../lib/deltaSyncService';
+import { getLastDeltaSyncTime, getRestoreCutoffTimestamp, pullAndApplyDeltas } from '../lib/deltaSyncService';
 
 /**
  * SyncMonitor: A floating debug panel to verify real-time sync, fingerprinting, and cutoff.
@@ -35,7 +35,7 @@ export const SyncMonitor: React.FC = () => {
   const handleManualSync = async () => {
     setIsSyncing(true);
     try {
-      await forceFullServerSync();
+      await pullAndApplyDeltas();
     } finally {
       setIsSyncing(false);
     }

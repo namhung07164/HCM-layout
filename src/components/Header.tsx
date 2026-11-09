@@ -1,4 +1,3 @@
-import { useEnrichedData } from '../hooks/useEnrichedData';
 import { safeGetItemLocal, safeSetItemLocal, safeRemoveItemLocal, safeGetItemSession, safeSetItemSession, safeRemoveItemSession } from "../lib/storage";
 import { useAppStore } from "../store/useAppStore";
 import { doc } from 'firebase/firestore';
@@ -32,9 +31,7 @@ import {
   SlidersHorizontal,
   Search,
   Command,
-  RefreshCw,
 } from "lucide-react";
-import { forceFullServerSync } from "../lib/deltaSyncService";
 import { lazyWithRetry } from "../lib/lazyWithRetry";
 const QRScannerModal = lazyWithRetry(() => import("./QRScannerModal").then(m => ({ default: m.QRScannerModal })), "QRScannerModal");
 import { AppUser, TabId, AppRole } from "../types";
@@ -69,46 +66,55 @@ interface HeaderProps {
   onQuickNavigate?: (targetTab: TabId, target: any) => void;
 }
 
-export function Header({
+const HeaderClockWidget = React.memo(function HeaderClockWidget() {
+  const [currentTime, setCurrentTime] = useState(() => new Date());
+
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const day = currentTime.getDate().toString().padStart(2, '0');
+  const month = currentTime.toLocaleString('en-US', { month: 'short' });
+  const year = currentTime.getFullYear();
+  const hours = currentTime.getHours().toString().padStart(2, '0');
+  const mins = currentTime.getMinutes().toString().padStart(2, '0');
+  const secs = currentTime.getSeconds().toString().padStart(2, '0');
+  const compactTime = `${day} ${month} ${year} ${hours}:${mins}:${secs}`;
+
+  const fullTime = currentTime.toLocaleString('en-US', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+
+  return (
+    <div
+      title={`Today: ${fullTime}`}
+      className="h-8 px-2.5 bg-blue-50 dark:bg-[#28282a] text-blue-700 dark:text-[#8ab4f8] rounded-lg text-xs font-mono font-bold border border-blue-100 dark:border-[#444446] hidden lg:flex items-center gap-1.5 shadow-2xs transition-colors shrink-0 select-none whitespace-nowrap"
+    >
+      <Clock className="w-3.5 h-3.5 shrink-0 text-blue-600 dark:text-[#8ab4f8]" />
+      <span>{compactTime}</span>
+    </div>
+  );
+});
+
+export const Header = React.memo(function Header({
   cloudStatus, onLoginClick, onLogoutClick, onTabChange, activeTab, notificationCount = 0, onUndo, canUndo = false, hasDataToUndo = false, undoDescription, onRedo, canRedo = false, hasDataToRedo = false, redoDescription, onToggleTheme, isFocusMode = false, onToggleFocusMode, onPrintClick, isPrintPreview = false, onPrintPreviewToggle, onDeepLink, onQuickNavigate}: HeaderProps) {
 
-  const { enrichedProjects: projects, filteredTasks: tasks, visibleDelegationGroups: delegationGroups } = useEnrichedData();
   const currentUser = useAppStore(state => state.currentUser)!;
   const permissionMatrix = useAppStore(state => state.permissionMatrix);
-  const locations = useAppStore(state => state.locations);
   const theme = useAppStore(state => state.theme);
-  const appUsers = useAppStore(state => state.appUsers);
-  const subAppUsers = useAppStore(state => state.subAppUsers);
   const [isQRScannerOpen, setIsQRScannerOpen] = useState(false);
-  const [isFullSyncing, setIsFullSyncing] = useState(false);
-
-  const handleForceSyncClick = async () => {
-    if (isFullSyncing) return;
-    setIsFullSyncing(true);
-    try {
-      await forceFullServerSync();
-      useAppStore.getState().setToast({
-        title: "Full Sync Completed",
-        message: "Data has been verified and reconciled 100% with the cloud server.",
-        type: "success"
-      });
-    } catch (err) {
-      console.error("Force sync failed:", err);
-      useAppStore.getState().setToast({
-        title: "Sync Warning",
-        message: "Network interrupted. Stored local cache remains active.",
-        type: "warning"
-      });
-    } finally {
-      setIsFullSyncing(false);
-    }
-  };
 
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
-  const [currentTime, setCurrentTime] = useState(new Date());
   const menuRef = useRef<HTMLDivElement>(null);
-  const { language, setLanguage, t } = useLanguage();
+  const { t } = useLanguage();
   
   const currency = useAppStore(state => state.currency);
   const setCurrency = useAppStore(state => state.setCurrency);
@@ -116,16 +122,6 @@ export function Header({
   const canWriteImportCsv = currentUser?.role === 'admin' || !!permissionMatrix[currentUser?.role as AppRole]?.Write?.importCsv;
   const jpyRate = useAppStore(state => state.jpyRate);
   const usdRate = useAppStore(state => state.usdRate);
-
-  const ganttViewMode = useAppStore(state => state.ganttViewMode);
-  const setGanttViewMode = useAppStore(state => state.setGanttViewMode);
-  const ganttDayWidth = useAppStore(state => state.ganttDayWidth);
-  const setGanttDayWidth = useAppStore(state => state.setGanttDayWidth);
-  const ganttScaleInput = useAppStore(state => state.ganttScaleInput);
-  const setGanttScaleInput = useAppStore(state => state.setGanttScaleInput);
-  const isGanttWidthChanged = useAppStore(state => state.isGanttWidthChanged);
-  const setIsGanttWidthChanged = useAppStore(state => state.setIsGanttWidthChanged);
-  const saveGanttDayWidth = useAppStore(state => state.saveGanttDayWidth);
 
   const handleCurrencyClick = () => {
     let nextCurrency: 'VND' | 'JPY' | 'USD' = 'VND';
@@ -160,11 +156,6 @@ export function Header({
   };
 
   useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
         setIsMenuOpen(false);
@@ -183,29 +174,6 @@ export function Header({
     };
   }, []);
 
-  const formatCompactTime = (date: Date) => {
-    const day = date.getDate().toString().padStart(2, '0');
-    const month = date.toLocaleString('en-US', { month: 'short' });
-    const year = date.getFullYear();
-    const hours = date.getHours().toString().padStart(2, '0');
-    const mins = date.getMinutes().toString().padStart(2, '0');
-    const secs = date.getSeconds().toString().padStart(2, '0');
-    return `${day} ${month} ${year} ${hours}:${mins}:${secs}`;
-  };
-
-  const formatFullTime = (date: Date) => {
-    return date.toLocaleString('en-US', {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false,
-    });
-  };
-
   const statusColors = {
     online: "text-emerald-700 bg-emerald-50/90 border-emerald-200 dark:bg-[#1a3821] dark:border-[#265330] dark:text-emerald-400",
     syncing: "text-blue-700 bg-blue-50/90 border-blue-200 dark:bg-[#28282a] dark:border-[#444446] dark:text-[#8ab4f8]",
@@ -213,16 +181,16 @@ export function Header({
   };
 
   return (
-    <header className="sticky top-0 z-50 bg-white/95 dark:bg-[#1e1e20]/95 backdrop-blur-md border-b border-slate-200/80 dark:border-[#333336] py-2 px-3 sm:px-4 mb-2.5 rounded-t-xl transition-all min-w-0 flex items-center justify-between gap-2 sm:gap-3">
+    <header className="sticky top-0 z-50 bg-white/95 dark:bg-[#1e1e20]/95 backdrop-blur-md border-b border-slate-200/80 dark:border-[#333336] py-1.5 sm:py-2 px-2 sm:px-4 mb-2 sm:mb-2.5 rounded-t-xl transition-all min-w-0 flex items-center justify-between gap-1 sm:gap-3">
       {/* Left: Brand Identity & Menu */}
-      <div className="flex items-center gap-2 sm:gap-2.5 min-w-0 shrink">
+      <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0 shrink">
         <div ref={menuRef} className="relative shrink-0">
           <button
             title="Menu"
             onClick={() => setIsMenuOpen(!isMenuOpen)}
-            className="h-8 w-8 flex items-center justify-center hover:bg-slate-100 dark:hover:bg-[#28282a] text-slate-700 dark:text-[#c3c3c3] rounded-lg transition-colors outline-none cursor-pointer active:scale-95 touch-manipulation"
+            className="h-7 w-7 sm:h-8 sm:w-8 flex items-center justify-center hover:bg-slate-100 dark:hover:bg-[#28282a] text-slate-700 dark:text-[#c3c3c3] rounded-lg transition-colors outline-none cursor-pointer active:scale-95 touch-manipulation"
           >
-            <Menu className="w-5 h-5" />
+            <Menu className="w-4.5 h-4.5 sm:w-5 sm:h-5" />
           </button>
 
           <HeaderMenuDrawer
@@ -242,9 +210,9 @@ export function Header({
         </div>
 
         {/* Japanese Takashimaya Logo */}
-        <div className="w-8 h-8 sm:w-8.5 sm:h-8.5 bg-white dark:bg-[#28282a] border border-slate-200/90 dark:border-[#444446] rounded-lg flex items-center justify-center shadow-2xs shrink-0 transition-colors">
+        <div className="w-7 h-7 sm:w-8.5 sm:h-8.5 bg-white dark:bg-[#28282a] border border-slate-200/90 dark:border-[#444446] rounded-lg flex items-center justify-center shadow-2xs shrink-0 transition-colors">
           <svg
-            className="w-5.5 h-5.5 sm:w-6 sm:h-6 text-red-600 dark:text-red-500"
+            className="w-5 h-5 sm:w-6 sm:h-6 text-red-600 dark:text-red-500"
             viewBox="0 0 100 100"
             fill="currentColor"
           >
@@ -376,11 +344,11 @@ export function Header({
             redoDescription={redoDescription}
           />
 
-          {/* Currency Selector (Visible on Main Header) */}
+          {/* Currency Selector (Always visible on iPhone, iPad & Desktop) */}
           <button 
             onClick={handleCurrencyClick}
             onContextMenu={handleCurrencyContextMenu}
-            className="h-8 px-2 sm:px-2.5 min-w-[50px] sm:min-w-[64px] bg-slate-50 hover:bg-slate-100 dark:bg-[#28282a] dark:hover:bg-[#333336] text-slate-700 dark:text-[#c3c3c3] rounded-lg transition-colors border border-slate-200 dark:border-[#444446] shadow-2xs text-[10px] sm:text-xs font-bold font-mono flex items-center justify-center active:scale-95 touch-manipulation shrink-0 cursor-pointer"
+            className="h-7 sm:h-8 px-1.5 sm:px-2.5 min-w-[42px] sm:min-w-[60px] bg-slate-50 hover:bg-slate-100 dark:bg-[#28282a] dark:hover:bg-[#333336] text-slate-700 dark:text-[#c3c3c3] rounded-lg transition-colors border border-slate-200 dark:border-[#444446] shadow-2xs text-[9.5px] sm:text-xs font-bold font-mono flex items-center justify-center active:scale-95 touch-manipulation shrink-0 cursor-pointer"
             title={
               currency === 'VND'
                 ? (currentUser.role === 'admin' ? "Currency: '000 VND (Right-click to set exchange rates)" : "Currency: '000 VND")
@@ -393,34 +361,24 @@ export function Header({
             {currency === 'VND' ? "'000 VND" : currency === 'JPY' ? '万円' : 'USD'}
           </button>
 
-          {/* Force Full Sync / Refresh Safety Net Button */}
-          <button
-            onClick={handleForceSyncClick}
-            disabled={isFullSyncing}
-            className="h-8 w-8 flex items-center justify-center bg-slate-50 hover:bg-slate-100 dark:bg-[#28282a] dark:hover:bg-[#333336] rounded-lg transition-colors border border-slate-200 dark:border-[#444446] shadow-2xs text-slate-600 dark:text-[#a3a3a3] hover:text-emerald-600 dark:hover:text-emerald-400 active:scale-95 touch-manipulation shrink-0 cursor-pointer disabled:opacity-50"
-            title="Force Full Sync (Cưỡng chế đồng bộ toàn bộ từ Server)"
-          >
-            <RefreshCw className={cn("w-4 h-4", isFullSyncing && "animate-spin text-emerald-500")} />
-          </button>
-
-          {/* QR Scanner Button */}
+          {/* QR Scanner Button (Always visible on iPhone, iPad & Desktop) */}
           <button
             onClick={() => setIsQRScannerOpen(true)}
-            className="h-8 w-8 flex items-center justify-center bg-slate-50 hover:bg-slate-100 dark:bg-[#28282a] dark:hover:bg-[#333336] rounded-lg transition-colors border border-slate-200 dark:border-[#444446] shadow-2xs text-slate-600 dark:text-[#a3a3a3] hover:text-blue-600 dark:hover:text-blue-400 active:scale-95 touch-manipulation shrink-0 cursor-pointer"
+            className="h-7 w-7 sm:h-8 sm:w-8 flex items-center justify-center bg-slate-50 hover:bg-slate-100 dark:bg-[#28282a] dark:hover:bg-[#333336] rounded-lg transition-colors border border-slate-200 dark:border-[#444446] shadow-2xs text-slate-600 dark:text-[#a3a3a3] hover:text-blue-600 dark:hover:text-blue-400 active:scale-95 touch-manipulation shrink-0 cursor-pointer"
             title="Scan QR Code"
           >
-            <ScanQrCode className="w-4 h-4" />
+            <ScanQrCode className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
           </button>
 
-          {/* Notification Bell */}
+          {/* Notification Bell (Always visible, right-aligned, shrink-0) */}
           <button
             onClick={() => onTabChange("notification")}
-            className="relative h-8 w-8 flex items-center justify-center text-slate-400 hover:bg-slate-100 dark:hover:bg-[#28282a] hover:text-slate-600 dark:hover:text-slate-300 rounded-lg transition-colors focus:outline-none shrink-0"
+            className="relative h-7 w-7 sm:h-8 sm:w-8 flex items-center justify-center text-slate-500 hover:bg-slate-100 dark:hover:bg-[#28282a] hover:text-slate-700 dark:hover:text-slate-200 rounded-lg transition-colors focus:outline-none shrink-0"
             title="Notifications"
           >
-            <Bell className="w-4.5 h-4.5" />
+            <Bell className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
             {notificationCount > 0 && (
-              <span className="absolute top-1 right-1 w-3.5 h-3.5 bg-red-500 rounded-full border border-white dark:border-[#1e1e20] text-[8px] font-bold text-white flex items-center justify-center">
+              <span className="absolute -top-0.5 -right-0.5 min-w-[15px] h-3.5 px-0.5 bg-red-500 rounded-full border border-white dark:border-[#1e1e20] text-[8px] font-bold text-white flex items-center justify-center shadow-xs">
                 {notificationCount > 9 ? "9+" : notificationCount}
               </span>
             )}
@@ -468,37 +426,8 @@ export function Header({
               </span>
             )}
 
-            {/* Theme Toggle */}
-            {onToggleTheme && (
-              <button
-                onClick={onToggleTheme}
-                className="h-8 w-8 flex items-center justify-center bg-slate-50 hover:bg-slate-100 dark:bg-[#28282a] dark:hover:bg-[#333336] text-slate-500 dark:text-[#a3a3a3] rounded-lg transition-colors border border-slate-200 dark:border-[#444446] shadow-2xs active:scale-95 touch-manipulation"
-                title="Toggle Theme"
-              >
-                {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-              </button>
-            )}
-
-            {/* Language Switcher */}
-            <button onClick={() => setLanguage(language === 'en' ? 'ja' : 'en')}
-              className="h-8 px-2 bg-slate-50 hover:bg-slate-100 dark:bg-[#28282a] dark:hover:bg-[#333336] rounded-lg transition-colors border border-slate-200 dark:border-[#444446] shadow-2xs active:scale-95 touch-manipulation flex items-center justify-center"
-              title="Toggle Language"
-            >
-              {language === 'en' ? (
-                <span className="text-sm leading-none" role="img" aria-label="English">🇬🇧</span>
-              ) : (
-                <span className="text-sm leading-none" role="img" aria-label="Japanese">🇯🇵</span>
-              )}
-            </button>
-
             {/* Realtime Clock Widget */}
-            <div 
-              title={`Today: ${formatFullTime(currentTime)}`}
-              className="h-8 px-2.5 bg-blue-50 dark:bg-[#28282a] text-blue-700 dark:text-[#8ab4f8] rounded-lg text-xs font-mono font-bold border border-blue-100 dark:border-[#444446] hidden lg:flex items-center gap-1.5 shadow-2xs transition-colors shrink-0 select-none whitespace-nowrap"
-            >
-              <Clock className="w-3.5 h-3.5 shrink-0 text-blue-600 dark:text-[#8ab4f8]" />
-              <span>{formatCompactTime(currentTime)}</span>
-            </div>
+            <HeaderClockWidget />
 
             {/* Ribbon Display Options on Header */}
             <RibbonDisplayMenu variant="header" className="hidden lg:inline-flex shrink-0" />
@@ -524,4 +453,4 @@ export function Header({
       )}
     </header>
   );
-}
+});

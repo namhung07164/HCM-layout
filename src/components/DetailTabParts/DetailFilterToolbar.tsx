@@ -1,5 +1,7 @@
 import React, { memo } from 'react';
-import { Search, Edit3, Plus, Wand2, Hash, X, ArrowUpDown, Unlink } from 'lucide-react';
+import { motion, useDragControls } from 'motion/react';
+import { FixedProjectInput } from '../FixedProjectInput';
+import { Search, Edit3, Plus, Wand2, Hash, X, ArrowUpDown, Unlink, Zap, GripHorizontal } from 'lucide-react';
 import { MultiCheckboxSelect } from '../MultiCheckboxSelect';
 import { DebouncedSearchInput } from '../DebouncedSearchInput';
 import { ColumnAdder } from '../ColumnAdder';
@@ -94,37 +96,78 @@ export const DetailFilterToolbar = memo(function DetailFilterToolbar({
   selectedTaskCount = 0,
   onBulkAction
 }: DetailFilterToolbarProps) {
+  const dragControls = useDragControls();
+  const fixedProjectCode = useAppStore((s) => s.fixedProjectCode);
+
+  const effectiveTargetProject = React.useMemo(() => {
+    const cleanFix = String(fixedProjectCode || '').trim().toLowerCase();
+    if (cleanFix) {
+      const exactInFiltered = filteredProjects.find(
+        (p) =>
+          String(p.code || '').trim().toLowerCase() === cleanFix ||
+          String(p.id || '').trim().toLowerCase() === cleanFix ||
+          String(p.name || '').trim().toLowerCase() === cleanFix
+      );
+      if (exactInFiltered) return exactInFiltered;
+      if (filteredProjects.length > 0) return filteredProjects[0];
+      const exactInAll = projects.find(
+        (p) =>
+          String(p.code || '').trim().toLowerCase() === cleanFix ||
+          String(p.id || '').trim().toLowerCase() === cleanFix ||
+          String(p.name || '').trim().toLowerCase() === cleanFix
+      );
+      if (exactInAll) return exactInAll;
+    }
+    if (
+      activeProjectInView &&
+      (filteredProjects.length === 0 || filteredProjects.some((p) => p.id === activeProjectInView.id))
+    ) {
+      return activeProjectInView;
+    }
+    if (filteredProjects && filteredProjects.length > 0) return filteredProjects[0];
+    if (activeProjectInView) return activeProjectInView;
+    return projects && projects.length > 0 ? projects[0] : null;
+  }, [fixedProjectCode, filteredProjects, activeProjectInView, projects]);
+
   return (
-    <div className="px-3 sm:px-4 md:px-5 py-3 md:py-4 border-b border-slate-100 dark:border-[#333336] bg-slate-50 dark:bg-[#1e1e20]/50 flex flex-col xl:flex-row gap-3 justify-between items-stretch xl:items-center shrink-0 print:hidden">
-      <div className="flex flex-col gap-2.5 sm:gap-3 w-full xl:w-auto flex-grow max-w-4xl">
-        <div className="flex flex-wrap items-center gap-2 sm:gap-3 w-full">
+    <>
+      <div className="p-2 sm:p-3 bg-slate-100 dark:bg-[#121214] border-b border-slate-200 dark:border-slate-800 flex flex-col gap-2 shrink-0 print:hidden rounded-t-xl text-slate-800 dark:text-slate-100">
+        {/* Row 1: 4 Compact Filter Boxes in 2x2 grid on mobile and 4 cols on desktop */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 flex-grow w-full">
+          {/* Col 1: Year */}
           <select 
             value={globalYearFilter}
             onChange={(e) => setGlobalYearFilter(e.target.value)}
-            className="bg-white dark:bg-[#1e1e20] border border-slate-200 dark:border-[#444446] text-slate-900 dark:text-[#e3e3e3] text-xs sm:text-sm rounded-lg focus:ring-2 focus:ring-blue-500 block p-2 outline-none shadow-sm min-w-[85px] sm:min-w-[95px] flex-1 sm:flex-none"
+            className="w-full bg-white dark:bg-[#1a1a1c] border border-slate-300 dark:border-slate-700/80 text-slate-800 dark:text-white text-xs rounded-lg px-2.5 py-1.5 outline-none shadow-xs font-medium cursor-pointer h-8"
           >
             <option value="all">All Years</option>
             {years.map(y => <option key={y} value={y}>Year {y}</option>)}
           </select>
+
+          {/* Col 2: Store */}
           <select 
             value={effectiveStore}
             onChange={(e) => setGlobalStoreFilter(e.target.value)}
-            className="bg-white dark:bg-[#1e1e20] border border-slate-200 dark:border-[#444446] text-slate-900 dark:text-[#e3e3e3] text-xs sm:text-sm rounded-lg focus:ring-2 focus:ring-blue-500 block p-2 outline-none shadow-sm min-w-[85px] sm:min-w-[95px] flex-1 sm:flex-none"
+            className="w-full bg-white dark:bg-[#1a1a1c] border border-slate-300 dark:border-slate-700/80 text-slate-800 dark:text-white text-xs rounded-lg px-2.5 py-1.5 outline-none shadow-xs font-medium cursor-pointer h-8"
           >
             {stores.length > 1 && <option value="all">All Stores</option>}
             {stores.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
+
+          {/* Col 3: Location */}
           <MultiCheckboxSelect 
             value={globalLocationFilter}
             onChange={setGlobalLocationFilter}
             options={locationFilterOptions}
             placeholder="All Locations"
-            className="min-w-[95px] sm:min-w-[100px] flex-1 sm:flex-none"
+            className="w-full bg-white dark:bg-[#1a1a1c] border border-slate-300 dark:border-slate-700/80 rounded-lg text-xs"
           />
+
+          {/* Col 4: Status */}
           <select 
             value={statusFilter}
             onChange={(e) => onStatusFilterChange(e.target.value)}
-            className="bg-white dark:bg-[#1e1e20] border border-slate-200 dark:border-[#444446] text-slate-900 dark:text-[#e3e3e3] text-xs sm:text-sm rounded-lg focus:ring-2 focus:ring-blue-500 block p-2 outline-none shadow-sm min-w-[95px] sm:min-w-[100px] flex-1 sm:flex-none"
+            className="w-full bg-white dark:bg-[#1a1a1c] border border-slate-300 dark:border-slate-700/80 text-slate-800 dark:text-white text-xs rounded-lg px-2.5 py-1.5 outline-none shadow-xs font-medium cursor-pointer h-8"
           >
             <option value="all">All Status</option>
             <option value="Upcoming">Upcoming</option>
@@ -135,45 +178,75 @@ export const DetailFilterToolbar = memo(function DetailFilterToolbar({
             <option value="Canceled">Canceled</option>
           </select>
         </div>
-        <div className="relative w-full">
-          <DebouncedSearchInput 
-            value={searchTerm}
-            onChange={onSearchTermChange}
-            placeholder="Search in detail..."
-          />
+
+        {/* Row 2: Fixed Project, Search & Column Adder */}
+        <div className="flex flex-wrap items-center justify-between gap-2 w-full">
+          <div className="flex flex-wrap items-center gap-2 flex-grow">
+            <FixedProjectInput 
+              projects={filteredProjects} 
+              yearFilter={globalYearFilter}
+              storeFilter={effectiveStore}
+              locationFilter={globalLocationFilter}
+              statusFilter={statusFilter}
+            />
+
+            <div className="relative flex-1 min-w-[150px] sm:min-w-[180px] md:min-w-[240px] max-w-full sm:max-w-xs md:max-w-md lg:max-w-lg xl:max-w-xl">
+              <DebouncedSearchInput 
+                value={searchTerm}
+                onChange={onSearchTermChange}
+                placeholder="Search in detail..."
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0 ml-auto">
+            {hasWritePermission && canWrite && (
+              <button
+                type="button"
+                onClick={() => {
+                  window.dispatchEvent(
+                    new CustomEvent('taka_open_stem_workbench', {
+                      detail: {
+                        projectId: effectiveTargetProject?.id,
+                        projectCode: effectiveTargetProject?.code,
+                      },
+                    })
+                  );
+                }}
+                className="flex items-center justify-center gap-1.5 px-2.5 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-lg font-bold transition-all shadow-xs shrink-0 touch-manipulation text-xs active:scale-95 cursor-pointer"
+                title="⚡ Lắp ghép từ Thư viện (Visual STEM Task Library Builder)"
+              >
+                <Zap className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">⚡ Lắp ghép từ Thư viện</span>
+              </button>
+            )}
+            <ColumnAdder 
+              availableColumns={availableColumnsForUser} 
+              visibleColumns={visibleColumns} 
+              onAddColumn={onToggleColumn} 
+            />
+          </div>
         </div>
       </div>
 
-      {/* Controls - Column customization is only used on desktop table view (xl), hidden on iOS/mobile */}
-      <div className="hidden xl:flex items-center gap-2 w-full sm:w-auto justify-end shrink-0 self-end xl:self-center">
-        <ColumnAdder 
-          availableColumns={availableColumnsForUser} 
-          visibleColumns={visibleColumns} 
-          onAddColumn={onToggleColumn} 
-        />
-      </div>
-
-      {/* Floating Edit Mode Button - Moved to bottom-16 right-4 to avoid overlapping search bar */}
-      {hasWritePermission && !isEditMode && (
-        <div className="fixed bottom-16 right-4 z-40 flex flex-row gap-2 justify-end items-start print:hidden pointer-events-auto">
-          <button
-            onClick={() => setIsEditMode(true)}
-            className="flex items-center justify-center gap-1.5 px-3.5 py-2.5 bg-blue-600 dark:bg-blue-600 border border-blue-400 text-white hover:bg-blue-700 dark:hover:bg-blue-500 rounded-xl font-bold transition-all shadow-2xl hover:scale-105 active:scale-95 shrink-0 touch-manipulation text-xs cursor-pointer ring-2 ring-blue-500/30"
-            title="Edit Mode"
-          >
-            <Edit3 className="w-4 h-4 text-white pointer-events-none" />
-            <span className="pointer-events-none">
-              Edit Mode
-            </span>
-          </button>
-        </div>
-      )}
-
+      {/* Sticky + Draggable Editing Mode Bar: reserves its own row at top (0% overlap on filters/search/table) and slides smoothly along with screen scroll */}
       {hasWritePermission && isEditMode && (
-        <div className="fixed top-[154px] sm:top-[160px] left-1/2 -translate-x-1/2 z-40 flex flex-wrap items-center justify-center gap-2 sm:gap-3 px-3 py-2 sm:px-4 sm:py-3 bg-white dark:bg-[#28282a] border border-slate-200 dark:border-[#444446] rounded-2xl shadow-2xl backdrop-blur-md bg-opacity-95 w-[calc(100vw-1rem)] sm:w-max max-w-[calc(100vw-1rem)] sm:max-w-[calc(100vw-2rem)] print:hidden pointer-events-auto">
-            <div className="hidden sm:flex items-center gap-1.5 text-xs font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 px-2.5 py-1.5 rounded-lg border border-blue-200 dark:border-blue-800 shrink-0">
+        <div className="sticky top-2 z-40 flex justify-center w-full py-1 print:hidden pointer-events-none">
+          <motion.div
+            drag
+            dragControls={dragControls}
+            dragListener={false}
+            dragMomentum={false}
+            className="pointer-events-auto flex flex-wrap items-center justify-center gap-1.5 sm:gap-2 px-2.5 py-1.5 sm:px-3.5 sm:py-2 bg-white/95 dark:bg-[#222226]/95 border border-blue-300/80 dark:border-blue-800/70 rounded-2xl shadow-xl backdrop-blur-md w-[calc(100%-0.5rem)] sm:w-max max-w-full"
+          >
+            <div
+              onPointerDown={(e) => dragControls.start(e)}
+              title="Drag to move toolbar"
+              className="modal-handle flex items-center gap-1 text-xs font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30 px-2 py-1 rounded-lg border border-blue-200 dark:border-blue-800 shrink-0 cursor-grab active:cursor-grabbing select-none"
+            >
+              <GripHorizontal className="w-3.5 h-3.5 text-slate-400" />
               <Edit3 className="w-3.5 h-3.5 text-blue-500" />
-              <span>Editing Mode</span>
+              <span className="hidden sm:inline">Editing Mode</span>
             </div>
 
             {canWrite && (
@@ -191,15 +264,35 @@ export const DetailFilterToolbar = memo(function DetailFilterToolbar({
 
                 <button 
                   onClick={() => {
-                    const targetProj = activeProjectInView || (filteredProjects && filteredProjects.length > 0 ? filteredProjects[0] : (projects && projects.length > 0 ? projects[0] : null));
-                    onAddTask(targetProj);
+                    onAddTask(effectiveTargetProject);
                   }}
                   className="flex items-center justify-center gap-1.5 px-3 py-1.5 bg-emerald-600 dark:bg-emerald-600 border border-emerald-700 text-white rounded-lg hover:bg-emerald-700 font-bold transition-all shadow-md shrink-0 touch-manipulation text-xs active:scale-95 cursor-pointer"
-                  title={activeProjectInView?.code ? `Add Task for ${activeProjectInView.code}` : "Add New Task"}
+                  title={effectiveTargetProject?.code ? `Add Task for ${effectiveTargetProject.code}` : "Add New Task"}
                 >
                   <Plus className="w-4 h-4 pointer-events-none" />
                   <span className="hidden sm:inline pointer-events-none">
-                    {activeProjectInView?.code ? `+ Task (${activeProjectInView.code})` : 'Add New Task'}
+                    {effectiveTargetProject?.code ? `+ Task (${effectiveTargetProject.code})` : 'Add New Task'}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    window.dispatchEvent(
+                      new CustomEvent('taka_open_stem_workbench', {
+                        detail: {
+                          projectId: effectiveTargetProject?.id,
+                          projectCode: effectiveTargetProject?.code,
+                        },
+                      })
+                    );
+                  }}
+                  className="flex items-center justify-center gap-1.5 px-3 py-1.5 bg-orange-600 border border-orange-700 text-white rounded-lg hover:bg-orange-700 font-bold transition-all shadow-md shrink-0 touch-manipulation text-xs active:scale-95 cursor-pointer"
+                  title="⚡ Lắp ghép từ Thư viện (Visual STEM Task Library Builder)"
+                >
+                  <Zap className="w-4 h-4 pointer-events-none" />
+                  <span className="hidden sm:inline pointer-events-none">
+                    ⚡ Lắp ghép từ Thư viện
                   </span>
                 </button>
 
@@ -208,11 +301,11 @@ export const DetailFilterToolbar = memo(function DetailFilterToolbar({
                     onClick={onSortSubTasks}
                     disabled={isSortingSubTasks}
                     className="flex items-center justify-center gap-1.5 px-3 py-1.5 bg-amber-600 dark:bg-amber-600 border border-amber-700 text-white rounded-lg hover:bg-amber-700 font-bold transition-all shadow-md shrink-0 touch-manipulation text-xs active:scale-95 disabled:opacity-50 cursor-pointer"
-                    title={activeProjectInView?.code ? `Sort sub-tasks for ${activeProjectInView.code} by Start Date & Dependencies` : "Sort sub-tasks by Start Date & Dependencies"}
+                    title={effectiveTargetProject?.code ? `Sort sub-tasks for ${effectiveTargetProject.code} by Start Date & Dependencies` : "Sort sub-tasks by Start Date & Dependencies"}
                   >
                     <ArrowUpDown className={`w-4 h-4 pointer-events-none ${isSortingSubTasks ? 'animate-spin' : ''}`} />
                     <span className="hidden sm:inline pointer-events-none">
-                      {isSortingSubTasks ? 'Sorting...' : (activeProjectInView?.code ? `Sort (${activeProjectInView.code})` : 'Sort Sub-tasks')}
+                      {isSortingSubTasks ? 'Sorting...' : (effectiveTargetProject?.code ? `Sort (${effectiveTargetProject.code})` : 'Sort Sub-tasks')}
                     </span>
                   </button>
                 )}
@@ -271,11 +364,28 @@ export const DetailFilterToolbar = memo(function DetailFilterToolbar({
             >
               <X className="w-5 h-5" />
             </button>
-          </div>
-        )}
+          </motion.div>
+        </div>
+      )}
 
-        {hasWritePermission && (
-          <>
+      {/* Floating Edit Mode Button */}
+      {hasWritePermission && !isEditMode && (
+        <div className="fixed bottom-16 right-4 z-40 flex flex-row gap-2 justify-end items-start print:hidden pointer-events-auto">
+          <button
+            onClick={() => setIsEditMode(true)}
+            className="flex items-center justify-center gap-1.5 px-3.5 py-2.5 bg-blue-600 dark:bg-blue-600 border border-blue-400 text-white hover:bg-blue-700 dark:hover:bg-blue-500 rounded-xl font-bold transition-all shadow-2xl hover:scale-105 active:scale-95 shrink-0 touch-manipulation text-xs cursor-pointer ring-2 ring-blue-500/30"
+            title="Edit Mode"
+          >
+            <Edit3 className="w-4 h-4 text-white pointer-events-none" />
+            <span className="pointer-events-none">
+              Edit Mode
+            </span>
+          </button>
+        </div>
+      )}
+
+      {hasWritePermission && (
+        <>
             <div className="flex gap-1 items-center">
               {currentUser.role === 'admin' && (
                 <FullReplaceImport 
@@ -285,11 +395,12 @@ export const DetailFilterToolbar = memo(function DetailFilterToolbar({
                     const p: any = {};
                     let rowNo: any = null;
                     headers.forEach((h, i) => {
-                      const fieldMap: any = { 'store': 'store', 'location': 'location', 'year': 'year', 'code': 'code', 'name': 'name', 'no': 'no' };
+                      const fieldMap: any = { 'store': 'store', 'location': 'location', 'year': 'year', 'code': 'code', 'name': 'name', 'no': 'no', 'shoptype': 'shopType', 'shop type': 'shopType', 'shop_type': 'shopType', 'shop': 'shopType', 'sizem2': 'sizeM2', 'size': 'sizeM2', 'area': 'sizeM2' };
                       const target = fieldMap[h];
                       if (target) {
                         let val: any = row[i];
-                        if (target === 'year' || target === 'no') val = isNaN(Number(val)) ? val : Number(val);
+                        if (target === 'year' || target === 'no' || target === 'sizeM2') val = isNaN(Number(val)) ? val : Number(val);
+                        if (target === 'shopType') val = val !== undefined && val !== null ? String(val).trim() : '';
                         p[target] = val;
                         if (target === 'no') rowNo = val;
                       }
@@ -383,6 +494,6 @@ export const DetailFilterToolbar = memo(function DetailFilterToolbar({
             </div>
           </>
         )}
-    </div>
+    </>
   );
 });

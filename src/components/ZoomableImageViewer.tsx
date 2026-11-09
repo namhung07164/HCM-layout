@@ -1,27 +1,14 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  X,
-  ZoomIn,
-  ZoomOut,
-  RotateCcw,
-  ExternalLink,
-  Copy,
-  Check,
-  Loader2,
-  AlertCircle,
-  Maximize2,
-  FileText,
-  RefreshCw,
-  Hand,
-  Layers,
+  X, ZoomIn, ZoomOut, RotateCcw, ExternalLink, Copy, Check,
+  Loader2, AlertCircle, Maximize2, FileText, RefreshCw, Hand, Layers,
+  ChevronUp, ChevronDown, ArrowUpToLine,
 } from 'lucide-react';
 import { normalizeImageUrl } from './LayoutTabParts/LayoutUnitLightboxModal';
 import { PdfNativeCanvasViewer } from './LayoutTabParts/PdfNativeCanvasViewer';
-import {
-  TouchPinchZoomStage,
-  TouchPinchZoomStageHandle,
-} from './LayoutTabParts/TouchPinchZoomStage';
+import { TouchPinchZoomStage, TouchPinchZoomStageHandle } from './LayoutTabParts/TouchPinchZoomStage';
+import { LightboxIframeViewer } from './LayoutTabParts/LightboxIframeViewer';
 import { useAppStore } from '../store/useAppStore';
 
 export interface ZoomableImageViewerProps {
@@ -65,6 +52,9 @@ function getPdfIframeUrl(url: string, useGdocsViewer: boolean): string {
     return url;
   }
   if (useGdocsViewer) {
+    return `https://docs.google.com/viewer?url=${encodeURIComponent(url)}&embedded=true`;
+  }
+  if (/^https?:\/\//i.test(url) && (/\.pdf($|\?)/i.test(url) || url.includes('taka-pm.org'))) {
     return `https://docs.google.com/viewer?url=${encodeURIComponent(url)}&embedded=true`;
   }
   return url;
@@ -163,17 +153,14 @@ export const ZoomableImageViewer: React.FC<ZoomableImageViewerProps> = ({
   const resolvedUrl = normalizeImageUrl(rawTargetUrl, 'w1600');
   const [currentSrc, setCurrentSrc] = useState(resolvedUrl);
   const [hasTriedCdnFallback, setHasTriedCdnFallback] = useState(false);
+  const [hasTriedProxyFallback, setHasTriedProxyFallback] = useState(false);
 
   const handleClose = useCallback(() => {
     if (iframeRef.current) {
-      try {
-        iframeRef.current.src = 'about:blank';
-      } catch {}
+      try { iframeRef.current.src = 'about:blank'; } catch {}
     }
     if (imgRef.current) {
-      try {
-        imgRef.current.src = '';
-      } catch {}
+      try { imgRef.current.src = ''; } catch {}
     }
     if (isControlled) {
       propOnClose?.();
@@ -185,17 +172,21 @@ export const ZoomableImageViewer: React.FC<ZoomableImageViewerProps> = ({
 
   const handleImageError = useCallback(() => {
     const driveMatch =
-      rawTargetUrl.match(
-        /drive\.google\.com\/(?:file\/d\/|open\?id=|uc\?id=)([a-zA-Z0-9_-]+)/
-      ) || rawTargetUrl.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+      rawTargetUrl.match(/drive\.google\.com\/(?:file\/d\/|open\?id=|uc\?id=)([a-zA-Z0-9_-]+)/) ||
+      rawTargetUrl.match(/[?&]id=([a-zA-Z0-9_-]+)/);
     if (driveMatch && driveMatch[1] && !hasTriedCdnFallback) {
       setHasTriedCdnFallback(true);
-      setCurrentSrc(`https://lh3.googleusercontent.com/d/${driveMatch[1]}=w1600`);
+      setCurrentSrc(`/api/drive-thumb?id=${driveMatch[1]}&sz=w1600`);
+      return;
+    }
+    if (!driveMatch?.[1] && !hasTriedProxyFallback && /^https?:\/\//i.test(resolvedUrl)) {
+      setHasTriedProxyFallback(true);
+      setCurrentSrc(`/api/pdf-proxy?url=${encodeURIComponent(resolvedUrl)}`);
       return;
     }
     setIsLoading(false);
     setHasError(true);
-  }, [rawTargetUrl, hasTriedCdnFallback]);
+  }, [rawTargetUrl, resolvedUrl, hasTriedCdnFallback, hasTriedProxyFallback]);
 
   const handleImageLoad = useCallback(() => {
     setIsLoading(false);
@@ -209,16 +200,12 @@ export const ZoomableImageViewer: React.FC<ZoomableImageViewerProps> = ({
     if (!isVisible) return;
     setCurrentSrc(resolvedUrl);
     setHasTriedCdnFallback(false);
+    setHasTriedProxyFallback(false);
     setHasError(false);
     setUseGdocsFallback(false);
     setZoomScale(effectiveInitialScale);
     setTouchZoomMode('pinch');
-
-    if (!resolvedUrl) {
-      setIsLoading(false);
-      return;
-    }
-    setIsLoading(true);
+    setIsLoading(Boolean(resolvedUrl));
   }, [isVisible, resolvedUrl, effectiveInitialScale]);
 
   useEffect(() => {
@@ -241,7 +228,7 @@ export const ZoomableImageViewer: React.FC<ZoomableImageViewerProps> = ({
 
   if (!isVisible || typeof document === 'undefined') return null;
 
-  const useEmbedViewer = isPdf && (isDriveOrDocs || useGdocsFallback);
+  const useEmbedViewer = isPdf && useGdocsFallback;
   const iframeSrc = useEmbedViewer
     ? getPdfIframeUrl(rawTargetUrl, useGdocsFallback)
     : '';
@@ -278,7 +265,10 @@ export const ZoomableImageViewer: React.FC<ZoomableImageViewerProps> = ({
             <>
               <button
                 type="button"
-                onClick={() => zoomStageRef.current?.zoomOut(0.45)}
+                onClick={() => {
+                  if (useEmbedViewer && touchZoomMode === 'scroll') setTouchZoomMode('pinch');
+                  zoomStageRef.current?.zoomOut(0.45);
+                }}
                 title="Zoom Out (-)"
                 className="p-1.5 sm:p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white transition-colors active:scale-95 touch-manipulation"
               >
@@ -291,8 +281,11 @@ export const ZoomableImageViewer: React.FC<ZoomableImageViewerProps> = ({
 
               <button
                 type="button"
-                onClick={() => zoomStageRef.current?.zoomIn(0.45)}
-                title="Zoom In (+)"
+                onClick={() => {
+                  if (useEmbedViewer && touchZoomMode === 'scroll') setTouchZoomMode('pinch');
+                  zoomStageRef.current?.zoomIn(0.45);
+                }}
+                title="Zoom In on Current Page (+)"
                 className="p-1.5 sm:p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white transition-colors active:scale-95 touch-manipulation"
               >
                 <ZoomIn className="w-4 h-4" />
@@ -321,22 +314,14 @@ export const ZoomableImageViewer: React.FC<ZoomableImageViewerProps> = ({
                 }
               }}
               className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors active:scale-95 touch-manipulation flex items-center gap-1.5 ${
-                touchZoomMode === 'pinch'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-slate-800 text-slate-200 hover:bg-slate-700'
+                touchZoomMode === 'pinch' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-200 hover:bg-slate-700'
               }`}
               title="Toggle between Finger Pinch Zoom and Page Scroll"
             >
               {touchZoomMode === 'pinch' ? (
-                <>
-                  <Hand className="w-3.5 h-3.5" />
-                  <span>Pinch Zoom</span>
-                </>
+                <><Hand className="w-3.5 h-3.5" /><span>Pinch Zoom</span></>
               ) : (
-                <>
-                  <Layers className="w-3.5 h-3.5" />
-                  <span>Scroll Pages</span>
-                </>
+                <><Layers className="w-3.5 h-3.5" /><span>Scroll Pages</span></>
               )}
             </button>
           )}
@@ -404,25 +389,15 @@ export const ZoomableImageViewer: React.FC<ZoomableImageViewerProps> = ({
       <div className="relative flex-1 w-full h-full overflow-hidden flex items-center justify-center p-1 sm:p-2">
         {isPdf ? (
           useEmbedViewer ? (
-            <TouchPinchZoomStage
-              ref={zoomStageRef}
-              initialScale={effectiveInitialScale}
-              minScale={0.5}
-              maxScale={8}
+            <LightboxIframeViewer
+              embedUrl={iframeSrc}
+              title={activeTitle}
+              touchZoomMode={touchZoomMode}
+              zoomScale={zoomScale}
               onScaleChange={setZoomScale}
-              captureOverlay={touchZoomMode === 'pinch'}
-              allowNativeTouch={touchZoomMode === 'scroll'}
-              className="w-full h-full rounded-xl overflow-hidden border border-slate-800 bg-slate-900"
-            >
-              <iframe
-                ref={iframeRef}
-                src={iframeSrc}
-                onLoad={() => setIsLoading(false)}
-                className="w-full h-full border-0 bg-white"
-                title={activeTitle}
-                allow="autoplay; fullscreen"
-              />
-            </TouchPinchZoomStage>
+              zoomStageRef={zoomStageRef}
+              iframeRef={iframeRef}
+            />
           ) : (
             <div className="relative w-full h-full flex flex-col items-center justify-center bg-slate-900 rounded-xl overflow-hidden border border-slate-800">
               <PdfNativeCanvasViewer

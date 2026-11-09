@@ -1,10 +1,11 @@
 import React, { FC, useState } from 'react';
-import { ShieldCheck, Wrench, RefreshCw } from 'lucide-react';
+import { ShieldCheck, Wrench, RefreshCw, Trash2, ChevronDown, ChevronRight } from 'lucide-react';
 import { useAppStore } from '../../store/useAppStore';
 import {
   runSummaryAudit,
   repairServerSummaries,
   repairLocalDevice,
+  purgeExcessFirestoreTasks,
   AuditReport,
 } from '../../lib/summaryAuditService';
 
@@ -17,6 +18,7 @@ export const SummaryAuditPanel: FC<SummaryAuditPanelProps> = ({ isAdmin, onConfi
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState('');
   const [report, setReport] = useState<AuditReport | null>(null);
+  const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
 
   if (!isAdmin) return null;
 
@@ -26,12 +28,14 @@ export const SummaryAuditPanel: FC<SummaryAuditPanelProps> = ({ isAdmin, onConfi
   const handleAudit = async () => {
     setRunning(true);
     setReport(null);
+    setExpandedProjectId(null);
     try {
       const r = await runSummaryAudit(setProgress);
       setReport(r);
+      const excessCount = r.issues.reduce((acc, i) => acc + i.missingInSummary.length, 0);
       toast(
         'Kiểm tra xong',
-        `${r.projectCount} dự án, ${r.taskCount} task. Lệch summary: ${r.issues.filter((i) => i.summaryIssue).length} dự án. Lệch thiết bị: ${r.issues.filter((i) => i.deviceIssue).length} dự án.`,
+        `${r.projectCount} dự án, ${r.taskCount} task trên server. Có ${excessCount} task thừa trên Firestore ngoài Summary.`,
         'success'
       );
     } catch (e: any) {
@@ -45,22 +49,74 @@ export const SummaryAuditPanel: FC<SummaryAuditPanelProps> = ({ isAdmin, onConfi
 
   const summaryIssues = report ? report.issues.filter((i) => i.summaryIssue) : [];
   const deviceIssues = report ? report.issues.filter((i) => i.deviceIssue) : [];
+  const excessRows = report ? report.issues.filter((i) => i.missingInSummary.length > 0) : [];
+  const totalExcessTasks = excessRows.reduce((acc, r) => acc + r.missingInSummary.length, 0);
 
-  const handleRepairServer = () => {
+  const handlePurgeExcess = (targetProjectIds?: string[]) => {
     if (!report) return;
+    const isSingle = targetProjectIds && targetProjectIds.length === 1;
+    const row = isSingle ? report.issues.find((r) => r.projectId === targetProjectIds[0]) : null;
+    const count = isSingle && row ? row.missingInSummary.length : totalExcessTasks;
+    const title = isSingle && row
+      ? `Xóa ${count} task thừa của dự án ${row.code}`
+      : `Xóa toàn bộ ${totalExcessTasks} task thừa trên Firestore (${excessRows.length} dự án)`;
+
+    const msg = isSingle && row
+      ? `Hệ thống sẽ xóa vĩnh viễn ${count} task document trên Firestore taka_tasks không nằm trong Summary của dự án ${row.code}. Số task trên Firestore sẽ về đúng ${row.summaryEntryCount} task chuẩn. Tiếp tục?`
+      : `Hệ thống sẽ xóa vĩnh viễn ${totalExcessTasks} task document trên Firestore taka_tasks không nằm trong bảng Summary chuẩn của ${excessRows.length} dự án. Bảng Summary hiện tại của bạn sẽ được giữ nguyên 100%. Tiếp tục?`;
+
+    onConfirmAction(title, msg, async () => {
+      setRunning(true);
+      try {
+        const res = await purgeExcessFirestoreTasks(report, targetProjectIds, (d, t) =>
+          setProgress(`Đang xóa ${d}/${t} task thừa...`)
+        );
+        toast(
+          'Đã xóa task thừa',
+          `Đã xóa sạch ${res.purgedTasks} task thừa trên Firestore của ${res.updatedProjects} dự án. Hãy bấm Kiểm tra chéo để làm mới.`,
+          'success'
+        );
+        setReport(null);
+        setExpandedProjectId(null);
+      } catch (e: any) {
+        console.error('Purge excess tasks error:', e);
+        toast('Xóa thất bại', e?.message || 'Lỗi khi xóa task trên Firestore', 'error');
+      } finally {
+        setRunning(false);
+        setProgress('');
+      }
+    });
+  };
+
+  const handleRepairServer = (targetProjectIds?: string[]) => {
+    if (!report) return;
+    const isSingle = targetProjectIds && targetProjectIds.length === 1;
+    const row = isSingle ? report.issues.find((r) => r.projectId === targetProjectIds[0]) : null;
+    const missingInFirestoreCount = summaryIssues.reduce((acc, r) => acc + r.ghostInSummary.length, 0);
+    const title = isSingle && row
+      ? `Cập nhật Summary dự án ${row.code} theo Firestore (${row.serverTaskCount} task)`
+      : 'Đồng bộ nhanh Summary ⇄ Firestore';
+    const msg = isSingle && row
+      ? `Hệ thống sẽ cập nhật bảng Summary của dự án ${row.code} khớp 100% với ${row.serverTaskCount} task trên Firestore (không xóa bất kỳ task nào), đồng thời chuẩn hóa bộ đếm & ngày rollup cha-con trên mọi thiết bị. Tiếp tục?`
+      : `Hệ thống sẽ đồng bộ song song (Mass Batch) cho ${summaryIssues.length} dự án: cập nhật Summary khớp với toàn bộ task trên Firestore${missingInFirestoreCount > 0 ? `, khôi phục ${missingInFirestoreCount} task bị thiếu` : ''}, đồng thời chuẩn hóa lại bộ đếm & ngày rollup cha-con. Tiếp tục?`;
     onConfirmAction(
-      'Sửa summary trên Firestore',
-      `Dựng lại số task và danh sách tóm tắt của ${summaryIssues.length} dự án từ task thật trên Firestore. Các thiết bị khác sẽ tự cập nhật. Tiếp tục?`,
+      title,
+      msg,
       async () => {
         setRunning(true);
         try {
-          const res = await repairServerSummaries(report, (d, t) => setProgress(`Đang sửa ${d}/${t}...`));
+          const res = await repairServerSummaries(
+            report,
+            (d, t) => setProgress(`Đang đồng bộ nhanh ${d}/${t}...`),
+            targetProjectIds
+          );
           toast(
-            'Đã sửa summary',
-            `Sửa ${res.fixed} dự án. Bỏ qua ${res.skippedEmpty} dự án không có task thật (cần xem thủ công). Hãy chạy kiểm tra lại.`,
+            'Đã đồng bộ Summary ⇄ Firestore',
+            `Đã đồng bộ ${res.fixed} dự án${res.backfilledTasks ? ` và khôi phục ${res.backfilledTasks} task thiếu lên Firestore` : ''}. Hãy bấm Kiểm tra chéo để xác nhận.`,
             'success'
           );
           setReport(null);
+          setExpandedProjectId(null);
         } catch (e: any) {
           console.error('Repair server summaries error:', e);
           toast('Sửa thất bại', e?.message || 'Lỗi khi ghi lên Firestore', 'error');
@@ -115,12 +171,25 @@ export const SummaryAuditPanel: FC<SummaryAuditPanelProps> = ({ isAdmin, onConfi
 
         {report && summaryIssues.length > 0 && (
           <button
-            onClick={handleRepairServer}
+            onClick={() => handleRepairServer()}
             disabled={running}
+            title="Cập nhật bảng Summary khớp với toàn bộ task trên Firestore và khôi phục task thiếu"
             className={`${btn} border-amber-200 dark:border-amber-900/40 text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/20`}
           >
             <Wrench className="w-4 h-4 text-amber-500" />
-            Sửa summary trên Firestore ({summaryIssues.length})
+            Cập nhật Summary ⇄ Firestore ({summaryIssues.length})
+          </button>
+        )}
+
+        {report && totalExcessTasks > 0 && (
+          <button
+            onClick={() => handlePurgeExcess()}
+            disabled={running}
+            title="Xóa vĩnh viễn các task thừa trên Firestore taka_tasks không có trong Summary"
+            className={`${btn} border-rose-200 dark:border-rose-900/40 text-rose-700 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/20`}
+          >
+            <Trash2 className="w-4 h-4 text-rose-500" />
+            Xóa task thừa trên Firestore ({excessRows.length} dự án - {totalExcessTasks} task)
           </button>
         )}
 
@@ -140,50 +209,189 @@ export const SummaryAuditPanel: FC<SummaryAuditPanelProps> = ({ isAdmin, onConfi
 
       {report && (
         <div className="text-xs text-slate-600 dark:text-[#c3c3c3] flex flex-col gap-1">
-          <div>
-            {report.projectCount} dự án, {report.taskCount} task trên server. Task không thuộc dự án nào:{' '}
-            {report.orphanCount}. Task khớp nhiều dự án: {report.ambiguousCount}.
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span>
+              {report.projectCount} dự án, {report.taskCount} task trên server. Task không thuộc dự án nào:{' '}
+              {report.orphanCount}. Task khớp nhiều dự án: {report.ambiguousCount}.
+            </span>
+            {totalExcessTasks > 0 && (
+              <span className="text-amber-600 dark:text-amber-400 font-semibold">
+                ⚠️ Có {totalExcessTasks} task trên Firestore chưa có trong Summary (bấm &quot;Cập nhật Summary&quot; để đồng bộ đủ task, hoặc &quot;Xóa task thừa&quot; nếu muốn xóa).
+              </span>
+            )}
           </div>
           {report.issues.length === 0 ? (
             <div className="text-emerald-600 dark:text-emerald-400 font-medium">
-              Summary trên Firestore và dữ liệu thiết bị này đều khớp with task thật.
+              Summary trên Firestore và dữ liệu thiết bị này đều khớp hoàn toàn với task trên Firestore.
             </div>
           ) : (
-            <div className="max-h-64 overflow-y-auto overflow-x-auto border border-slate-200 dark:border-[#444446] rounded-lg">
+            <div className="max-h-80 overflow-y-auto overflow-x-auto border border-slate-200 dark:border-[#444446] rounded-lg">
               <table className="w-full text-left">
-                <thead className="bg-slate-100 dark:bg-[#28282a] sticky top-0">
+                <thead className="bg-slate-100 dark:bg-[#28282a] sticky top-0 z-10 text-[11px]">
                   <tr>
-                    <th className="px-2 py-1">Dự án</th>
-                    <th className="px-2 py-1">Task thật</th>
-                    <th className="px-2 py-1">Summary</th>
-                    <th className="px-2 py-1">Thiếu / thừa trong summary</th>
-                    <th className="px-2 py-1">Thiết bị (thiếu / thừa)</th>
+                    <th className="px-2 py-1.5">Dự án</th>
+                    <th className="px-2 py-1.5">Task Firestore</th>
+                    <th className="px-2 py-1.5">Summary hiện tại</th>
+                    <th className="px-2 py-1.5 text-rose-600 dark:text-rose-400">Lệch Firestore vs Summary</th>
+                    <th className="px-2 py-1.5">Thiết bị (thiếu / thừa)</th>
+                    <th className="px-2 py-1.5 text-right">Thao tác</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {report.issues.slice(0, 80).map((r) => (
-                    <tr key={r.projectId} className="border-t border-slate-200 dark:border-[#444446]">
-                      <td className="px-2 py-1 whitespace-nowrap">
-                        {r.code} ({r.store} {r.year})
-                      </td>
-                      <td className="px-2 py-1">{r.serverTaskCount}</td>
-                      <td className="px-2 py-1">
-                        {r.summaryTaskCount} / {r.summaryEntryCount}
-                      </td>
-                      <td className="px-2 py-1">
-                        {r.summaryIssue ? `${r.missingInSummary.length} / ${r.ghostInSummary.length}` : '-'}
-                      </td>
-                      <td className="px-2 py-1">
-                        {r.deviceIssue
-                          ? r.loadedLocally
-                            ? `${r.missingLocal.length} / ${r.ghostLocal.length}${r.localProjectStale ? ', dự án cũ' : ''}`
-                            : r.localProjectStale
-                              ? 'dự án cũ'
-                              : '-'
-                          : '-'}
-                      </td>
-                    </tr>
-                  ))}
+                  {report.issues.slice(0, 80).map((r) => {
+                    const isExpanded = expandedProjectId === r.projectId;
+                    const hasExcess = r.missingInSummary.length > 0;
+                    const hasMissingInFirestore = r.ghostInSummary.length > 0;
+                    const excessTasks = hasExcess
+                      ? r.missingInSummary
+                          .map((id) => report.internal.serverTasksById.get(id))
+                          .filter(Boolean) as any[]
+                      : [];
+
+                    return (
+                      <React.Fragment key={r.projectId}>
+                        <tr
+                          onClick={() => setExpandedProjectId(isExpanded ? null : r.projectId)}
+                          className={`border-t border-slate-200 dark:border-[#444446] hover:bg-slate-50 dark:hover:bg-[#28282a]/50 cursor-pointer ${
+                            isExpanded ? 'bg-slate-50/80 dark:bg-[#252528]' : ''
+                          }`}
+                        >
+                          <td className="px-2 py-1 whitespace-nowrap font-medium flex items-center gap-1.5">
+                            {hasExcess ? (
+                              isExpanded ? (
+                                <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                              ) : (
+                                <ChevronRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                              )
+                            ) : (
+                              <span className="w-3.5" />
+                            )}
+                            <span>{r.code} ({r.store} {r.year})</span>
+                          </td>
+                          <td className="px-2 py-1 font-mono">{r.serverTaskCount}</td>
+                          <td className="px-2 py-1 font-mono text-emerald-600 dark:text-emerald-400">
+                            {r.summaryTaskCount} / {r.summaryEntryCount}
+                          </td>
+                          <td className="px-2 py-1">
+                            <div className="flex flex-wrap items-center gap-1">
+                              {hasExcess && (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-semibold bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+                                  Summary thiếu {r.missingInSummary.length} task (+{r.missingInSummary.length} trên Firestore)
+                                </span>
+                              )}
+                              {hasMissingInFirestore && (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-semibold bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+                                  Thiếu {r.ghostInSummary.length} task trên Firestore
+                                </span>
+                              )}
+                              {!hasExcess && !hasMissingInFirestore && r.summaryIssue && (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-slate-100 text-slate-600 dark:bg-[#2a2a2d] dark:text-[#aaa]">
+                                  Lệch ngày rollup / bộ đếm
+                                </span>
+                              )}
+                              {!hasExcess && !hasMissingInFirestore && !r.summaryIssue && (
+                                <span className="text-slate-400 dark:text-[#777]">-</span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-2 py-1 text-slate-500 dark:text-[#999]">
+                            {r.deviceIssue
+                              ? r.loadedLocally
+                                ? `${r.missingLocal.length} / ${r.ghostLocal.length}${r.localProjectStale ? ', dự án cũ' : ''}`
+                                : r.localProjectStale
+                                  ? 'dự án cũ'
+                                  : '-'
+                              : '-'}
+                          </td>
+                          <td className="px-2 py-1 text-right">
+                            <div className="inline-flex items-center gap-1.5">
+                              {r.summaryIssue && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleRepairServer([r.projectId]);
+                                  }}
+                                  disabled={running}
+                                  title="Cập nhật bảng Summary của dự án này khớp đủ số task trên Firestore"
+                                  className="px-2 py-0.5 text-[11px] rounded border border-amber-200 dark:border-amber-900/40 text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/30 transition-colors cursor-pointer"
+                                >
+                                  Đồng bộ Summary ({r.serverTaskCount})
+                                </button>
+                              )}
+                              {hasExcess && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handlePurgeExcess([r.projectId]);
+                                  }}
+                                  disabled={running}
+                                  title="Xóa các task thừa của dự án này trên Firestore"
+                                  className="px-2 py-0.5 text-[11px] rounded border border-rose-200 dark:border-rose-900/40 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors cursor-pointer"
+                                >
+                                  Xóa {r.missingInSummary.length} task thừa
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+
+                        {isExpanded && hasExcess && (
+                          <tr className="bg-rose-50/30 dark:bg-rose-950/10 border-t border-rose-100 dark:border-rose-900/30">
+                            <td colSpan={6} className="px-4 py-2.5">
+                              <div className="flex items-center justify-between mb-2">
+                                <span className="font-semibold text-amber-700 dark:text-amber-300">
+                                  Danh sách {r.missingInSummary.length} task đang có trên Firestore nhưng thiếu trong Summary của {r.code}:
+                                </span>
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleRepairServer([r.projectId]);
+                                    }}
+                                    disabled={running}
+                                    className="px-2.5 py-1 text-xs rounded bg-amber-600 hover:bg-amber-700 text-white font-medium flex items-center gap-1.5 transition-colors shadow-sm cursor-pointer"
+                                  >
+                                    <Wrench className="w-3.5 h-3.5" />
+                                    Đồng bộ đủ {r.serverTaskCount} task vào Summary
+                                  </button>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handlePurgeExcess([r.projectId]);
+                                    }}
+                                    disabled={running}
+                                    className="px-2.5 py-1 text-xs rounded bg-rose-600 hover:bg-rose-700 text-white font-medium flex items-center gap-1.5 transition-colors shadow-sm cursor-pointer"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                    Xóa {r.missingInSummary.length} task này
+                                  </button>
+                                </div>
+                              </div>
+                              <div className="max-h-40 overflow-y-auto border border-rose-200/60 dark:border-rose-900/40 rounded bg-white dark:bg-[#1a1a1c] p-2 space-y-1">
+                                {excessTasks.map((t, idx) => (
+                                  <div
+                                    key={t.id || idx}
+                                    className="flex items-center justify-between text-[11px] py-0.5 border-b border-slate-100 dark:border-[#2a2a2c] last:border-0"
+                                  >
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-mono text-slate-500 w-6 text-right">{idx + 1}.</span>
+                                      <span className="font-semibold text-slate-800 dark:text-[#eee]">
+                                        {t.taskCodePhu || `#${(t.orderIndex ?? 0) + 1}`}
+                                      </span>
+                                      <span className="text-slate-600 dark:text-[#bbb]">{t.name || 'Không tên'}</span>
+                                    </div>
+                                    <div className="text-slate-400 font-mono text-[10px]">
+                                      {t.start || 'N/A'} ➔ {t.finish || 'N/A'}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -196,3 +404,4 @@ export const SummaryAuditPanel: FC<SummaryAuditPanelProps> = ({ isAdmin, onConfi
 };
 
 export default SummaryAuditPanel;
+

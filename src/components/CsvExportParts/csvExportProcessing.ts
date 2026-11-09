@@ -1,4 +1,5 @@
 import { TAB_CONFIG } from './csvExportTypes';
+import { METHOD_SHEET_ROWS, buildMassTaskExportRows } from './csvMassTaskBuilder';
 
 export const formatDateTime = (val: any, colName: string) => {
   if (!val && val !== 0) return '';
@@ -58,21 +59,81 @@ export const getCellValue = (
   mapping: Record<string, string>,
   constantMapping: Record<string, string>,
   keepOriginal: Record<string, boolean>,
-  unitSizeMap: Record<string, string>
+  unitSizeMap: Record<string, string>,
+  rowIndex?: number
 ) => {
   if (!row || typeof row !== 'object') return '';
 
-  let val = constantMapping[colName] || row[mapping[colName]];
+  let val = constantMapping[colName] || (mapping[colName] ? row[mapping[colName]] : undefined);
+  if (val === undefined || val === null || String(val) === '') {
+    const cleanTarget = colName.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const matchedKey = Object.keys(row).find((k) => {
+      const cleanK = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (cleanK === cleanTarget) return true;
+      if (cleanTarget === 'predecessor' && (cleanK.includes('predecessor') || cleanK === 'tiennhiem')) return true;
+      if (cleanTarget === 'subtaskcode' && (cleanK.includes('subtask') || cleanK.includes('taskcodephu'))) return true;
+      if (cleanTarget === 'parenttaskcode' && (cleanK.includes('parenttask') || cleanK.includes('taskme'))) return true;
+      return false;
+    });
+    if (matchedKey !== undefined) {
+      val = row[matchedKey];
+    }
+  }
 
-  if (
-    activeTab === 'task' &&
-    colName.toLowerCase() === 'predecessor' &&
-    !keepOriginal[colName]
-  ) {
+  if (activeTab === 'task') {
     const projCode =
-      constantMapping['projectCode'] || row[mapping['projectCode']] || '';
-    if (val !== undefined && val !== null && String(val).trim() !== '') {
-      val = `${projCode}-${val}`;
+      constantMapping['projectCode'] ||
+      (mapping['projectCode'] ? row[mapping['projectCode']] : undefined) ||
+      row['projectCode'] ||
+      row['Project Code'] ||
+      '';
+
+    if (colName === 'Sub-task code') {
+      if (keepOriginal['Sub-task code'] && val !== undefined && val !== null && String(val).trim() !== '') {
+        // Keep original
+      } else if (val !== undefined && val !== null && String(val).trim() !== '') {
+        const strVal = String(val).trim();
+        if (projCode && !strVal.includes('#') && !strVal.startsWith(projCode)) {
+          val = `${projCode}#${strVal}`;
+        } else {
+          val = strVal;
+        }
+      } else {
+        const lineNum = (rowIndex ?? 0) + 1;
+        val = projCode ? `${projCode}#${lineNum}` : String(lineNum);
+      }
+    } else if (colName === 'Parent task code') {
+      if (!keepOriginal['Parent task code'] && val !== undefined && val !== null && String(val).trim() !== '') {
+        const strVal = String(val).trim();
+        if (projCode && !strVal.includes('#') && !strVal.includes('-') && !strVal.startsWith(projCode)) {
+          val = `${projCode}#${strVal}`;
+        } else {
+          val = strVal;
+        }
+      }
+    } else if (colName.toLowerCase() === 'predecessor') {
+      if (val !== undefined && val !== null && String(val).trim() !== '') {
+        const cleanedRaw = String(val).trim().replace(/^[,;\s]+|[,;\s]+$/g, '').trim();
+        if (keepOriginal[colName]) {
+          val = cleanedRaw;
+        } else {
+          val = cleanedRaw
+            .split(/[,;]+/)
+            .map((part) => {
+              let cleanPart = part.trim();
+              if (!cleanPart) return '';
+              cleanPart = cleanPart.replace(/^([A-Za-z0-9_-]+)-(\d+)(\s*(?:FS|SS|FF|SF).*)?$/i, '$1#$2$3');
+              if (projCode && !cleanPart.includes('#') && !cleanPart.toLowerCase().startsWith(String(projCode).toLowerCase())) {
+                if (/^\d+/.test(cleanPart)) {
+                  return `${projCode}#${cleanPart}`;
+                }
+              }
+              return cleanPart;
+            })
+            .filter(Boolean)
+            .join(', ');
+        }
+      }
     }
   }
 
@@ -181,20 +242,7 @@ export async function executeCsvExport({
 
       const finalRows = [...headerRows];
       Object.keys(rowsByLevel).forEach((level) => {
-        finalRows.push([
-          level,
-          '',
-          '',
-          '',
-          '',
-          '',
-          '',
-          'Subtotal',
-          '',
-          '',
-          '',
-          '',
-        ]);
+        finalRows.push([level, '', '', '', '', '', '', 'Subtotal', '', '', '', '']);
         rowsByLevel[level].forEach((r) => finalRows.push(r));
       });
 
@@ -208,178 +256,25 @@ export async function executeCsvExport({
       return;
     }
 
-    const finalJson: any[] = [];
-    for (const proj of excelData) {
-      const projStore = getCellValue(
-        proj,
-        'store',
-        activeTab,
-        mapping,
-        constantMapping,
-        keepOriginal,
-        unitSizeMap
-      );
-      const projLocation = getCellValue(
-        proj,
-        'location',
-        activeTab,
-        mapping,
-        constantMapping,
-        keepOriginal,
-        unitSizeMap
-      );
-      const projCode = getCellValue(
-        proj,
-        'projectCode',
-        activeTab,
-        mapping,
-        constantMapping,
-        keepOriginal,
-        unitSizeMap
-      );
-      const projYear =
-        getCellValue(
-          proj,
-          'projectYear',
-          activeTab,
-          mapping,
-          constantMapping,
-          keepOriginal,
-          unitSizeMap
-        ) ||
-        getCellValue(
-          proj,
-          'YEAR',
-          activeTab,
-          mapping,
-          constantMapping,
-          keepOriginal,
-          unitSizeMap
-        );
-
-      for (const taskDef of templateData) {
-        const taskName = taskDef['Task name'] || '';
-        const tcKey = Object.keys(taskDef).find((k) => {
-          const clean = k
-            .toLowerCase()
-            .replace(/á»¥/g, 'ụ')
-            .replace(/\s+/g, '');
-          return clean.includes('taskcodeph') || clean.includes('taskcodephu');
-        });
-        let taskCodePhu = tcKey ? taskDef[tcKey] : '';
-        if (
-          !keepOriginal['Task code phụ'] &&
-          taskCodePhu !== undefined &&
-          taskCodePhu !== null &&
-          String(taskCodePhu).trim() !== ''
-        ) {
-          taskCodePhu = projCode
-            ? `${projCode}#${String(taskCodePhu).trim()}`
-            : String(taskCodePhu).trim();
-        }
-        let start = taskDef['start'] || '';
-        let finish = taskDef['finish'] || '';
-
-        const formatExcelDate = (val: any) => {
-          if (typeof val !== 'number') return val;
-          const date = new Date((val - 25569) * 86400 * 1000);
-          return (
-            date.toLocaleDateString('en-US') +
-            ' ' +
-            date.toLocaleTimeString('en-US', {
-              hour: '2-digit',
-              minute: '2-digit',
-              hour12: false,
-            })
-          );
-        };
-        if (typeof start === 'number') start = formatExcelDate(start);
-        if (typeof finish === 'number') finish = formatExcelDate(finish);
-
-        const party = taskDef['party'] || '';
-        const duration =
-          taskDef['duration'] !== undefined ? taskDef['duration'] : '';
-        const predKey = Object.keys(taskDef).find(
-          (k) => k.toLowerCase().replace(/\s+/g, '') === 'predecessor'
-        );
-        const templatePred = predKey ? taskDef[predKey] : '';
-        const mappedPred =
-          constantMapping['predecessor'] || proj[mapping['predecessor']];
-        let pred =
-          mappedPred !== undefined &&
-          mappedPred !== null &&
-          String(mappedPred).trim() !== ''
-            ? mappedPred
-            : templatePred;
-        if (
-          !keepOriginal['predecessor'] &&
-          pred !== undefined &&
-          pred !== null &&
-          String(pred).trim() !== ''
-        ) {
-          pred = projCode ? `${projCode}-${String(pred).trim()}` : String(pred).trim();
-        }
-        const delegation =
-          taskDef['delegation'] !== undefined
-            ? taskDef['delegation']
-            : constantMapping['delegation'] || 'true';
-        const comments =
-          taskDef['comments'] !== undefined
-            ? taskDef['comments']
-            : constantMapping['comments'] || '';
-
-        finalJson.push({
-          store: projStore,
-          location: projLocation,
-          projectYear: projYear,
-          projectCode: projCode,
-          'Task code phụ': taskCodePhu,
-          'Task name': taskName,
-          start: start,
-          finish: finish,
-          duration: duration,
-          party: party,
-          predecessor: pred,
-          delegation: delegation,
-          comments: comments,
-        });
-      }
-    }
+    const finalJson = buildMassTaskExportRows({
+      excelData,
+      templateData,
+      activeTab,
+      mapping,
+      constantMapping,
+      keepOriginal,
+      unitSizeMap,
+      getCellValue,
+    });
 
     const wb = xlsx.utils.book_new();
     const wsData = xlsx.utils.json_to_sheet(finalJson, { header: targetCols });
     xlsx.utils.book_append_sheet(wb, wsData, 'Data');
-
-    const methodRows = [
-      ['QUY ĐỊNH & HƯỚNG DẪN IMPORT DATA'],
-      [],
-      ['Cột', 'Quy tắc / Hướng dẫn'],
-      [
-        'Predecessor',
-        "Nếu không check 'Giữ nguyên', hệ thống sẽ tự ghép với Project Code. (VD: 23 thành VN26-23). Nếu nhiều task cách nhau bằng dấu phẩy.",
-      ],
-      ['Task code phụ', 'Hệ thống tự động ghép với Project Code ở đầu.'],
-      [
-        'Comments',
-        "Để xóa nội dung comments hiện tại trên hệ thống, bạn hãy điền một khoảng trắng (Space) vào ô này, hoặc nhập khoảng trắng ở 'Giá trị tĩnh'.",
-      ],
-      [
-        'Start / Finish',
-        'Định dạng chuẩn: MM/DD/YYYY HH:mm. Nếu không có giờ, Start mặc định là 22:00, Finish là 10:00.',
-      ],
-      ['Delegation', "Mặc định nếu để trống sẽ là 'true'."],
-      [],
-      [
-        'LƯU Ý QUAN TRỌNG:',
-        "Hệ thống Takashimaya hiện tại chỉ import được file đuôi .csv. Bạn hãy chỉnh sửa trên file này, sau đó mở Sheet 'Data' và chọn Save As -> định dạng CSV (Comma delimited) trước khi import nhé!",
-      ],
-    ];
-    const wsMethod = xlsx.utils.aoa_to_sheet(methodRows);
+    const wsMethod = xlsx.utils.aoa_to_sheet(METHOD_SHEET_ROWS);
     xlsx.utils.book_append_sheet(wb, wsMethod, 'Method');
-
     xlsx.writeFile(wb, `${TAB_CONFIG[activeTab].fileNamePrefix}.xlsx`);
   } else {
-    const exportJson = excelData.map((row) => {
+    const exportJson = excelData.map((row, rowIndex) => {
       const out: any = {};
       targetCols.forEach((col: string) => {
         out[col] = getCellValue(
@@ -389,7 +284,8 @@ export async function executeCsvExport({
           mapping,
           constantMapping,
           keepOriginal,
-          unitSizeMap
+          unitSizeMap,
+          rowIndex
         );
       });
       return out;
@@ -398,34 +294,8 @@ export async function executeCsvExport({
     const wb = xlsx.utils.book_new();
     const wsData = xlsx.utils.json_to_sheet(exportJson, { header: targetCols });
     xlsx.utils.book_append_sheet(wb, wsData, 'Data');
-
-    const methodRows = [
-      ['QUY ĐỊNH & HƯỚNG DẪN IMPORT DATA'],
-      [],
-      ['Cột', 'Quy tắc / Hướng dẫn'],
-      [
-        'Predecessor',
-        "Nếu không check 'Giữ nguyên', hệ thống sẽ tự ghép với Project Code. (VD: 23 thành VN26-23). Nếu nhiều task cách nhau bằng dấu phẩy.",
-      ],
-      ['Task code phụ', 'Hệ thống tự động ghép với Project Code ở đầu.'],
-      [
-        'Comments',
-        "Để xóa nội dung comments hiện tại trên hệ thống, bạn hãy điền một khoảng trắng (Space) vào ô này, hoặc nhập khoảng trắng ở 'Giá trị tĩnh'.",
-      ],
-      [
-        'Start / Finish',
-        'Định dạng chuẩn: MM/DD/YYYY HH:mm. Nếu không có giờ, Start mặc định là 22:00, Finish là 10:00.',
-      ],
-      ['Delegation', "Mặc định nếu để trống sẽ là 'true'."],
-      [],
-      [
-        'LƯU Ý QUAN TRỌNG:',
-        "Hệ thống Takashimaya hiện tại chỉ import được file đuôi .csv. Bạn hãy chỉnh sửa trên file này, sau đó mở Sheet 'Data' và chọn Save As -> định dạng CSV (Comma delimited) trước khi import nhé!",
-      ],
-    ];
-    const wsMethod = xlsx.utils.aoa_to_sheet(methodRows);
+    const wsMethod = xlsx.utils.aoa_to_sheet(METHOD_SHEET_ROWS);
     xlsx.utils.book_append_sheet(wb, wsMethod, 'Method');
-
     xlsx.writeFile(wb, `${TAB_CONFIG[activeTab].fileNamePrefix}.xlsx`);
   }
 }

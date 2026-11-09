@@ -5,6 +5,7 @@ interface UseLayoutGesturesProps {
   stageRef: React.RefObject<any>;
   containerRef: React.RefObject<HTMLDivElement | null>;
   dimensions: { width: number; height: number };
+  setDimensions?: React.Dispatch<React.SetStateAction<{ width: number; height: number }>>;
   stageScale: number;
   setStageScale: (s: number) => void;
   stagePos: { x: number; y: number };
@@ -19,6 +20,7 @@ export function useLayoutGestures({
   stageRef,
   containerRef,
   dimensions,
+  setDimensions,
   stageScale,
   setStageScale,
   stagePos,
@@ -53,11 +55,40 @@ export function useLayoutGestures({
   });
   const rafInertiaIdRef = useRef<number | null>(null);
 
+  const rafZoomAnimIdRef = useRef<number | null>(null);
+  const targetZoomScaleRef = useRef<number | null>(null);
+
+  // Interaction guard refs to prevent accidental unit tooltip triggers while zooming, pinching or dragging
+  const isPinchingRef = useRef(false);
+  const lastPinchEndTimeRef = useRef(0);
+  const lastWheelTimeRef = useRef(0);
+  const lastDragEndTimeRef = useRef(0);
+  const lastZoomTimeRef = useRef(0);
+  const dragStartPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const isDraggingStageRef = useRef(false);
+
+  const canTriggerUnitInteraction = useCallback(() => {
+    if (isInteractingRef.current) return false;
+    if (isPinchingRef.current) return false;
+    if (isDraggingStageRef.current) return false;
+    const now = Date.now();
+    if (now - lastPinchEndTimeRef.current < 550) return false;
+    if (now - lastWheelTimeRef.current < 400) return false;
+    if (now - lastDragEndTimeRef.current < 350) return false;
+    if (now - lastZoomTimeRef.current < 400) return false;
+    return true;
+  }, []);
+
   const stopInertia = useCallback(() => {
     if (rafInertiaIdRef.current !== null) {
       cancelAnimationFrame(rafInertiaIdRef.current);
       rafInertiaIdRef.current = null;
     }
+    if (rafZoomAnimIdRef.current !== null) {
+      cancelAnimationFrame(rafZoomAnimIdRef.current);
+      rafZoomAnimIdRef.current = null;
+    }
+    targetZoomScaleRef.current = null;
   }, []);
 
   // Cleanup timers & RAFs on unmount
@@ -67,52 +98,104 @@ export function useLayoutGestures({
       if (rafWheelIdRef.current !== null) cancelAnimationFrame(rafWheelIdRef.current);
       if (rafInertiaIdRef.current !== null) cancelAnimationFrame(rafInertiaIdRef.current);
       if (rafTouchIdRef.current !== null) cancelAnimationFrame(rafTouchIdRef.current);
+      if (rafZoomAnimIdRef.current !== null) cancelAnimationFrame(rafZoomAnimIdRef.current);
     };
   }, []);
 
   // Auto-fit floor plan background & units to perfectly fit and center in the viewport
   const fitToScreen = useCallback((animated: boolean = false) => {
     stopInertia();
-    const containerW = containerRef.current?.offsetWidth || dimensions.width;
-    const containerH = containerRef.current?.offsetHeight || dimensions.height;
+    const el = containerRef.current;
+    const rect = el ? el.getBoundingClientRect() : null;
+    const containerW = Math.round(rect?.width || el?.clientWidth || el?.offsetWidth || dimensions.width);
+    const containerH = Math.round(rect?.height || el?.clientHeight || el?.offsetHeight || dimensions.height);
     if (containerW <= 0 || containerH <= 0) return;
 
-    let contentW = 1000;
-    let contentH = 800;
-    let contentX = 0;
-    let contentY = 0;
+    // Immediately sync Stage and dimensions state with real container size so Stage never clips at 800x600
+    if (setDimensions) {
+      setDimensions(prev => (prev.width === containerW && prev.height === containerH) ? prev : { width: containerW, height: containerH });
+    }
+    const stage = stageRef.current;
+    if (stage) {
+      if (stage.width() !== containerW) stage.width(containerW);
+      if (stage.height() !== containerH) stage.height(containerH);
+    }
+
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
 
     if (bgImage) {
       const imgNaturalW = (bgImage as HTMLImageElement).naturalWidth || bgImage.width || 1000;
       const imgNaturalH = (bgImage as HTMLImageElement).naturalHeight || bgImage.height || 800;
       const imgScale = version?.imageScale || 1;
-      contentW = imgNaturalW * imgScale;
-      contentH = imgNaturalH * imgScale;
-      contentX = version?.imagePos?.x || 0;
-      contentY = version?.imagePos?.y || 0;
-    } else if (units && units.length > 0) {
-      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-      units.forEach((u: any) => {
-        const ux = u.x || 0;
-        const uy = u.y || 0;
-        const uw = u.width || 100;
-        const uh = u.height || 100;
-        minX = Math.min(minX, ux);
-        minY = Math.min(minY, uy);
-        maxX = Math.max(maxX, ux + uw);
-        maxY = Math.max(maxY, uy + uh);
+      const w = imgNaturalW * imgScale;
+      const h = imgNaturalH * imgScale;
+      const px = version?.imagePos?.x || 0;
+      const py = version?.imagePos?.y || 0;
+      const angle = ((version?.backgroundRotation || 0) * Math.PI) / 180;
+      const s = Math.sin(angle);
+      const c = Math.cos(angle);
+
+      const corners = [
+        { x: px, y: py },
+        { x: px + w * c, y: py + w * s },
+        { x: px + w * c - h * s, y: py + w * s + h * c },
+        { x: px - h * s, y: py + h * c },
+      ];
+      corners.forEach(pt => {
+        minX = Math.min(minX, pt.x);
+        minY = Math.min(minY, pt.y);
+        maxX = Math.max(maxX, pt.x);
+        maxY = Math.max(maxY, pt.y);
       });
-      if (minX !== Infinity && maxX > minX) {
-        contentX = minX;
-        contentY = minY;
-        contentW = Math.max(100, maxX - minX);
-        contentH = Math.max(100, maxY - minY);
-      }
     }
 
-    const pad = containerW < 640 ? 12 : 24;
-    const availW = Math.max(10, containerW - pad * 2);
-    const availH = Math.max(10, containerH - pad * 2);
+    if (units && units.length > 0) {
+      units.forEach((u: any) => {
+        if (u.type === 'polygon' && Array.isArray(u.points) && u.points.length >= 2) {
+          const ox = u.x || 0;
+          const oy = u.y || 0;
+          for (let i = 0; i < u.points.length; i += 2) {
+            const px = ox + u.points[i];
+            const py = oy + u.points[i + 1];
+            minX = Math.min(minX, px);
+            minY = Math.min(minY, py);
+            maxX = Math.max(maxX, px);
+            maxY = Math.max(maxY, py);
+          }
+        } else if (u.type === 'circle') {
+          const r = u.radius || 20;
+          const cx = u.x || 0;
+          const cy = u.y || 0;
+          minX = Math.min(minX, cx - r);
+          minY = Math.min(minY, cy - r);
+          maxX = Math.max(maxX, cx + r);
+          maxY = Math.max(maxY, cy + r);
+        } else {
+          const ux = u.x || 0;
+          const uy = u.y || 0;
+          const uw = u.width || 100;
+          const uh = u.height || 100;
+          minX = Math.min(minX, ux);
+          minY = Math.min(minY, uy);
+          maxX = Math.max(maxX, ux + uw);
+          maxY = Math.max(maxY, uy + uh);
+        }
+      });
+    }
+
+    const contentX = minX !== Infinity ? minX : 0;
+    const contentY = minY !== Infinity ? minY : 0;
+    const contentW = minX !== Infinity && maxX > minX ? Math.max(100, maxX - minX) : 1000;
+    const contentH = minY !== Infinity && maxY > minY ? Math.max(100, maxY - minY) : 800;
+
+    const sidePad = containerW < 640 ? 12 : 24;
+    const topPad = containerW < 640 ? 52 : 56;
+    const bottomPad = containerW < 640 ? 48 : 28;
+    const availW = Math.max(10, containerW - sidePad * 2);
+    const availH = Math.max(10, containerH - topPad - bottomPad);
 
     const scaleX = availW / contentW;
     const scaleY = availH / contentH;
@@ -122,11 +205,10 @@ export function useLayoutGestures({
     const contentCenterX = contentX + contentW / 2;
     const contentCenterY = contentY + contentH / 2;
     const posX = containerW / 2 - contentCenterX * clampedScale;
-    const posY = containerH / 2 - contentCenterY * clampedScale;
+    const posY = topPad + availH / 2 - contentCenterY * clampedScale;
 
     const newPos = { x: posX, y: posY };
 
-    const stage = stageRef.current;
     if (stage) {
       if (animated) {
         stage.to({
@@ -152,7 +234,7 @@ export function useLayoutGestures({
       setStageScale(clampedScale);
       setStagePos(newPos);
     }
-  }, [bgImage, version?.id, version?.imageScale, version?.imagePos?.x, version?.imagePos?.y, units, dimensions.width, dimensions.height, containerRef, stageRef, setStageScale, setStagePos, stopInertia]);
+  }, [bgImage, version?.id, version?.imageScale, version?.imagePos?.x, version?.imagePos?.y, version?.backgroundRotation, units, dimensions.width, dimensions.height, containerRef, stageRef, setDimensions, setStageScale, setStagePos, stopInertia]);
 
   // Inertia momentum panning handlers
   const handleDragStart = useCallback(() => {
@@ -163,9 +245,11 @@ export function useLayoutGestures({
     }
     stopInertia();
     isInteractingRef.current = true;
+    isDraggingStageRef.current = true;
     setHoverInfo((current: any) => (current ? null : current));
     const stage = stageRef.current;
     if (stage) {
+      dragStartPosRef.current = { x: stage.x(), y: stage.y() };
       dragVelocityTrackerRef.current.history = [
         { x: stage.x(), y: stage.y(), time: performance.now() }
       ];
@@ -187,8 +271,15 @@ export function useLayoutGestures({
     const stage = stageRef.current;
     if (!stage) {
       isInteractingRef.current = false;
+      isDraggingStageRef.current = false;
       return;
     }
+
+    const dist = Math.hypot(stage.x() - dragStartPosRef.current.x, stage.y() - dragStartPosRef.current.y);
+    if (dist > 5) {
+      lastDragEndTimeRef.current = Date.now();
+    }
+    isDraggingStageRef.current = false;
 
     const history = dragVelocityTrackerRef.current.history;
     const now = performance.now();
@@ -245,76 +336,118 @@ export function useLayoutGestures({
           rafInertiaIdRef.current = requestAnimationFrame(step);
         } else {
           rafInertiaIdRef.current = null;
+          currentStage.batchDraw();
           setStagePos({ x: currentStage.x(), y: currentStage.y() });
-          isInteractingRef.current = false;
+          setTimeout(() => {
+            isInteractingRef.current = false;
+          }, 200);
         }
       };
 
       rafInertiaIdRef.current = requestAnimationFrame(step);
     } else {
+      stage.batchDraw();
       setStagePos({ x: stage.x(), y: stage.y() });
-      isInteractingRef.current = false;
+      setTimeout(() => {
+        isInteractingRef.current = false;
+      }, 200);
     }
   }, [stageRef, setStagePos]);
 
-  const handleZoomIn = useCallback(() => {
+  const animateZoomByFactor = useCallback((factor: number) => {
     const stage = stageRef.current;
     if (!stage) return;
-    const oldScale = stage.scaleX();
-    const newScale = Math.min(oldScale * 1.3, 20);
-    const center = { x: dimensions.width / 2, y: dimensions.height / 2 };
-    const mousePointTo = {
-      x: (center.x - stage.x()) / oldScale,
-      y: (center.y - stage.y()) / oldScale,
-    };
-    const newPos = {
-      x: center.x - mousePointTo.x * newScale,
-      y: center.y - mousePointTo.y * newScale,
-    };
-    stage.to({
-      scaleX: newScale,
-      scaleY: newScale,
-      x: newPos.x,
-      y: newPos.y,
-      duration: 0.18,
-      easing: Konva.Easings.EaseOut,
-      onFinish: () => {
-        setStageScale(newScale);
-        setStagePos(newPos);
+    if (rafInertiaIdRef.current !== null) {
+      cancelAnimationFrame(rafInertiaIdRef.current);
+      rafInertiaIdRef.current = null;
+    }
+
+    isInteractingRef.current = true;
+    lastZoomTimeRef.current = Date.now();
+    setHoverInfo(null);
+
+    const baseScale = targetZoomScaleRef.current ?? stage.scaleX();
+    const targetScale = Math.max(0.04, Math.min(baseScale * factor, 20));
+    targetZoomScaleRef.current = targetScale;
+
+    const center = { x: ( stage.width() || dimensions.width ) / 2, y: ( stage.height() || dimensions.height ) / 2 };
+
+    if (rafZoomAnimIdRef.current !== null) {
+      // Animation loop is already running and will smoothly converge toward the updated targetZoomScaleRef
+      return;
+    }
+
+    const step = () => {
+      const curStage = stageRef.current;
+      const goalScale = targetZoomScaleRef.current;
+      if (!curStage || goalScale === null) {
+        rafZoomAnimIdRef.current = null;
+        isInteractingRef.current = false;
+        return;
       }
-    });
-  }, [dimensions.width, dimensions.height, stageRef, setStageScale, setStagePos]);
+
+      const curScale = curStage.scaleX();
+      const diff = goalScale - curScale;
+
+      if (Math.abs(diff) / Math.max(0.04, curScale) < 0.008) {
+        const worldPt = {
+          x: (center.x - curStage.x()) / curScale,
+          y: (center.y - curStage.y()) / curScale,
+        };
+        const finalPos = {
+          x: center.x - worldPt.x * goalScale,
+          y: center.y - worldPt.y * goalScale,
+        };
+        curStage.scale({ x: goalScale, y: goalScale });
+        curStage.position(finalPos);
+        curStage.batchDraw();
+        rafZoomAnimIdRef.current = null;
+        targetZoomScaleRef.current = null;
+        setStageScale(goalScale);
+        setStagePos(finalPos);
+        lastZoomTimeRef.current = Date.now();
+        setTimeout(() => {
+          isInteractingRef.current = false;
+        }, 250);
+        return;
+      }
+
+      const nextScale = curScale + diff * 0.35;
+      const worldPt = {
+        x: (center.x - curStage.x()) / curScale,
+        y: (center.y - curStage.y()) / curScale,
+      };
+      const nextPos = {
+        x: center.x - worldPt.x * nextScale,
+        y: center.y - worldPt.y * nextScale,
+      };
+
+      curStage.scale({ x: nextScale, y: nextScale });
+      curStage.position(nextPos);
+      curStage.batchDraw();
+
+      rafZoomAnimIdRef.current = requestAnimationFrame(step);
+    };
+
+    rafZoomAnimIdRef.current = requestAnimationFrame(step);
+  }, [dimensions.width, dimensions.height, stageRef, setStageScale, setStagePos, setHoverInfo]);
+
+  const handleZoomIn = useCallback(() => {
+    animateZoomByFactor(1.3);
+  }, [animateZoomByFactor]);
 
   const handleZoomOut = useCallback(() => {
-    const stage = stageRef.current;
-    if (!stage) return;
-    const oldScale = stage.scaleX();
-    const newScale = Math.max(oldScale / 1.3, 0.04);
-    const center = { x: dimensions.width / 2, y: dimensions.height / 2 };
-    const mousePointTo = {
-      x: (center.x - stage.x()) / oldScale,
-      y: (center.y - stage.y()) / oldScale,
-    };
-    const newPos = {
-      x: center.x - mousePointTo.x * newScale,
-      y: center.y - mousePointTo.y * newScale,
-    };
-    stage.to({
-      scaleX: newScale,
-      scaleY: newScale,
-      x: newPos.x,
-      y: newPos.y,
-      duration: 0.18,
-      easing: Konva.Easings.EaseOut,
-      onFinish: () => {
-        setStageScale(newScale);
-        setStagePos(newPos);
-      }
-    });
-  }, [dimensions.width, dimensions.height, stageRef, setStageScale, setStagePos]);
+    animateZoomByFactor(1 / 1.3);
+  }, [animateZoomByFactor]);
 
   return {
     isInteractingRef,
+    isPinchingRef,
+    lastPinchEndTimeRef,
+    lastWheelTimeRef,
+    lastDragEndTimeRef,
+    lastZoomTimeRef,
+    canTriggerUnitInteraction,
     wheelTimeoutRef,
     pendingWheelDeltaRef,
     rafWheelIdRef,

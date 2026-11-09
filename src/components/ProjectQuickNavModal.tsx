@@ -20,7 +20,7 @@ import {
 import { TabId } from '../types';
 import { QuickNavTarget } from '../store/storeTypes';
 import { useAppStore } from '../store/useAppStore';
-import { getZIndexClass, useOverlayStack } from '../lib/zIndexManager';
+import { getZIndexClass, getZIndexValue, useOverlayStack } from '../lib/zIndexManager';
 import { formatDisplayDateMain } from '../lib/utils';
 
 interface ProjectQuickNavModalProps {
@@ -86,13 +86,15 @@ export function ProjectQuickNavModal({
   const canSeeDetail = isAdmin || !!perms.See?.detail;
   const canSeeBudget = isAdmin || !!perms.See?.budget;
   const canSeeCost = isAdmin || !!perms.See?.costDetail;
+  const canSeeMyWork = isAdmin || !!perms.See?.myWork || !!perms.See?.general || !!perms.See?.detail;
 
-  // Exact 5 ordered tabs as requested:
+  // Ordered Quick Navigation tabs:
   // 1/ Layout: Floor Plan (Indigo)
   // 2/ Gantt: Timeline (Emerald)
   // 3/ Detail: Task Detail (Blue)
-  // 4/ Budget: Budget (Amber)
-  // 5/ Cost: Expenses (Rose)
+  // 4/ My Works: Tasks & Related Work (Violet)
+  // 5/ Budget: Budget (Amber)
+  // 6/ Cost: Expenses (Rose)
   const navItems = [
     {
       id: 'layout' as TabId,
@@ -137,9 +139,23 @@ export function ProjectQuickNavModal({
       }
     },
     {
+      id: 'myWork' as TabId,
+      allowed: canSeeMyWork,
+      num: '4',
+      icon: CheckCircle2,
+      label: 'My Works',
+      desc: 'Tasks & Related Work',
+      theme: {
+        border: 'hover:border-violet-500/70 dark:hover:border-violet-400/70',
+        bgHover: 'hover:bg-violet-50/80 dark:hover:bg-violet-950/40',
+        iconBg: 'bg-violet-100 text-violet-700 dark:bg-violet-900/60 dark:text-violet-300',
+        accentText: 'text-violet-600 dark:text-violet-400',
+      }
+    },
+    {
       id: 'budget' as TabId,
       allowed: canSeeBudget,
-      num: '4',
+      num: '5',
       icon: PieChart,
       label: 'Budget',
       desc: 'Allocations',
@@ -153,7 +169,7 @@ export function ProjectQuickNavModal({
     {
       id: 'cost' as TabId,
       allowed: canSeeCost,
-      num: '5',
+      num: '6',
       icon: Receipt,
       label: 'Cost',
       desc: 'Expenses',
@@ -185,7 +201,8 @@ export function ProjectQuickNavModal({
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.94, y: 8 }}
           transition={{ duration: 0.14, ease: 'easeOut' }}
-          className={`w-[90vw] sm:w-[300px] max-w-[320px] bg-white dark:bg-[#1e1e20] rounded-xl shadow-2xl border border-slate-200 dark:border-[#444446] overflow-hidden flex flex-col select-none touch-manipulation relative ${getZIndexClass('QUICK_NAV', 1)}`}
+          className="w-[90vw] sm:w-[300px] max-w-[320px] bg-white dark:bg-[#1e1e20] rounded-xl shadow-2xl border border-slate-200 dark:border-[#444446] overflow-hidden flex flex-col select-none touch-manipulation relative"
+          style={{ zIndex: getZIndexValue('QUICK_NAV', 1) }}
         >
           {/* Draggable Header */}
           <div className="px-3 py-2 border-b border-slate-100 dark:border-[#333336] bg-slate-50/90 dark:bg-[#252528] flex items-center justify-between gap-1.5 cursor-grab active:cursor-grabbing">
@@ -313,15 +330,32 @@ export function ProjectQuickNavModal({
                           if (canSeeDetail) {
                             onNavigate('detail', { project, task: ts as any });
                             onClose();
+                          } else if (canSeeMyWork) {
+                            onNavigate('myWork', { project, task: ts as any });
+                            onClose();
                           }
                         }}
                         className="p-1 rounded-md hover:bg-blue-50/80 dark:hover:bg-blue-950/40 border border-transparent hover:border-blue-200 dark:hover:border-blue-900/50 cursor-pointer transition-colors group"
-                        title="Click to view details in Task Detail tab"
+                        title="Click to view in Task Detail, or click 'My Works' badge to focus in My Works"
                       >
                         <div className="flex items-start justify-between gap-1">
-                          <span className="text-[10px] font-medium text-slate-800 dark:text-slate-200 group-hover:text-blue-600 dark:group-hover:text-blue-400 line-clamp-2 leading-tight">
+                          <span className="text-[10px] font-medium text-slate-800 dark:text-slate-200 group-hover:text-blue-600 dark:group-hover:text-blue-400 line-clamp-2 leading-tight flex-1">
                             {ts.name || `Task #${idx + 1}`}
                           </span>
+                          {canSeeMyWork && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onNavigate('myWork', { project, task: ts as any });
+                                onClose();
+                              }}
+                              className="px-1.5 py-0.5 rounded text-[8px] font-bold bg-violet-50 dark:bg-violet-950/80 text-violet-600 dark:text-violet-300 border border-violet-200/70 dark:border-violet-800/60 hover:bg-violet-100 dark:hover:bg-violet-900/80 shrink-0 transition-colors cursor-pointer"
+                              title="Open this task & related work in My Works"
+                            >
+                              My Works
+                            </button>
+                          )}
                         </div>
                         {(startDisp || finishDisp) && (
                           <div className="flex items-center gap-1 text-[8px] text-slate-400 dark:text-slate-500 mt-0.5 font-mono">

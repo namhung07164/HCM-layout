@@ -2,32 +2,34 @@ import React, { Component, useDeferredValue, useEffect, useMemo, useRef, useStat
 import { Task, Project } from '../types';
 import { Search, X, Check, ExternalLink, Sparkles, ArrowRight, Link2, AlertTriangle, Loader2, Plus, Minus } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { computeTaskCode, splitPredecessors, buildTaskNoMap, parsePredecessors } from '../lib/ganttUtils';
+import { computeAllTaskCodes, splitPredecessors, buildTaskNoMap, parsePredecessors } from '../lib/ganttUtils';
 import { useAppStore } from '../store/useAppStore';
 import { 
   parsePredecessorToken, 
   rankCandidateTasks, 
   RankedPredecessorMatch, 
   PredecessorContext, 
-  getTaskProjectDiffDetails 
+  buildProjectLookupIndex,
+  resolveProjectContext,
+  getTaskProjectDiffDetailsWithResolved
 } from '../lib/predecessorMatchUtils';
-function shortDate(s?: string): string {
-  if (!s) return '—';
-  const m = String(s).match(/^(\d{4})-(\d{2})-(\d{2})/);
-  return m ? `${m[3]}/${m[2]}/${m[1].slice(2)}` : String(s);
-}
+import {
+  PredecessorType,
+  PredecessorChange,
+  LinkItem,
+  REL_INFO,
+  SLOT_STYLE,
+  shortDate,
+  externalLabel,
+  tokenOf,
+  normalize,
+  milestoneDate,
+  describe,
+  persistDefault,
+  LagInput,
+} from './PredecessorMultiInputParts/predecessorInputHelpers';
 
-/* ------------------------------------------------------------------ */
-/* Types & Helpers                                                    */
-/* ------------------------------------------------------------------ */
-
-type PredecessorType = 'FS' | 'SS' | 'FF' | 'SF';
-
-export interface PredecessorChange {
-  predecessor: string;
-  predecessorTaskIds: string[];
-  predecessors: { taskId: string; type: PredecessorType }[];
-}
+export type { PredecessorChange };
 
 interface PredecessorMultiInputProps {
   task?: Task;
@@ -47,175 +49,6 @@ interface PredecessorMultiInputProps {
   predecessorTaskIds?: string[];
   onPredecessorTaskIdsChange?: (ids: string[]) => void;
 }
-
-const REL_INFO: Record<PredecessorType, { hint: string }> = {
-  FS: { hint: 'Finish → Start' },
-  SS: { hint: 'Start → Start' },
-  FF: { hint: 'Finish → Finish' },
-  SF: { hint: 'Start → Finish' },
-};
-
-const SLOT_STYLE = [
-  {
-    tag: '1',
-    border: 'border-l-blue-500',
-    badge: 'bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-[#8ab4f8]',
-    active: 'bg-blue-600 text-white border-blue-600 shadow-sm',
-    caption: 'text-blue-700 dark:text-[#8ab4f8]',
-  },
-  {
-    tag: '2',
-    border: 'border-l-amber-500',
-    badge: 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300',
-    active: 'bg-amber-600 text-white border-amber-600 shadow-sm',
-    caption: 'text-amber-700 dark:text-amber-300',
-  },
-];
-
-function externalLabel(diffDetails: any, fallbackCode?: string) {
-  if (!diffDetails || !diffDetails.diffFactors || diffDetails.diffFactors.length === 0) {
-    return fallbackCode || "Cross-Project";
-  }
-  const factors = diffDetails.diffFactors;
-  const factorLabels = factors.map((f: string) => {
-    if (f === 'year') return 'Year';
-    if (f === 'store') return 'Store';
-    if (f === 'location') return 'Location';
-    return 'Project';
-  });
-  return `Cross-Project (${factorLabels.join(', ')})`;
-}
-
-function lagToText(sign: string, v: number): string {
-  return v ? `${sign}${v}` : '';
-}
-
-function tokenOf(it: LinkItem): string {
-  if (!it.resolved) return it.raw;
-  const lag = lagToText(it.lagSign, it.lagValue);
-  const rel = it.type === 'FS' && !lag ? '' : it.type;
-  return `${it.code}${rel}${lag}`;
-}
-
-function normalize(list: LinkItem[]): LinkItem[] {
-  return list.slice(0, 2).map((it, i) =>
-    i === 1 && it.resolved && it.type !== 'FF' && it.type !== 'SF' ? { ...it, type: 'FF' as PredecessorType } : it
-  );
-}
-
-function milestoneDate(it: LinkItem): string {
-  if (!it.resolved || !it.task) return '';
-  const base = it.type === 'FS' || it.type === 'FF' ? it.task.finish : it.task.start;
-  if (!base) return '';
-  const d = new Date(base);
-  if (isNaN(d.getTime())) return '';
-  const signed = (it.lagSign === '-' ? -1 : 1) * it.lagValue;
-  if (signed !== 0) d.setDate(d.getDate() + signed);
-  return d.toISOString().split('T')[0];
-}
-
-function describe(it: LinkItem): string {
-  if (!it.resolved || !it.task) return '';
-  const n = it.task.name;
-  const s = it.lagValue > 0 ? ` (lag ${it.lagSign}${it.lagValue} days)` : '';
-  switch (it.type) {
-    case 'FS': return `Start after «${n}» finishes${s}`;
-    case 'SS': return `Start when «${n}» starts${s}`;
-    case 'FF': return `Finish when «${n}» finishes${s}`;
-    case 'SF': return `Finish when «${n}» starts${s}`;
-  }
-}
-
-interface LinkItem {
-  key: string;
-  resolved: boolean;
-  taskId: string;
-  task?: Task;
-  code: string;
-  type: PredecessorType;
-  lagSign: '+' | '-';
-  lagValue: number;
-  raw: string;
-  isExternal: boolean;
-  externalLabel: string;
-}
-
-async function persistDefault(source: Task, change: PredecessorChange, projects: Project[]): Promise<void> {
-  if (!source?.id) throw new Error('Please save the task before linking a predecessor.');
-  const now = new Date().toISOString();
-  
-  const updatedTask = {
-    ...source,
-    predecessor: change.predecessor,
-    predecessorTaskIds: change.predecessorTaskIds,
-    predecessors: change.predecessors,
-    updatedAt: now,
-  } as Task;
-
-  const { writeBatch } = await import('../lib/firestoreWrites');
-  const { db, APP_ID } = await import('../lib/firebase');
-  const { doc, serverTimestamp } = await import('firebase/firestore');
-
-  const cleanData = Object.fromEntries(Object.entries(updatedTask).filter(([_, v]) => v !== undefined));
-  if (!cleanData.parentTaskId) cleanData.parentTaskId = null;
-
-  const batch = writeBatch(db);
-  batch.update(doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_tasks', source.id), {
-    ...cleanData,
-    _serverTimestamp: serverTimestamp()
-  });
-
-  await batch.commit();
-}
-
-/** Lag input */
-function LagInput({ value, disabled, onCommit }: { value: number; disabled?: boolean; onCommit: (n: number) => void }) {
-  const fmt = (n: number) => (n > 0 ? `+${n}` : String(n));
-  const [txt, setTxt] = useState(fmt(value));
-  const isTypingRef = useRef(false);
-
-  useEffect(() => {
-    if (!isTypingRef.current) setTxt(fmt(value));
-  }, [value]);
-
-  const commit = () => {
-    isTypingRef.current = false;
-    const n = parseFloat(txt.replace(',', '.').replace('−', '-'));
-    if (isNaN(n)) {
-      setTxt(fmt(value));
-      return;
-    }
-    const r = Math.round(n * 100) / 100;
-    if (r !== value) onCommit(r);
-    else setTxt(fmt(value));
-  };
-
-  return (
-    <input
-      type="text"
-      inputMode="decimal"
-      value={txt}
-      disabled={disabled}
-      onFocus={(e: any) => { isTypingRef.current = true; e.target.select?.(); }}
-      onChange={(e: any) => setTxt(e.target.value.replace(/[^0-9+-−.,]/g, ''))}
-      onBlur={commit}
-      onKeyDown={(e: any) => {
-        if (e.key === 'Enter') {
-          e.preventDefault(); e.stopPropagation(); commit(); e.target.blur?.();
-        }
-      }}
-      title="Enter lag days, e.g. +2 or -1"
-      className={cn(
-        'h-6 w-12 rounded bg-slate-100 dark:bg-[#18181a] border border-slate-200 dark:border-[#333] text-center font-mono text-xs font-bold outline-none focus:ring-1 focus:ring-blue-500 transition-colors',
-        value === 0 ? 'text-slate-500 dark:text-slate-400' : value > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-orange-600 dark:text-orange-400'
-      )}
-    />
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Component Main                                                     */
-/* ------------------------------------------------------------------ */
 export function PredecessorMultiInput({
   task,
   value,
@@ -274,7 +107,13 @@ export function PredecessorMultiInput({
     projectLocation: source?.location || currentProjectLocation,
   }), [source, currentProjectId, currentProjectCode, currentProjectYear, currentProjectStore, currentProjectLocation]);
 
-  const pool = useMemo(() => (storeTasks || tasksProp || useAppStore.getState().tasks || []).filter((t) => t && !t.isDeleted), [storeTasks, tasksProp]);
+  const pool = useMemo(() => {
+    const raw = storeTasks || tasksProp || useAppStore.getState().tasks || [];
+    return raw.some((t) => !t || t.isDeleted) ? raw.filter((t) => t && !t.isDeleted) : raw;
+  }, [storeTasks, tasksProp]);
+  const projectIndex = useMemo(() => buildProjectLookupIndex(activeProjects), [activeProjects]);
+  const allCodesMap = useMemo(() => computeAllTaskCodes(activeProjects, pool), [activeProjects, pool]);
+  const resolvedContext = useMemo(() => resolveProjectContext(ctx, activeProjects, projectIndex), [ctx, activeProjects, projectIndex]);
   const taskNoMap = useMemo(() => buildTaskNoMap(activeProjects, pool), [activeProjects, pool]);
 
   const items = useMemo<LinkItem[]>(() => {
@@ -287,8 +126,8 @@ export function PredecessorMultiInput({
       let p: any;
       try { p = parsePredecessors(tok, taskNoMap, { ...source, predecessorTaskIds: [ids[i] || ''] } as Task)[0]; } catch {}
       if (p && p.task) {
-        const diff = getTaskProjectDiffDetails(ctx, p.task, activeProjects);
-        const code = computeTaskCode(activeProjects, pool, p.task) || p.task.taskCodePhu || p.no || tok;
+        const diff = getTaskProjectDiffDetailsWithResolved(resolvedContext, p.task, activeProjects, projectIndex);
+        const code = allCodesMap.get(p.task.id) || p.task.taskCodePhu || p.no || tok;
         return {
           key: `${p.task.id}-${i}`,
           resolved: true,
@@ -308,7 +147,7 @@ export function PredecessorMultiInput({
         key: `raw-${i}-${tok}`, resolved: false, taskId: '', code: q || tok, type: 'FS', lagSign: '+', lagValue: 0, raw: tok, isExternal: false, externalLabel: '',
       };
     });
-  }, [source, taskNoMap, ctx, activeProjects, pool]);
+  }, [source, taskNoMap, resolvedContext, activeProjects, projectIndex, allCodesMap]);
 
   useEffect(() => {
     const handler = (e: MouseEvent | TouchEvent) => {
@@ -332,16 +171,35 @@ export function PredecessorMultiInput({
     if (!open) return [];
     const q = deferredQuery.trim();
     if (q) {
-      return rankCandidateTasks(q, pool, activeProjects, pool, source?.projectCode, ctx).filter((m) => !excluded.has(m.task.id)).slice(0, 20);
+      return rankCandidateTasks(q, pool, activeProjects, pool, source?.projectCode, ctx, {
+        projectIndex,
+        allTaskCodesMap: allCodesMap,
+      }).filter((m) => !excluded.has(m.task.id)).slice(0, 20);
     }
     let base = pool.filter((t) => !excluded.has(t.id));
-    const sameCode = base.filter((t) => t.projectCode === source?.projectCode);
-    if (sameCode.length > 0) base = sameCode;
-    base = base.filter((t) => !getTaskProjectDiffDetails(ctx, t, activeProjects).isDifferent).sort((a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0)).slice(0, 25);
-    return base.map((t) => ({
-      task: t, score: 0, exactTaskCode: computeTaskCode(activeProjects, pool, t) || t.taskCodePhu || t.id, isExternal: !!getTaskProjectDiffDetails(ctx, t, activeProjects).isDifferent, diffDetails: getTaskProjectDiffDetails(ctx, t, activeProjects),
+    if (source?.projectId) {
+      const sameId = base.filter((t) => t.projectId === source.projectId);
+      if (sameId.length > 0) base = sameId;
+    } else if (source?.projectCode) {
+      const sameCode = base.filter((t) => t.projectCode === source.projectCode);
+      if (sameCode.length > 0) base = sameCode;
+    }
+    const withDiff = base.map((t) => ({
+      task: t,
+      diff: getTaskProjectDiffDetailsWithResolved(resolvedContext, t, activeProjects, projectIndex),
+    }));
+    const internalOnly = withDiff.filter((item) => !item.diff.isDifferent);
+    const chosen = (internalOnly.length > 0 ? internalOnly : withDiff)
+      .sort((a, b) => (a.task.orderIndex ?? 0) - (b.task.orderIndex ?? 0))
+      .slice(0, 25);
+    return chosen.map(({ task: t, diff }) => ({
+      task: t,
+      score: 0,
+      exactTaskCode: allCodesMap.get(t.id) || t.taskCodePhu || t.id,
+      isExternal: !!diff.isDifferent,
+      diffDetails: diff,
     } as RankedPredecessorMatch));
-  }, [open, deferredQuery, pool, activeProjects, excluded, source?.projectCode, ctx]);
+  }, [open, deferredQuery, pool, activeProjects, excluded, source?.projectId, source?.projectCode, ctx, projectIndex, allCodesMap, resolvedContext]);
 
   const commit = async (list: LinkItem[]) => {
     const finalList = normalize(list);
@@ -387,7 +245,7 @@ export function PredecessorMultiInput({
     if (m.isExternal && !confirmed) { setPendingExternal(m); setOpen(false); return; }
     const idx = items.length;
     const next: LinkItem = {
-      key: `${t.id}-${idx}`, resolved: true, taskId: t.id, task: t, code: m.exactTaskCode || computeTaskCode(activeProjects, pool, t) || t.taskCodePhu || t.id,
+      key: `${t.id}-${idx}`, resolved: true, taskId: t.id, task: t, code: m.exactTaskCode || allCodesMap.get(t.id) || t.taskCodePhu || t.id,
       type: idx === 0 ? 'FS' : 'FF', lagSign: '+', lagValue: 0, raw: '', isExternal: !!m.isExternal, externalLabel: externalLabel(m.diffDetails, t.projectCode),
     };
     setPendingExternal(null); setQuery(''); setOpen(false); inputRef.current?.blur();
@@ -536,7 +394,7 @@ export function PredecessorMultiInput({
           </div>
 
           {open && (
-            <ul className="absolute left-0 right-0 top-full z-[9999] mt-1 max-h-64 overflow-y-auto rounded-lg border border-slate-200 bg-white py-1 shadow-xl dark:border-[#444446] dark:bg-[#252528] overscroll-contain">
+            <ul className="absolute left-0 right-0 top-full z-[300000] mt-1 max-h-80 overflow-y-auto rounded-lg border border-slate-200 bg-white py-1 shadow-xl dark:border-[#444446] dark:bg-[#252528] overscroll-contain">
               {!hasQuery && candidates.length > 0 && <li className="px-2.5 pb-1 pt-1.5 text-[9px] font-extrabold uppercase text-slate-400">Suggestions (Same Project)</li>}
               {candidates.length === 0 ? (
                 <li className="px-3 py-3 text-center text-[11px] italic text-slate-500">No tasks found</li>

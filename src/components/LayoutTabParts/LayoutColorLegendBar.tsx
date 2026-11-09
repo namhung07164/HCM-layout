@@ -1,56 +1,31 @@
-import React, { Dispatch, FC, SetStateAction, memo, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Draggable from 'react-draggable';
-import {
-  Palette,
-  ChevronUp,
-  ChevronDown,
-  Download,
-  RefreshCw,
-  FileText,
-  Image as ImageIcon,
-  Printer,
-  GripHorizontal,
-  Compass,
-  Search,
-  X,
-  Layers
-} from 'lucide-react';
+import { Palette, ChevronUp, ChevronDown, Download, RefreshCw, GripHorizontal, Compass, Search, X, Layers, Image as ImageIcon } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { getHatchCssStyle } from './layoutPatternUtils';
+import { LayoutLegendExportMenu } from './LayoutLegendExportMenu';
+import { useColorLegendImages } from './useColorLegendImages';
+import { TooltipImageGalleryPanel } from './TooltipParts/TooltipImageGalleryPanel';
+import { LayoutUnitLightboxModal } from './LayoutUnitLightboxModal';
 
 export type LegendDockPosition = 'top-right' | 'bottom-right' | 'bottom-left';
 
 export interface LayoutColorLegendBarProps {
-  layoutTooltipVisibility: any;
-  activeGroups: any[];
-  selectedLegendGroupId: string | null;
-  setSelectedLegendGroupId: (id: string | null) => void;
-  setShowLegendModal?: (show: boolean) => void;
-  isLegendStripCollapsed?: boolean;
+  layoutTooltipVisibility: any; activeGroups: any[];
+  selectedLegendGroupId: string | null; setSelectedLegendGroupId: (id: string | null) => void;
+  setShowLegendModal?: (show: boolean) => void; isLegendStripCollapsed?: boolean;
   setIsLegendStripCollapsed?: React.Dispatch<React.SetStateAction<boolean>>;
-  canWrite?: boolean;
-  handleTriggerExport?: () => void | Promise<void>;
-  isExporting?: boolean;
-  exportStatus?: string;
-  handleExport?: (type: 'jpeg' | 'pdf') => void;
-  setIsPrintPreview?: (show: boolean) => void;
+  canWrite?: boolean; handleTriggerExport?: () => void | Promise<void>;
+  isExporting?: boolean; exportStatus?: string;
+  handleExport?: (type: 'jpeg' | 'pdf') => void; setIsPrintPreview?: (show: boolean) => void;
 }
 
 const DEFAULT_DOCK_STORAGE_KEY = 'taka_layout_legend_dock_pos';
 
 export const LayoutColorLegendBar: React.FC<LayoutColorLegendBarProps> = React.memo(({
-  layoutTooltipVisibility,
-  activeGroups,
-  selectedLegendGroupId,
-  setSelectedLegendGroupId,
-  setShowLegendModal,
-  isLegendStripCollapsed: propIsCollapsed,
-  setIsLegendStripCollapsed: propSetIsCollapsed,
-  canWrite = false,
-  handleTriggerExport,
-  isExporting = false,
-  exportStatus = '',
-  handleExport,
-  setIsPrintPreview,
+  layoutTooltipVisibility, activeGroups, selectedLegendGroupId, setSelectedLegendGroupId,
+  setShowLegendModal, isLegendStripCollapsed: propIsCollapsed, setIsLegendStripCollapsed: propSetIsCollapsed,
+  canWrite = false, handleTriggerExport, isExporting = false, exportStatus = '', handleExport, setIsPrintPreview,
 }) => {
   const [internalCollapsed, setInternalCollapsed] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
@@ -58,25 +33,24 @@ export const LayoutColorLegendBar: React.FC<LayoutColorLegendBarProps> = React.m
   const [dockPosition, setDockPosition] = useState<LegendDockPosition>(() => {
     try {
       const saved = localStorage.getItem(DEFAULT_DOCK_STORAGE_KEY);
-      if (saved === 'top-right' || saved === 'bottom-right' || saved === 'bottom-left') {
-        return saved;
-      }
-    } catch {
-      // Ignore storage errors
-    }
+      if (saved === 'top-right' || saved === 'bottom-right' || saved === 'bottom-left') return saved;
+    } catch {}
     return 'top-right';
   });
+
+  const {
+    cleanCode, showImagePanel, setShowImagePanel, showAddLinkInput, setShowAddLinkInput,
+    newLinkInput, setNewLinkInput, copiedLink, enlargedImage, setEnlargedImage,
+    allLegendImages, handleAddCustomImage, handleDeleteCustomImage, handleCopyLink,
+  } = useColorLegendImages(canWrite);
 
   const nodeRef = useRef<HTMLDivElement>(null);
   const exportMenuRef = useRef<HTMLDivElement>(null);
 
   const isCollapsed = propIsCollapsed !== undefined ? propIsCollapsed : internalCollapsed;
   const toggleCollapsed = () => {
-    if (propSetIsCollapsed) {
-      propSetIsCollapsed(!isCollapsed);
-    } else {
-      setInternalCollapsed(prev => !prev);
-    }
+    if (propSetIsCollapsed) propSetIsCollapsed(!isCollapsed);
+    else setInternalCollapsed(prev => !prev);
   };
 
   const cycleDockPosition = (e: React.MouseEvent) => {
@@ -115,6 +89,19 @@ export const LayoutColorLegendBar: React.FC<LayoutColorLegendBarProps> = React.m
     return activeGroups.filter(g => g.name?.toLowerCase().includes(q));
   }, [activeGroups, groupSearch]);
 
+  const { totalUnitsAllGroups, totalAreaAllGroups } = useMemo(() => {
+    let unitsCount = 0;
+    let areaSum = 0;
+    activeGroups.forEach((g: any) => {
+      unitsCount += Number(g.matchCount || 0);
+      areaSum += Number(g.totalArea || 0);
+    });
+    return {
+      totalUnitsAllGroups: unitsCount,
+      totalAreaAllGroups: areaSum,
+    };
+  }, [activeGroups]);
+
   if (layoutTooltipVisibility?.legendColor === false) return null;
 
   // Dock positioning classes
@@ -125,6 +112,7 @@ export const LayoutColorLegendBar: React.FC<LayoutColorLegendBarProps> = React.m
   }[dockPosition];
 
   return (
+    <>
     <Draggable
       handle=".legend-drag-handle"
       cancel="button, input, select, textarea, .no-drag"
@@ -136,7 +124,7 @@ export const LayoutColorLegendBar: React.FC<LayoutColorLegendBarProps> = React.m
         className={cn(
           "absolute z-30 pointer-events-auto hide-on-actual-print print:hidden transition-shadow select-none",
           dockClasses,
-          isCollapsed ? "max-w-xs" : "w-[300px] sm:w-[340px]"
+          isCollapsed && !showImagePanel ? "max-w-xs" : "w-[330px] sm:w-[390px] max-w-[calc(100vw-1.5rem)]"
         )}
       >
         <div className="bg-white/95 dark:bg-[#1a1a1c]/95 backdrop-blur-xl rounded-2xl border border-slate-200/90 dark:border-[#333336] shadow-2xl p-2 sm:p-2.5 transition-all text-slate-800 dark:text-slate-100">
@@ -185,6 +173,27 @@ export const LayoutColorLegendBar: React.FC<LayoutColorLegendBarProps> = React.m
                 </button>
               )}
 
+              {/* Attached Images & Links Toggle Button */}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowImagePanel(!showImagePanel);
+                }}
+                className={cn(
+                  "flex items-center gap-1 px-1.5 py-1 rounded-lg text-[10px] font-semibold transition-all border cursor-pointer active:scale-95 touch-manipulation shrink-0",
+                  showImagePanel
+                    ? "bg-blue-600 text-white border-blue-700 shadow-xs"
+                    : allLegendImages.length > 0
+                      ? "bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800/80 hover:bg-blue-100 dark:hover:bg-blue-900/60"
+                      : "bg-slate-100 dark:bg-slate-800/80 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:text-blue-600 dark:hover:text-blue-400"
+                )}
+                title={allLegendImages.length > 0 ? `View ${allLegendImages.length} attached image(s) / link(s)` : "Attach image or link to Color Legend"}
+              >
+                <ImageIcon className="w-3.5 h-3.5" />
+                {allLegendImages.length > 0 && <span>{allLegendImages.length}</span>}
+              </button>
+
               {/* Dock Position Switcher */}
               <button
                 type="button"
@@ -230,79 +239,13 @@ export const LayoutColorLegendBar: React.FC<LayoutColorLegendBarProps> = React.m
 
                 {/* Export Dropdown Popover */}
                 {showExportMenu && (
-                  <div className="absolute top-full right-0 mt-1.5 w-56 bg-white dark:bg-[#1e1e20] rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 p-2 flex flex-col gap-1 z-40 animate-in fade-in zoom-in-95 duration-150">
-                    <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 border-b border-slate-100 dark:border-slate-800">
-                      Export Options
-                    </div>
-
-                    {canWrite && handleTriggerExport && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowExportMenu(false);
-                          handleTriggerExport();
-                        }}
-                        className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-xs font-semibold text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 text-left transition-colors cursor-pointer active:scale-95"
-                      >
-                        <RefreshCw className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
-                        <div>
-                          <div className="font-bold">Sync to Cloud R2</div>
-                          <div className="text-[10px] text-slate-400 dark:text-slate-500 font-normal">Auto-sync all floor layouts</div>
-                        </div>
-                      </button>
-                    )}
-
-                    {handleExport && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowExportMenu(false);
-                            handleExport('jpeg');
-                          }}
-                          className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 text-left transition-colors cursor-pointer active:scale-95"
-                        >
-                          <ImageIcon className="w-3.5 h-3.5 shrink-0 text-blue-500" />
-                          <div>
-                            <div className="font-bold">Export Image (JPEG)</div>
-                            <div className="text-[10px] text-slate-400 dark:text-slate-500 font-normal">High-resolution layout capture</div>
-                          </div>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowExportMenu(false);
-                            handleExport('pdf');
-                          }}
-                          className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 text-left transition-colors cursor-pointer active:scale-95"
-                        >
-                          <FileText className="w-3.5 h-3.5 shrink-0 text-rose-500" />
-                          <div>
-                            <div className="font-bold">Export PDF</div>
-                            <div className="text-[10px] text-slate-400 dark:text-slate-500 font-normal">Architectural A3/A4 document</div>
-                          </div>
-                        </button>
-                      </>
-                    )}
-
-                    {setIsPrintPreview && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowExportMenu(false);
-                          setIsPrintPreview(true);
-                        }}
-                        className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 text-left transition-colors cursor-pointer border-t border-slate-100 dark:border-slate-800 pt-1.5 active:scale-95"
-                      >
-                        <Printer className="w-3.5 h-3.5 shrink-0 text-purple-500" />
-                        <div>
-                          <div className="font-bold">Print Preview</div>
-                          <div className="text-[10px] text-slate-400 dark:text-slate-500 font-normal">Direct blueprint print layout</div>
-                        </div>
-                      </button>
-                    )}
-                  </div>
+                  <LayoutLegendExportMenu
+                    canWrite={canWrite}
+                    handleTriggerExport={handleTriggerExport}
+                    handleExport={handleExport}
+                    setIsPrintPreview={setIsPrintPreview}
+                    onClose={() => setShowExportMenu(false)}
+                  />
                 )}
               </div>
 
@@ -318,6 +261,28 @@ export const LayoutColorLegendBar: React.FC<LayoutColorLegendBarProps> = React.m
             </div>
           </div>
 
+          {/* Attached Images & Links Panel */}
+          {showImagePanel && (
+            <div className="no-drag mt-2">
+              <TooltipImageGalleryPanel
+                showImagePanel={showImagePanel}
+                setShowImagePanel={setShowImagePanel}
+                showAddLinkInput={showAddLinkInput}
+                setShowAddLinkInput={setShowAddLinkInput}
+                newLinkInput={newLinkInput}
+                setNewLinkInput={setNewLinkInput}
+                allUnitImages={allLegendImages}
+                copiedLink={copiedLink}
+                handleAddCustomImage={handleAddCustomImage}
+                handleDeleteCustomImage={handleDeleteCustomImage}
+                handleCopyLink={handleCopyLink}
+                setEnlargedImage={setEnlargedImage}
+                unitCode={cleanCode}
+                canWrite={canWrite}
+              />
+            </div>
+          )}
+
           {/* Body List (Visible when Expanded) */}
           {!isCollapsed && (
             <div className="pt-2 border-t border-slate-100 dark:border-slate-800/80 mt-1.5 space-y-2 animate-in fade-in duration-150">
@@ -329,8 +294,10 @@ export const LayoutColorLegendBar: React.FC<LayoutColorLegendBarProps> = React.m
                     type="text"
                     value={groupSearch}
                     onChange={(e) => setGroupSearch(e.target.value)}
-                    placeholder="Search groups..."
-                    className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg pl-7 pr-6 py-1 text-[11px] placeholder-slate-400 outline-none focus:ring-1 focus:ring-purple-500"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg pl-7 pr-6 py-1 text-[16px] sm:text-[11px] placeholder-slate-400 outline-none focus:ring-1 focus:ring-purple-500 transition-colors duration-150 [overflow-anchor:none]"
                   />
                   {groupSearch && (
                     <button
@@ -348,22 +315,34 @@ export const LayoutColorLegendBar: React.FC<LayoutColorLegendBarProps> = React.m
               {activeGroups.length === 0 ? (
                 /* Default Project Status Legend */
                 <div className="grid grid-cols-2 gap-1.5 py-0.5 text-xs">
-                  <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700 text-slate-800 dark:text-slate-200 shadow-2xs">
-                    <span className="w-3 h-3 rounded-full bg-emerald-500 shrink-0 shadow-xs ring-1 ring-white/50 dark:ring-black/30" />
-                    <span className="text-[11px] font-semibold whitespace-nowrap">Completed</span>
-                  </div>
-                  <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700 text-slate-800 dark:text-slate-200 shadow-2xs">
-                    <span className="w-3 h-3 rounded-full bg-blue-500 shrink-0 shadow-xs ring-1 ring-white/50 dark:ring-black/30" />
-                    <span className="text-[11px] font-semibold whitespace-nowrap">On Process</span>
-                  </div>
-                  <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700 text-slate-800 dark:text-slate-200 shadow-2xs">
-                    <span className="w-3 h-3 rounded-full bg-amber-500 shrink-0 shadow-xs ring-1 ring-white/50 dark:ring-black/30" />
-                    <span className="text-[11px] font-semibold whitespace-nowrap">Upcoming</span>
-                  </div>
-                  <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700 text-slate-800 dark:text-slate-200 shadow-2xs">
-                    <span className="w-3 h-3 rounded-full bg-rose-500 shrink-0 shadow-xs ring-1 ring-white/50 dark:ring-black/30" />
-                    <span className="text-[11px] font-semibold whitespace-nowrap">Delay</span>
-                  </div>
+                  {[
+                    { id: 'Completed', label: 'Completed', color: '#10b981' },
+                    { id: 'On process', label: 'On Process', color: '#3b82f6' },
+                    { id: 'Upcoming', label: 'Upcoming', color: '#f59e0b' },
+                    { id: 'Delay', label: 'Delay', color: '#ef4444' },
+                  ].map(s => {
+                    const isSelected = selectedLegendGroupId === s.id;
+                    return (
+                      <button
+                        key={s.id}
+                        type="button"
+                        onClick={() => setSelectedLegendGroupId(isSelected ? null : s.id)}
+                        className={cn(
+                          "flex items-center gap-2 px-2.5 py-1.5 rounded-xl border transition-all cursor-pointer active:scale-95 touch-manipulation shadow-2xs text-left",
+                          isSelected
+                            ? "bg-purple-100 dark:bg-purple-950/80 border-purple-500 text-purple-950 dark:text-purple-100 ring-2 ring-purple-400/50 font-bold"
+                            : "bg-slate-50 dark:bg-slate-800/80 border-slate-200/80 dark:border-slate-700 text-slate-800 dark:text-slate-200"
+                        )}
+                        title={`Click to ${isSelected ? 'clear filter' : 'filter on canvas'} ${s.label}`}
+                      >
+                        <span
+                          className="w-3 h-3 rounded-full shrink-0 shadow-xs ring-1 ring-white/50 dark:ring-black/30"
+                          style={{ backgroundColor: s.color }}
+                        />
+                        <span className="text-[11px] font-semibold whitespace-nowrap">{s.label}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               ) : (
                 /* Custom Classification Groups */
@@ -386,19 +365,48 @@ export const LayoutColorLegendBar: React.FC<LayoutColorLegendBarProps> = React.m
                               ? "bg-purple-100 dark:bg-purple-950/80 border-purple-500 text-purple-950 dark:text-purple-100 ring-2 ring-purple-400/50 font-bold"
                               : "bg-slate-50/90 hover:bg-slate-100 dark:bg-slate-800/80 dark:hover:bg-slate-700/80 border-slate-200/80 dark:border-slate-700 text-slate-800 dark:text-slate-200"
                           )}
-                          title={`Click to ${isSelected ? 'clear highlight' : 'highlight on canvas'} group ${g.name}`}
+                          title={`Click to ${isSelected ? 'clear highlight' : 'highlight on canvas'} group ${g.name} (${g.matchCount} ${g.matchCount === 1 ? 'unit' : 'units'}${g.totalArea > 0 ? ` • ${Number(g.totalArea).toLocaleString('en-US', { maximumFractionDigits: 2 })} m²` : ''}${g.areaPercent ? ` • ${Number(g.areaPercent).toFixed(1)}%` : ''})`}
                         >
                           <div className="flex items-center gap-2 min-w-0">
                             <span
-                              className="w-3.5 h-3.5 rounded-full shrink-0 shadow-2xs border border-black/15 ring-1 ring-white/50"
-                              style={{ backgroundColor: g.color }}
-                            />
-                            <span className="truncate text-[11px] font-semibold">
-                              {g.name}
+                              className="w-4 h-4 rounded shrink-0 shadow-2xs border border-black/25 ring-1 ring-white/50 relative overflow-hidden flex items-center justify-center"
+                              style={{
+                                backgroundColor: g.color,
+                                ...getHatchCssStyle(g.color, g.hatchPattern),
+                              }}
+                            >
+                              {g.symbol && (
+                                <span className="text-[10px] font-black text-white drop-shadow-[0_1px_1px_rgba(0,0,0,0.9)] leading-none select-none">
+                                  {g.symbol}
+                                </span>
+                              )}
+                            </span>
+                            <span className="truncate text-[11px] font-semibold flex items-center gap-1" title={g.name}>
+                              {g.symbol && <span className="text-amber-500 dark:text-amber-400 font-mono text-[10px] font-bold">[{g.symbol}]</span>}
+                              <span className="truncate">{g.name}</span>
                             </span>
                           </div>
-                          <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded-full bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200/80 dark:border-slate-700 shrink-0">
-                            {g.matchCount} {g.matchCount === 1 ? 'unit' : 'units'}
+                          <span
+                            className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200/80 dark:border-slate-700 shrink-0 whitespace-nowrap flex items-center gap-1 shadow-2xs"
+                            title={`Units: ${g.matchCount}${g.totalArea > 0 ? ` • Area: ${Number(g.totalArea).toLocaleString('en-US', { maximumFractionDigits: 2 })} m²` : ''}${g.areaPercent ? ` • ${Number(g.areaPercent).toFixed(1)}% of categorized area` : ''}`}
+                          >
+                            <span>{g.matchCount} {g.matchCount === 1 ? 'unit' : 'units'}</span>
+                            {g.totalArea > 0 && (
+                              <>
+                                <span className="text-slate-300 dark:text-slate-600 font-normal">•</span>
+                                <span className="text-emerald-600 dark:text-emerald-400 font-semibold">
+                                  {Number(g.totalArea).toLocaleString('en-US', { maximumFractionDigits: 2 })} m²
+                                </span>
+                              </>
+                            )}
+                            {g.areaPercent !== undefined && g.areaPercent > 0 && (
+                              <>
+                                <span className="text-slate-300 dark:text-slate-600 font-normal">•</span>
+                                <span className="text-indigo-600 dark:text-indigo-400 font-semibold">
+                                  {Number(g.areaPercent).toFixed(1)}%
+                                </span>
+                              </>
+                            )}
                           </span>
                         </button>
                       );
@@ -406,10 +414,37 @@ export const LayoutColorLegendBar: React.FC<LayoutColorLegendBarProps> = React.m
                   )}
                 </div>
               )}
+
+              {/* Total Summary Footer */}
+              {filteredGroups.length >= 2 && totalUnitsAllGroups > 0 && (
+                <div className="flex items-center justify-between px-2.5 py-1 text-[10px] font-mono font-bold border-t border-slate-200/80 dark:border-slate-800 pt-1 mt-0.5 bg-slate-50/50 dark:bg-slate-900/30 rounded-lg">
+                  <span className="uppercase text-[9px] tracking-wider text-slate-500 dark:text-slate-400">Total</span>
+                  <div className="flex items-center gap-1.5 text-slate-700 dark:text-slate-200">
+                    <span>{totalUnitsAllGroups} {totalUnitsAllGroups === 1 ? 'unit' : 'units'}</span>
+                    {totalAreaAllGroups > 0 && (
+                      <>
+                        <span className="text-slate-300 dark:text-slate-600">•</span>
+                        <span className="text-emerald-600 dark:text-emerald-400">{Number(totalAreaAllGroups).toLocaleString('en-US', { maximumFractionDigits: 2 })} m²</span>
+                        <span className="text-slate-300 dark:text-slate-600">•</span>
+                        <span className="text-indigo-600 dark:text-indigo-400">100%</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
       </div>
     </Draggable>
+    {enlargedImage && (
+      <LayoutUnitLightboxModal
+        enlargedImage={enlargedImage}
+        onClose={() => setEnlargedImage(null)}
+        onCopyLink={handleCopyLink}
+        copiedLink={copiedLink}
+      />
+    )}
+    </>
   );
 });

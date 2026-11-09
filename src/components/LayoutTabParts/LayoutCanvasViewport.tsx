@@ -24,6 +24,10 @@ interface LayoutCanvasViewportProps {
   pendingTouchRef: React.MutableRefObject<any>;
   rafTouchIdRef: React.MutableRefObject<number | null>;
   isInteractingRef: React.MutableRefObject<boolean>;
+  isPinchingRef?: React.MutableRefObject<boolean>;
+  lastPinchEndTimeRef?: React.MutableRefObject<number>;
+  lastWheelTimeRef?: React.MutableRefObject<number>;
+  lastZoomTimeRef?: React.MutableRefObject<number>;
   fitToScreen: (animated?: boolean) => void;
   lastWheelPointerRef: React.MutableRefObject<any>;
   pendingWheelDeltaRef: React.MutableRefObject<number>;
@@ -35,14 +39,15 @@ interface LayoutCanvasViewportProps {
   layoutTooltipVisibility: any;
   focusedUnitId: string | null;
   selectedLegendGroupId: string | null;
+  activeGroups?: any[];
   getContrastStyle: (color: string) => ContrastStyle;
   aggregatedData: Record<string, any>;
   focusedUnit: any;
   handleMouseEnterUnit: (unit: any, e: any) => void;
   handleMouseMoveUnit: (unit: any, e: any) => void;
   handleMouseLeaveUnit: (unit: any, e: any) => void;
-  handleClickUnit: (unit: any, e: any) => void;
-  handleTapUnit: (unit: any, e: any) => void;
+  handleClickUnit: (unit: any, e: any, quickImageMode?: boolean) => void;
+  handleTapUnit: (unit: any, e: any, quickImageMode?: boolean) => void;
   hasStoredUnitImages: (key: string | undefined | null, store?: string) => boolean;
   storeFilter?: string;
 }
@@ -68,6 +73,10 @@ export const LayoutCanvasViewport: React.FC<LayoutCanvasViewportProps> = React.m
   pendingTouchRef,
   rafTouchIdRef,
   isInteractingRef,
+  isPinchingRef,
+  lastPinchEndTimeRef,
+  lastWheelTimeRef,
+  lastZoomTimeRef,
   fitToScreen,
   lastWheelPointerRef,
   pendingWheelDeltaRef,
@@ -79,6 +88,7 @@ export const LayoutCanvasViewport: React.FC<LayoutCanvasViewportProps> = React.m
   layoutTooltipVisibility,
   focusedUnitId,
   selectedLegendGroupId,
+  activeGroups,
   getContrastStyle,
   aggregatedData,
   focusedUnit,
@@ -94,7 +104,7 @@ export const LayoutCanvasViewport: React.FC<LayoutCanvasViewportProps> = React.m
     <div 
       id="live-layout-canvas-container"
       ref={containerRef} 
-      className="flex-grow w-full h-full relative cursor-grab active:cursor-grabbing"
+      className="flex-1 min-h-0 w-full h-full relative overflow-hidden cursor-grab active:cursor-grabbing"
       style={{ touchAction: 'none' }}
     >
       <Stage 
@@ -132,6 +142,10 @@ export const LayoutCanvasViewport: React.FC<LayoutCanvasViewportProps> = React.m
         onDblClick={() => {
           if (isProjectModalOpen || Boolean(miniGanttProject)) return;
           stopInertia();
+          isPinnedRef.current = false;
+          setHoverInfo(null);
+          if (lastZoomTimeRef) lastZoomTimeRef.current = Date.now();
+          isInteractingRef.current = true;
           const stage = stageRef.current;
           if (!stage) return;
           const pointer = stage.getPointerPosition();
@@ -156,6 +170,10 @@ export const LayoutCanvasViewport: React.FC<LayoutCanvasViewportProps> = React.m
             onFinish: () => {
               setStageScale(newScale);
               setStagePos(newPos);
+              if (lastZoomTimeRef) lastZoomTimeRef.current = Date.now();
+              setTimeout(() => {
+                isInteractingRef.current = false;
+              }, 250);
             }
           });
         }}
@@ -163,7 +181,7 @@ export const LayoutCanvasViewport: React.FC<LayoutCanvasViewportProps> = React.m
           if (document.body.classList.contains('lightbox-open')) return;
           if (isProjectModalOpen || Boolean(miniGanttProject)) return;
           stopInertia();
-          if (e.evt.touches.length === 2) {
+          if (e.evt.touches.length >= 2) {
             const touch1 = e.evt.touches[0];
             const touch2 = e.evt.touches[1];
             const dist = Math.hypot(touch1.clientX - touch2.clientX, touch1.clientY - touch2.clientY);
@@ -174,13 +192,19 @@ export const LayoutCanvasViewport: React.FC<LayoutCanvasViewportProps> = React.m
             touchStateRef.current = { lastDist: dist, lastCenter: center, lastTap: 0 };
             const stage = stageRef.current;
             if (stage) stage.draggable(false);
+            if (isPinchingRef) isPinchingRef.current = true;
+            if (lastPinchEndTimeRef) lastPinchEndTimeRef.current = Date.now();
             isInteractingRef.current = true;
+            isPinnedRef.current = false;
             setHoverInfo(null);
           } else if (e.evt.touches.length === 1) {
             const now = Date.now();
             if (now - touchStateRef.current.lastTap < 300) {
               fitToScreen(true);
               touchStateRef.current.lastTap = 0;
+              isPinnedRef.current = false;
+              setHoverInfo(null);
+              if (lastZoomTimeRef) lastZoomTimeRef.current = now;
             } else {
               touchStateRef.current.lastTap = now;
             }
@@ -188,8 +212,11 @@ export const LayoutCanvasViewport: React.FC<LayoutCanvasViewportProps> = React.m
         }}
         onTouchMove={(e) => {
           if (document.body.classList.contains('lightbox-open')) return;
-          if (e.evt.touches.length === 2) {
+          if (e.evt.touches.length >= 2) {
             e.evt.preventDefault();
+            if (isPinchingRef) isPinchingRef.current = true;
+            isInteractingRef.current = true;
+            setHoverInfo(null);
             const touch1 = e.evt.touches[0];
             const touch2 = e.evt.touches[1];
             const dist = Math.hypot(touch1.clientX - touch2.clientX, touch1.clientY - touch2.clientY);
@@ -242,16 +269,23 @@ export const LayoutCanvasViewport: React.FC<LayoutCanvasViewportProps> = React.m
             cancelAnimationFrame(rafTouchIdRef.current);
             rafTouchIdRef.current = null;
           }
+          if (isPinchingRef?.current) {
+            isPinchingRef.current = false;
+            if (lastPinchEndTimeRef) lastPinchEndTimeRef.current = Date.now();
+          }
           pendingTouchRef.current = null;
           touchStateRef.current.lastDist = 0;
           touchStateRef.current.lastCenter = null;
           const stage = stageRef.current;
           if (stage) {
             stage.draggable(true);
+            stage.batchDraw();
             setStageScale(stage.scaleX());
             setStagePos({ x: stage.x(), y: stage.y() });
           }
-          isInteractingRef.current = false;
+          setTimeout(() => {
+            isInteractingRef.current = false;
+          }, 350);
         }}
         onWheel={(e) => {
           if (document.body.classList.contains('lightbox-open')) return;
@@ -262,6 +296,8 @@ export const LayoutCanvasViewport: React.FC<LayoutCanvasViewportProps> = React.m
           if (!stage) return;
           
           isInteractingRef.current = true;
+          if (lastWheelTimeRef) lastWheelTimeRef.current = Date.now();
+          isPinnedRef.current = false;
           setHoverInfo(null);
 
           const pointer = stage.getPointerPosition();
@@ -300,10 +336,14 @@ export const LayoutCanvasViewport: React.FC<LayoutCanvasViewportProps> = React.m
 
               if (wheelTimeoutRef.current) clearTimeout(wheelTimeoutRef.current);
               wheelTimeoutRef.current = setTimeout(() => {
+                currentStage.batchDraw();
                 setStageScale(currentStage.scaleX());
                 setStagePos({ x: currentStage.x(), y: currentStage.y() });
-                isInteractingRef.current = false;
-              }, 120);
+                if (lastWheelTimeRef) lastWheelTimeRef.current = Date.now();
+                setTimeout(() => {
+                  isInteractingRef.current = false;
+                }, 200);
+              }, 200);
             });
           }
         }}
@@ -315,6 +355,7 @@ export const LayoutCanvasViewport: React.FC<LayoutCanvasViewportProps> = React.m
           layoutTooltipVisibility={layoutTooltipVisibility}
           focusedUnitId={focusedUnitId}
           selectedLegendGroupId={selectedLegendGroupId}
+          activeGroups={activeGroups}
           getContrastStyle={getContrastStyle}
           stageScale={stageScale}
           aggregatedData={aggregatedData}

@@ -93,12 +93,30 @@ export function computeFieldPatch<T extends Record<string, any>>(
     patch.updatedAt = current.updatedAt;
   }
 
-  // Preserve projectCode/projectYear if present to support Tri-Gate / year filter routing
+  // Preserve 4-key isolation markers if present to support Tri-Gate / year filter routing
+  if (current.projectId && !patch.projectId) {
+    patch.projectId = current.projectId;
+  }
   if (current.projectCode && !patch.projectCode) {
     patch.projectCode = current.projectCode;
   }
   if (current.projectYear !== undefined && patch.projectYear === undefined) {
     patch.projectYear = current.projectYear;
+  }
+  if (current.projectStore && !patch.projectStore) {
+    patch.projectStore = current.projectStore;
+  }
+  if (current.code && !patch.code) {
+    patch.code = current.code;
+  }
+  if (current.year !== undefined && patch.year === undefined) {
+    patch.year = current.year;
+  }
+  if (current.store && !patch.store) {
+    patch.store = current.store;
+  }
+  if (current.parentTaskId !== undefined && patch.parentTaskId === undefined) {
+    patch.parentTaskId = current.parentTaskId;
   }
 
   return patch;
@@ -142,13 +160,43 @@ export function createPatchDeltaItem(params: {
 }): TakaDeltaItem {
   const { docId, collectionName, previous, updated, year } = params;
   const action = params.action || (previous ? 'update' : 'create');
+  const refObj = updated || previous || {};
+  const resolvedYear =
+    year ||
+    (refObj?.projectYear !== undefined
+      ? String(refObj.projectYear)
+      : refObj?.year !== undefined
+        ? String(refObj.year)
+        : undefined);
+  const projectId = refObj?.projectId ? String(refObj.projectId) : undefined;
+  const projectCode = refObj?.projectCode
+    ? String(refObj.projectCode)
+    : refObj?.code
+      ? String(refObj.code)
+      : undefined;
+  const projectStore = refObj?.projectStore
+    ? String(refObj.projectStore)
+    : refObj?.store
+      ? String(refObj.store)
+      : undefined;
 
   if (action === 'delete') {
     return {
       docId,
       collectionName,
       action: 'delete',
-      year,
+      data: {
+        id: docId,
+        isDeleted: true,
+        ...(projectId ? { projectId } : {}),
+        ...(projectCode ? { projectCode } : {}),
+        ...(projectStore ? { projectStore } : {}),
+        ...(resolvedYear ? { projectYear: resolvedYear } : {}),
+      },
+      year: resolvedYear,
+      ...(projectId ? { projectId } : {}),
+      ...(projectCode ? { projectCode } : {}),
+      ...(projectStore ? { projectStore } : {}),
     };
   }
 
@@ -159,7 +207,10 @@ export function createPatchDeltaItem(params: {
       action: 'create',
       data: updated,
       isPatch: false,
-      year: year || (updated?.projectYear ? String(updated.projectYear) : undefined),
+      year: resolvedYear,
+      ...(projectId ? { projectId } : {}),
+      ...(projectCode ? { projectCode } : {}),
+      ...(projectStore ? { projectStore } : {}),
     };
   }
 
@@ -172,7 +223,10 @@ export function createPatchDeltaItem(params: {
     action: 'update',
     isPatch: true,
     data: patch,
-    year: year || (updated?.projectYear ? String(updated.projectYear) : undefined),
+    year: resolvedYear,
+    ...(projectId ? { projectId } : {}),
+    ...(projectCode ? { projectCode } : {}),
+    ...(projectStore ? { projectStore } : {}),
   };
 }
 

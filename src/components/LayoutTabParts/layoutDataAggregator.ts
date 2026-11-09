@@ -11,9 +11,11 @@ import {
   computePlanProgressPercent,
   computeActProgressPercent
 } from '../../lib/utils';
+import { getUnitEffectiveSizeM2, isSecondaryGroupedUnitForProject } from '../../lib/unitSizeResolver';
 
 export interface BuildAggregatedUnitDataParams {
   units: any[];
+  version?: any;
   summaryData: any[];
   enrichedProjects: Project[];
   tasks: any[];
@@ -30,6 +32,7 @@ export interface BuildAggregatedUnitDataParams {
 
 export function buildAggregatedUnitData({
   units,
+  version,
   summaryData,
   enrichedProjects,
   tasks,
@@ -49,6 +52,8 @@ export function buildAggregatedUnitData({
     const uName = (u?.name || '').toLowerCase().trim();
     if (!uName) return;
     const isRestricted = restrictedProjectCodes.has(uName);
+    const editTabUnitSize = getUnitEffectiveSizeM2(u, version, undefined, true);
+    const initialUnitSize = getUnitEffectiveSizeM2(u, version);
     dataMap[uName] = {
       name: u.name || '',
       id: u.id,
@@ -56,10 +61,11 @@ export function buildAggregatedUnitData({
       isRestricted,
       hasImage: Boolean(u.imageUrl || u.thumbnail || u.image),
       year: effectiveLayoutYear,
-      size: 0, sales: 0, salesByCp: 0, salesByHcmcate: 0,
+      editTabSizeM2: editTabUnitSize,
+      size: initialUnitSize, sizeM2: initialUnitSize, sales: 0, salesByCp: 0, salesByHcmcate: 0,
       profit: 0, profitByCp: 0, profitByHcmcate: 0,
       margin: 0, marginByCp: 0, hcmSalesEffi: 0, hcmMargin: 0,
-      mdStatus: "", task: "", projectStatus: "", actStatus: "",
+      mdStatus: "", task: "", projectStatus: "", actStatus: "", shopType: "",
       endDate: "", status: "", vendorCode: "",
       brandCode: "", brandName: "", classCode: "", floor: u.location || locationFilter || "",
       appProjectStatus: "", appProjectBudget: 0, appProjectActual: 0, appProjectCode: "", appProjectYear: "", projectName: "", startDate: "", handoverDate: "", openingDate: "", detail: "", party: "",
@@ -74,8 +80,14 @@ export function buildAggregatedUnitData({
         dataMap[key].isRestricted = true;
         return;
       }
+      const parsedSumSize = Number(String(sumData.size ?? '').replace(/,/g, '.'));
+      const validSumSize = !isNaN(parsedSumSize) && parsedSumSize > 0 ? parsedSumSize : 0;
+      const resolvedEditTabSize = dataMap[key].editTabSizeM2 > 0 ? dataMap[key].editTabSizeM2 : validSumSize;
+      const resolvedSize = dataMap[key].sizeM2 || dataMap[key].size || validSumSize || 0;
       Object.assign(dataMap[key], {
-          size: sumData.size || 0,
+          editTabSizeM2: resolvedEditTabSize,
+          size: resolvedSize,
+          sizeM2: resolvedSize,
           sales: sumData.salesAmount || 0,
           profit: sumData.profitAmount || 0,
           margin: sumData.margin || 0,
@@ -85,6 +97,7 @@ export function buildAggregatedUnitData({
           status: sumData.status || "",
           brandName: sumData.brandName || "",
           floor: dataMap[key].floor || (sumData as any).floor || "",
+          shopType: (sumData as any).shopType || (sumData as any).shop_type || dataMap[key].shopType || "",
       });
     }
   });
@@ -133,6 +146,24 @@ export function buildAggregatedUnitData({
     }
   });
 
+  // Pre-index dataMap unit entries once to avoid O(P * U) string allocations & Map lookups
+  const preIndexedUnits = Object.keys(dataMap).map((uKey) => {
+    const uEntry = dataMap[uKey];
+    const uKeyLower = uKey.toLowerCase();
+    const uName = uEntry?.name ? String(uEntry.name) : '';
+    const uNameLower = uName.toLowerCase();
+    const uIdLower = uEntry?.id ? String(uEntry.id).toLowerCase() : '';
+    const uStore = (uEntry?.store || storeFilter || '').toUpperCase().trim();
+    const uLoc = (uEntry?.location || targetLoc || '').toUpperCase().trim();
+    const uYr = String(uEntry?.year || effectiveLayoutYear || '').trim();
+    const linkedCodes = [
+      ...(unitToProjectCodesMap.get(uKeyLower) || []),
+      ...(uNameLower ? (unitToProjectCodesMap.get(uNameLower) || []) : []),
+      ...(uIdLower ? (unitToProjectCodesMap.get(uIdLower) || []) : []),
+    ];
+    return { uKey, uKeyLower, uName, uNameLower, uStore, uLoc, uYr, linkedCodes };
+  });
+
   const now = new Date();
   enrichedProjects.forEach((p) => {
     if (!p.code && !p.linkCodes) return;
@@ -144,6 +175,7 @@ export function buildAggregatedUnitData({
     }
 
     const pCodes = extractAllProjectCodes(p);
+    const pCodesLower = pCodes.map(c => c.toLowerCase());
     const status = getStatus(p.computedTakStart || p.start, p.computedTakCompl || p.handover, p.computedOpening || p.opening, p.code);
     
     const seenTaskKeys = new Set<string>();
@@ -231,34 +263,27 @@ export function buildAggregatedUnitData({
     const partyStr = p.party || (p as any).contractor || '';
     const mdStatusStr = p.mdStatus || '';
 
+    const isStorewide = pMeta.location === 'ALL' || pMeta.location === 'STORE' || pMeta.location === 'STOREWIDE' || pMeta.location === 'WHOLE STORE' || pMeta.location === 'ALL FLOORS';
     const targetUnitKeys = new Set<string>();
-    Object.keys(dataMap).forEach(uKey => {
-      const uEntry = dataMap[uKey];
-      if (!uEntry) return;
-      const uStore = (uEntry.store || storeFilter || '').toUpperCase().trim();
-      const uLoc = (uEntry.location || targetLoc || '').toUpperCase().trim();
-      const uYr = String(uEntry.year || effectiveLayoutYear || '').trim();
+    for (let i = 0; i < preIndexedUnits.length; i++) {
+      const u = preIndexedUnits[i];
+      if (pMeta.store && u.uStore && u.uStore !== 'ALL' && pMeta.store !== u.uStore) continue;
+      if (pMeta.location && u.uLoc && !isStorewide && pMeta.location !== u.uLoc) continue;
+      if (pMeta.year && u.uYr && u.uYr !== 'ALL' && u.uYr !== 'all' && pMeta.year !== u.uYr) continue;
 
-      // Strict Store, Location, and Year Isolation
-      if (pMeta.store && uStore && uStore !== 'ALL' && uStore !== 'all' && pMeta.store !== uStore) return;
-      const isStorewide = pMeta.location === 'ALL' || pMeta.location === 'STORE' || pMeta.location === 'STOREWIDE' || pMeta.location === 'WHOLE STORE' || pMeta.location === 'ALL FLOORS';
-      if (pMeta.location && uLoc && !isStorewide && pMeta.location !== uLoc) return;
-      if (pMeta.year && uYr && uYr !== 'ALL' && uYr !== 'all' && pMeta.year !== uYr) return;
-
-      const linkedCodes = [
-        ...(unitToProjectCodesMap.get(uKey.toLowerCase()) || []),
-        ...(uEntry.name ? (unitToProjectCodesMap.get(uEntry.name.toLowerCase()) || []) : []),
-        ...(uEntry.id ? (unitToProjectCodesMap.get(uEntry.id.toLowerCase()) || []) : []),
-      ];
-      const isLinkedViaProjectLink = linkedCodes.some(lc => 
-        pCodes.some(pc => pc.toLowerCase() === lc.toLowerCase() || projectMatchesUnitCode([pc], lc))
-      );
-
-      const isExactCode = pCodes.some(c => c.toLowerCase() === uKey.toLowerCase() || (uEntry.name && c.toLowerCase() === uEntry.name.toLowerCase()));
-      if (isExactCode || isLinkedViaProjectLink || projectMatchesUnitCode(pCodes, uKey) || (uEntry.name && projectMatchesUnitCode(pCodes, uEntry.name))) {
-        targetUnitKeys.add(uKey);
+      const isExactCode = pCodesLower.includes(u.uKeyLower) || (Boolean(u.uNameLower) && pCodesLower.includes(u.uNameLower));
+      if (isExactCode) {
+        targetUnitKeys.add(u.uKey);
+        continue;
       }
-    });
+
+      const isLinkedViaProjectLink = u.linkedCodes.length > 0 && u.linkedCodes.some(lc =>
+        pCodesLower.includes(lc) || projectMatchesUnitCode(pCodes, lc)
+      );
+      if (isLinkedViaProjectLink || projectMatchesUnitCode(pCodes, u.uKey) || (u.uName && projectMatchesUnitCode(pCodes, u.uName))) {
+        targetUnitKeys.add(u.uKey);
+      }
+    }
 
     targetUnitKeys.forEach(code => {
        if (dataMap[code]) {
@@ -274,6 +299,7 @@ export function buildAggregatedUnitData({
           dataMap[code].floor = (p as any).floor || p.location || dataMap[code].floor || targetLoc || '';
           dataMap[code].appProjectFloor = (p as any).floor || p.location || dataMap[code].floor || targetLoc || '';
           dataMap[code].appFloor = (p as any).floor || p.location || dataMap[code].floor || targetLoc || '';
+          dataMap[code].appProjectName = p.name || "";
           dataMap[code].projectName = p.name || "";
           dataMap[code].startDate = p.start || p.computedTakStart || "";
           dataMap[code].handoverDate = p.handover || p.computedTakCompl || "";
@@ -303,6 +329,32 @@ export function buildAggregatedUnitData({
 
           dataMap[code].appProjectParty = partyStr;
           dataMap[code].appParty = partyStr;
+
+          const isSecondaryGrouped = isSecondaryGroupedUnitForProject(p, dataMap[code].name || code);
+          dataMap[code].isGroupedSecondaryUnit = isSecondaryGrouped;
+
+          if (isSecondaryGrouped) {
+            const ownEditSize = dataMap[code].editTabSizeM2 || 0;
+            dataMap[code].sizeM2 = ownEditSize;
+            dataMap[code].size = ownEditSize;
+            dataMap[code].appProjectSizeM2 = ownEditSize;
+          } else {
+            const rawPSize = p.sizeM2 ?? (p as any)?.size ?? (p as any)?.area;
+            const parsedPSize = Number(String(rawPSize ?? '').replace(/,/g, '.'));
+            const pEffectiveSize = !isNaN(parsedPSize) && parsedPSize > 0 ? parsedPSize : 0;
+
+            if (pEffectiveSize > 0) {
+              dataMap[code].sizeM2 = pEffectiveSize;
+              dataMap[code].size = pEffectiveSize;
+              dataMap[code].appProjectSizeM2 = pEffectiveSize;
+            } else if (p.sizeM2) {
+              dataMap[code].sizeM2 = p.sizeM2;
+              dataMap[code].appProjectSizeM2 = p.sizeM2;
+            }
+          }
+          dataMap[code].matchedProject = p;
+          dataMap[code].shopType = p.shopType || (p as any).shop_type || dataMap[code].shopType || '';
+          dataMap[code].appProjectShopType = p.shopType || (p as any).shop_type || '';
 
           dataMap[code].matchedTasks = allMatchedTasks;
           dataMap[code].subTasks = allMatchedTasks.length > 0 ? allMatchedTasks : (p.taskSummaries || []);

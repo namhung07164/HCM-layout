@@ -1,7 +1,7 @@
 import React, { memo } from 'react';
 import { Project, Task } from '../../types';
-import { cn, formatDisplayDateTime, formatDisplayDateMain, calculateDays, getActStatusPercent } from '../../lib/utils';
-import { GripVertical, Trash2, Edit3, ArrowUp, ArrowDown } from 'lucide-react';
+import { cn, formatDisplayDateTime, formatDisplayDateMain, calculateDays, getActStatusPercent, getEffectiveTaskDuration } from '../../lib/utils';
+import { GripVertical, Trash2, Edit3, ArrowUp, ArrowDown, ChevronRight, ChevronDown } from 'lucide-react';
 import { DetailTableRow } from './detailTypes';
 import { EditableCell } from './EditableCell';
 import { PredecessorEditableCell } from './PredecessorEditableCell';
@@ -24,6 +24,8 @@ interface DetailTaskRowProps {
   delStatusText: string;
   delStatusColorClass: string;
   childTasksCount: number;
+  isModularExpanded?: boolean;
+  onToggleModularParent?: (parentTaskId: string) => void;
   tasks?: Task[];
   projects?: Project[];
   onToggleSelectTask: (id: string, shiftKey: boolean) => void;
@@ -51,6 +53,8 @@ export const DetailTaskRow = React.memo(function DetailTaskRow({
   delStatusText,
   delStatusColorClass,
   childTasksCount = 0,
+  isModularExpanded = false,
+  onToggleModularParent,
   tasks,
   projects,
   onToggleSelectTask,
@@ -84,12 +88,15 @@ export const DetailTaskRow = React.memo(function DetailTaskRow({
       onDragEnd={onDragEnd}
       onDrop={(e) => onDrop(e, t, p)}
       className={cn(
-        "table-row-optimized border-b border-slate-100 dark:border-[#333336] transition-all duration-700 relative",
+        "table-row-optimized h-[42px] border-b border-slate-100 dark:border-[#333336] relative",
+        !isDragOver && "transition-colors duration-300",
         item.taskIndex % 2 === 0 ? "bg-white dark:bg-[#1e1e20]" : "bg-slate-50/50 dark:bg-[#252528]",
         isSelected && "bg-blue-50/80 dark:bg-blue-900/20",
         isDragging && "opacity-40",
         isFocused && "ring-2 ring-blue-500 z-10",
-        isFlashed && "ring-2 ring-emerald-500/80 bg-emerald-50/80 dark:bg-emerald-950/60 z-10 shadow-sm"
+        isFlashed && "ring-2 ring-emerald-500/80 bg-emerald-50/80 dark:bg-emerald-950/60 z-10 shadow-sm",
+        isDragOver && dropPosition === 'before' && "[&>td]:shadow-[inset_0_3px_0_0_#3b82f6]",
+        isDragOver && dropPosition === 'after' && "[&>td]:shadow-[inset_0_-3px_0_0_#3b82f6]"
       )}
     >
       {visibleColumns.includes('drag') && (
@@ -119,23 +126,43 @@ export const DetailTaskRow = React.memo(function DetailTaskRow({
         </td>
       )}
       {visibleColumns.includes('no') && (
-        <td className="px-3 py-2 text-slate-600 dark:text-[#c3c3c3] text-xs font-mono">
-          <div className="flex items-center gap-1.5 pl-1">
-            {canWrite && (
-              <div className="cursor-grab active:cursor-grabbing text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
-                <GripVertical size={13} />
-              </div>
-            )}
-            <span className="font-semibold">{i + 1}</span>
+        <td className="px-2 py-2 text-slate-600 dark:text-[#c3c3c3] text-xs font-mono text-center">
+          <div className="flex flex-col items-center justify-center gap-0.5">
+            <div className="flex items-center justify-center gap-1">
+              {canWrite && (
+                <div className="cursor-grab active:cursor-grabbing text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
+                  <GripVertical size={13} />
+                </div>
+              )}
+              <span className="font-semibold">{i + 1}</span>
+              {isChildTask && (
+                <span className="text-[8.5px] font-bold px-1 py-0.5 rounded bg-amber-100 dark:bg-amber-950/80 text-amber-900 dark:text-amber-300 uppercase shrink-0 border border-amber-300 dark:border-amber-700 flex items-center gap-0.5 leading-none" title="Task con (Sub-task)">
+                  ↳ SUB
+                </span>
+              )}
+            </div>
             {childTasksCount > 0 && (
-              <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-purple-100 dark:bg-purple-950/90 text-purple-700 dark:text-purple-200 border border-purple-300 dark:border-purple-600 shadow-2xs flex items-center gap-0.5 leading-none" title={`${childTasksCount} task con`}>
-                ({childTasksCount})
-              </span>
-            )}
-            {isChildTask && (
-              <span className="text-[8.5px] font-bold px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-950/80 text-amber-900 dark:text-amber-300 uppercase shrink-0 border border-amber-300 dark:border-amber-700 flex items-center gap-0.5 leading-none" title="Task con (Sub-task)">
-                ↳ SUB
-              </span>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (onToggleModularParent) onToggleModularParent(t.id);
+                }}
+                className={cn(
+                  "px-1.5 py-0.5 rounded text-[10px] font-mono font-bold transition-all flex items-center gap-0.5 leading-none cursor-pointer shadow-2xs select-none active:scale-95 border",
+                  isModularExpanded
+                    ? "bg-purple-600 hover:bg-purple-700 text-white border-purple-500 shadow-purple-500/20"
+                    : "bg-purple-100 hover:bg-purple-200 text-purple-700 dark:bg-purple-950/80 dark:hover:bg-purple-900 dark:text-purple-200 border-purple-300 dark:border-purple-700"
+                )}
+                title={isModularExpanded ? `Collapse ${childTasksCount} subtasks` : `Expand ${childTasksCount} subtasks`}
+              >
+                {isModularExpanded ? (
+                  <ChevronDown className="w-3 h-3 text-current font-bold" />
+                ) : (
+                  <ChevronRight className="w-3 h-3 text-current font-bold" />
+                )}
+                <span>({childTasksCount})</span>
+              </button>
             )}
           </div>
         </td>
@@ -197,8 +224,9 @@ export const DetailTaskRow = React.memo(function DetailTaskRow({
         <td className="px-3 py-2 text-slate-500 dark:text-[#a3a3a3] font-mono text-xs">
           {canWrite ? (
             <EditableCell
-              value={t.duration !== undefined && t.duration !== null ? t.duration : calculateDays(t.start, t.finish).replace('d', '')}
+              value={getEffectiveTaskDuration(t)}
               type="number"
+              displaySuffix="d"
               className="text-slate-700 dark:text-[#c3c3c3] font-mono font-medium"
               onSave={(val) => {
                 const cleanVal = cleanDurationString(val);
@@ -208,7 +236,7 @@ export const DetailTaskRow = React.memo(function DetailTaskRow({
             />
           ) : (
             <span className="italic">
-              {t.duration !== undefined ? `${t.duration}d` : calculateDays(t.start, t.finish)}
+              {getEffectiveTaskDuration(t) !== '' ? `${getEffectiveTaskDuration(t)}d` : calculateDays(t.start, t.finish)}
             </span>
           )}
         </td>
@@ -331,15 +359,27 @@ export const DetailTaskRow = React.memo(function DetailTaskRow({
           </div>
         </td>
       )}
-      {isDragOver && dropPosition && (
-        <td
-          colSpan={visibleColumns.length}
-          className={cn(
-            "absolute left-0 right-0 h-1 bg-blue-500 pointer-events-none z-20",
-            dropPosition === 'before' ? "top-0" : "bottom-0"
-          )}
-        />
-      )}
     </tr>
+  );
+}, (prev, next) => {
+  return (
+    prev.item.task === next.item.task &&
+    prev.item.project === next.item.project &&
+    prev.item.taskIndex === next.item.taskIndex &&
+    prev.item.isProjDelegationOn === next.item.isProjDelegationOn &&
+    prev.item.groupTasks.length === next.item.groupTasks.length &&
+    prev.visibleColumns === next.visibleColumns &&
+    prev.canWrite === next.canWrite &&
+    prev.isSelected === next.isSelected &&
+    prev.isDragging === next.isDragging &&
+    prev.isDragOver === next.isDragOver &&
+    prev.dropPosition === next.dropPosition &&
+    prev.taskCode === next.taskCode &&
+    prev.isFocused === next.isFocused &&
+    prev.delStatusText === next.delStatusText &&
+    prev.delStatusColorClass === next.delStatusColorClass &&
+    prev.childTasksCount === next.childTasksCount &&
+    prev.isModularExpanded === next.isModularExpanded &&
+    prev.onToggleModularParent === next.onToggleModularParent
   );
 });

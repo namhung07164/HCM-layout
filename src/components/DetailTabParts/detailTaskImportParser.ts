@@ -2,11 +2,24 @@ import { Project } from '../../types';
 import { parseCSV } from '../../lib/csvUtils';
 import { cleanDurationString } from '../../lib/taskImportService';
 import { parseCSVDate } from './detailCsvUtils';
+import { validateTasksImportData, generateTaskErrorReportCSV, ImportValidationResult } from './importValidator';
+import { hydrateProjectsForImport, RawImportProjectKey } from './detailProjectImportHydrator';
+import { normalizeDashes } from '../../lib/utils';
+import { matchProjectCode } from '../../lib/projectDatesService';
+
+export interface ParsedTasksFileResult {
+  rawParsedRowsByProject: Map<string, Array<{ rowData: any; originalCsvIndex: number }>>;
+  headers: string[];
+  dataRows: string[][];
+  validation: ImportValidationResult;
+  errorReportCSV: string;
+  allKnownProjects: Project[];
+}
 
 export async function parseTasksFile(
   file: File,
   projects: Project[]
-): Promise<Map<string, Array<{ rowData: any; originalCsvIndex: number }>>> {
+): Promise<ParsedTasksFileResult> {
   let rows: string[][] = [];
   const fileName = file.name.toLowerCase();
 
@@ -24,46 +37,100 @@ export async function parseTasksFile(
   }
 
   if (!rows || rows.length < 2) {
-    throw new Error('CSV file is empty or format is invalid.');
+    throw new Error('CSV file is empty or format is invalid. At least 1 header row and 1 data row are required.');
   }
 
-  const headers = rows[0].map(h => h.trim().toLowerCase());
+  const headers = rows[0].map(h => String(h || '').replace(/^\uFEFF/, '').trim().toLowerCase());
   const dataRows = rows.slice(1);
 
-  // Field validation
-  for (let idx = 0; idx < dataRows.length; idx++) {
-    const row = dataRows[idx];
-    if (row.every(c => !String(c).trim())) continue;
+  // Extract project keys from data rows (including cross-project predecessor references) to hydrate any projects not yet loaded in active year view
+  const pCodeIdx = headers.findIndex(h => ['projectcode', 'project code', 'code'].includes(h));
+  const pYearIdx = headers.findIndex(h => ['projectyear', 'project year', 'year'].includes(h));
+  const pStoreIdx = headers.findIndex(h => ['projectstore', 'project store', 'store'].includes(h));
+  const predIdx = headers.findIndex(h =>
+    ['predecessor', 'predecessors', 'predecessor code', 'predecessor_code', 'predecessorcode', 'tiền nhiệm', 'tien nhiem'].includes(h)
+  );
 
-    let hasYear = false;
-    let hasStore = false;
-    let hasCode = false;
-
-    headers.forEach((h, i) => {
-      const val = String(row[i] || '').trim();
-      if ((h === 'year' || h === 'projectyear') && val) hasYear = true;
-      if ((h === 'store' || h === 'projectstore') && val) hasStore = true;
-      if ((h === 'code' || h === 'projectcode') && val) hasCode = true;
-    });
-
-    if (!hasYear || !hasStore || !hasCode) {
-      throw new Error(`Row ${idx + 2} is missing Year, Store, or Project Code. All imported data must include these three fields.`);
+  const rawKeys: RawImportProjectKey[] = [];
+  const seenRawKeySet = new Set<string>();
+  const pushRawKey = (k: RawImportProjectKey) => {
+    const sig = `${k.projectCode.toLowerCase()}|${k.projectYear || ''}|${k.projectStore || ''}|${k.isPredecessorRef ? '1' : '0'}`;
+    if (!seenRawKeySet.has(sig)) {
+      seenRawKeySet.add(sig);
+      rawKeys.push(k);
     }
-  }
+  };
+
+  dataRows.forEach(r => {
+    const year = pYearIdx !== -1 ? String(r[pYearIdx] || '').trim() : undefined;
+    const store = pStoreIdx !== -1 ? String(r[pStoreIdx] || '').trim() : undefined;
+    const rowCode = pCodeIdx !== -1 ? String(r[pCodeIdx] || '').trim() : '';
+    if (rowCode) {
+      pushRawKey({ projectCode: rowCode, projectYear: year, projectStore: store });
+    }
+    if (predIdx !== -1) {
+      const rawPred = normalizeDashes(String(r[predIdx] || '')).trim();
+      if (rawPred) {
+        rawPred.split(/[,;]+/).forEach(tok => {
+          const cleanTok = tok.trim();
+          const hashIdx = cleanTok.indexOf('#');
+          if (hashIdx > 0) {
+            const extCode = cleanTok.substring(0, hashIdx).trim();
+            if (extCode && extCode.toLowerCase() !== rowCode.toLowerCase()) {
+              pushRawKey({
+                projectCode: extCode,
+                projectYear: year,
+                projectStore: store,
+                isPredecessorRef: true,
+              });
+            }
+          }
+        });
+      }
+    }
+  });
+
+  const allKnownProjects = await hydrateProjectsForImport(rawKeys, projects);
+
+  // 1. Run Comprehensive Validation against all known projects across all years
+  const validation = validateTasksImportData(headers, dataRows, allKnownProjects);
+  const errorReportCSV = validation.isValid ? '' : generateTaskErrorReportCSV(headers, dataRows, validation);
 
   const rawParsedRowsByProject = new Map<string, Array<{ rowData: any; originalCsvIndex: number }>>();
 
+  // If validation failed, return immediately without parsing into project maps to ensure 0 writes
+  if (!validation.isValid) {
+    return {
+      rawParsedRowsByProject,
+      headers,
+      dataRows,
+      validation,
+      errorReportCSV,
+      allKnownProjects
+    };
+  }
+
   dataRows.forEach((row, rowIndex) => {
-    if (row.length < headers.length) return;
+    if (!row || row.every(c => !String(c || '').trim())) return;
     const t: any = {};
 
     headers.forEach((h, i) => {
       let key = h;
-      if (h === 'task name') key = 'name';
-      if (h === 'projectcode') key = 'projectCode';
-      if (h === 'year' || h === 'projectyear') key = 'projectYear';
-      if (h === 'store' || h === 'projectstore') key = 'projectStore';
-      if (h === 'sub-task code' || h === 'sub task code' || h === 'subtask code' || h === 'sub_task_code' || h === 'taskcodephu' || h === 'task code phu' || h === 'task_code_phu') {
+      if (h === 'task name' || h === 'taskname') key = 'name';
+      if (h === 'projectid' || h === 'project_id' || h === 'project id') key = 'projectId';
+      if (h === 'projectcode' || h === 'project code' || h === 'code') key = 'projectCode';
+      if (h === 'year' || h === 'projectyear' || h === 'project year') key = 'projectYear';
+      if (h === 'store' || h === 'projectstore' || h === 'project store') key = 'projectStore';
+      if (h === 'start date' || h === 'startdate') key = 'start';
+      if (h === 'finish date' || h === 'finishdate' || h === 'end') key = 'finish';
+      if (h === 'baseline start' || h === 'baselinestart' || h === 'baseline_start') key = 'baselineStart';
+      if (h === 'baseline finish' || h === 'baselinefinish' || h === 'baseline_finish' || h === 'baseline end' || h === 'baselineend' || h === 'baseline_end') key = 'baselineFinish';
+      if (h === 'durations') key = 'duration';
+      if (h === 'pic' || h === 'department') key = 'party';
+      if (h === 'predecessor' || h === 'predecessors' || h === 'predecessor code' || h === 'predecessor_code' || h === 'predecessorcode' || h === 'tiền nhiệm' || h === 'tien nhiem') {
+        key = 'predecessor';
+      }
+      if (h === 'sub-task code' || h === 'sub task code' || h === 'subtask code' || h === 'sub_task_code' || h === 'taskcodephu' || h === 'task code phu' || h === 'task_code_phu' || h === 'task code phụ') {
         key = 'taskCodePhu';
       }
       if (h === 'orderindex' || h === 'order_index') key = 'orderIndex';
@@ -92,14 +159,23 @@ export async function parseTasksFile(
         key = 'level';
       }
 
-      if (['projectCode', 'projectYear', 'projectStore', 'name', 'start', 'finish', 'duration', 'party', 'predecessor', 'taskCodePhu', 'orderIndex', 'delegation', 'realtimeUpdate', 'importComment', 'parentTaskId', 'parentTaskCode', 'parentTaskName', 'isParent', 'level'].includes(key)) {
-        let val: any = row[i];
-        if (key === 'start' || key === 'finish') {
+      if (['projectId', 'projectCode', 'projectYear', 'projectStore', 'name', 'start', 'finish', 'baselineStart', 'baselineFinish', 'duration', 'party', 'predecessor', 'taskCodePhu', 'orderIndex', 'delegation', 'realtimeUpdate', 'importComment', 'parentTaskId', 'parentTaskCode', 'parentTaskName', 'isParent', 'level'].includes(key)) {
+        let val: any = row[i] !== undefined ? row[i] : '';
+        if (key === 'start' || key === 'finish' || key === 'baselineStart' || key === 'baselineFinish') {
           val = parseCSVDate(val);
         } else if (key === 'duration') {
           val = cleanDurationString(val);
-        } else if (key === 'delegation' || key === 'realtimeUpdate') {
-          const strVal = String(val || '').trim().toLowerCase();
+        } else if (key === 'predecessor') {
+          val = normalizeDashes(String(val ?? '')).trim().replace(/^[,;\s]+|[,;\s]+$/g, '').trim();
+        } else if (key === 'delegation') {
+          const strVal = String(val ?? '').trim().toLowerCase();
+          if (strVal === '') {
+            val = undefined;
+          } else {
+            val = !(strVal === 'false' || strVal === '0' || strVal === 'no' || strVal === 'off');
+          }
+        } else if (key === 'realtimeUpdate') {
+          const strVal = String(val ?? '').trim().toLowerCase();
           val = (strVal === 'true' || strVal === '1' || strVal === 'yes' || strVal === 'on');
         } else if (key === 'projectYear') {
           val = isNaN(Number(val)) ? val : Number(val);
@@ -109,8 +185,10 @@ export async function parseTasksFile(
     });
 
     if (t.projectCode && t.name) {
+      const cleanPCode = normalizeDashes(t.projectCode).trim();
+      t.projectCode = cleanPCode;
       if (!t.projectYear || !t.projectStore) {
-        const possibleProjects = projects.filter(p => String(p.code).trim().toLowerCase() === String(t.projectCode).trim().toLowerCase());
+        const possibleProjects = allKnownProjects.filter(p => matchProjectCode(p.code, cleanPCode));
         if (possibleProjects.length === 1) {
           if (!t.projectYear) t.projectYear = possibleProjects[0].year;
           if (!t.projectStore) t.projectStore = possibleProjects[0].store;
@@ -118,7 +196,7 @@ export async function parseTasksFile(
       }
 
       if (!t.projectYear) {
-        const matchedProj = projects.find(p => String(p.code).trim().toLowerCase() === String(t.projectCode).trim().toLowerCase());
+        const matchedProj = allKnownProjects.find(p => matchProjectCode(p.code, cleanPCode));
         t.projectYear = (matchedProj?.year && !isNaN(Number(matchedProj.year))) ? Number(matchedProj.year) : new Date().getFullYear();
       }
 
@@ -130,7 +208,7 @@ export async function parseTasksFile(
 
       const yearKey = t.projectYear ? String(t.projectYear).trim().toLowerCase() : '';
       const storeKey = t.projectStore ? String(t.projectStore).trim().toLowerCase() : '';
-      const prjKey = `${String(t.projectCode).trim().toLowerCase()}_${yearKey}_${storeKey}`;
+      const prjKey = `${String(cleanPCode).toLowerCase()}_${yearKey}_${storeKey}`;
 
       if (!rawParsedRowsByProject.has(prjKey)) {
         rawParsedRowsByProject.set(prjKey, []);
@@ -139,5 +217,12 @@ export async function parseTasksFile(
     }
   });
 
-  return rawParsedRowsByProject;
+  return {
+    rawParsedRowsByProject,
+    headers,
+    dataRows,
+    validation,
+    errorReportCSV,
+    allKnownProjects
+  };
 }

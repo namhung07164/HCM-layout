@@ -1,10 +1,13 @@
-import React, { useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useAppStore } from '../../store/useAppStore';
 import { useEnrichedData } from '../../hooks/useEnrichedData';
 import { useSummaryData } from '../PictureMapping/lib/summaryData';
 import { useDataStore } from '../PictureMapping/DataContext';
 import { useDynamicUnitSummary } from '../PictureMapping/lib/dynamicSummaryEngine';
 import { buildAggregatedUnitData } from './layoutDataAggregator';
+import { computeActiveGroupsAndColorMaps } from './layoutActiveGroupsHelper';
+import { extractAllProjectCodes, extractProjectMetadata, getUserAllowedStores, projectMatchesScope, projectMatchesUnitCode } from '../../lib/utils';
+import { getSavedPaintGroupMappings, resolveGroupPaintCategory, subscribePaintCategoriesConfig } from './layoutPaintCategoriesService';
 
 const EMPTY_RESTRICTED_SET = new Set<string>();
 
@@ -44,43 +47,96 @@ export function useLayoutAggregates({
   const { enrichedProjects, filteredTasks: tasks } = useEnrichedData();
   const allProjects = useAppStore(state => state.projects);
   const currUser = useAppStore(state => state.currentUser);
+  const locationVisibility = useAppStore(state => state.locationVisibility);
   const delegationGroups = useAppStore(state => state.delegationGroups);
   const layoutTooltipVisibility = useAppStore(state => state.layoutTooltipVisibility);
   const summaryData = useSummaryData({ store: storeFilter, location: targetLoc, year: effectiveLayoutYear });
 
-  // Compute set of project codes that the current user is NOT allowed to access (RBAC)
+  // Compute set of project/unit codes that the current user is NOT allowed to access (Acc Control RBAC)
   const restrictedProjectCodes = useMemo(() => {
     if (!currUser || currUser.role === 'admin') return EMPTY_RESTRICTED_SET;
 
+    const projectLinkData = useDataStore.getState().projectLink || [];
+    const unitToProjectCodesMap = new Map<string, string[]>();
+    projectLinkData.forEach((pl: any) => {
+      const u = String(pl?.unit || '').trim().toLowerCase();
+      const pCode = String(pl?.code || pl?.projectCode || pl?.project || '').trim().toLowerCase();
+      if (u && pCode) {
+        if (!unitToProjectCodesMap.has(u)) unitToProjectCodesMap.set(u, []);
+        unitToProjectCodesMap.get(u)!.push(pCode);
+      }
+    });
+
+    const preIndexedUnits = units.map((u: any) => {
+      const uName = String(u?.name || '').trim().toLowerCase();
+      const uId = String(u?.id || '').trim().toLowerCase();
+      const linkedCodes = [
+        ...(unitToProjectCodesMap.get(uName) || []),
+        ...(unitToProjectCodesMap.get(uId) || []),
+      ];
+      return { uName, uId, linkedCodes };
+    });
+
     const allowedCodeSet = new Set<string>();
     enrichedProjects.forEach(p => {
-      if (p.code) allowedCodeSet.add(String(p.code).trim().toLowerCase());
-      if (p.linkCodes) {
-        p.linkCodes.split(/[+;,/]/).forEach(c => {
-          if (c.trim()) allowedCodeSet.add(c.trim().toLowerCase());
-        });
+      const pMeta = extractProjectMetadata(p);
+      if (!projectMatchesScope(pMeta, { store: storeFilter, location: targetLoc, year: effectiveLayoutYear })) return;
+      const pCodes = extractAllProjectCodes(p);
+      const pCodesLower = pCodes.map(c => c.toLowerCase());
+      pCodesLower.forEach(c => {
+        if (c) allowedCodeSet.add(c);
+      });
+      for (let i = 0; i < preIndexedUnits.length; i++) {
+        const { uName, uId, linkedCodes } = preIndexedUnits[i];
+        const isExact = (uName && pCodesLower.includes(uName)) || (uId && pCodesLower.includes(uId));
+        const isLinked = !isExact && linkedCodes.length > 0 && linkedCodes.some(lc =>
+          pCodesLower.includes(lc) || projectMatchesUnitCode(pCodes, lc)
+        );
+        if (isExact || isLinked || projectMatchesUnitCode(pCodes, uName || uId)) {
+          if (uName) allowedCodeSet.add(uName);
+          if (uId) allowedCodeSet.add(uId);
+        }
       }
     });
 
     const restrictedSet = new Set<string>();
+    const isPartyRestricted = currUser.byPartyAccess === true && currUser.partyPermissions?.['all'] !== true;
+
+    if (isPartyRestricted) {
+      for (let i = 0; i < preIndexedUnits.length; i++) {
+        const { uName, uId } = preIndexedUnits[i];
+        if (uName && !allowedCodeSet.has(uName)) restrictedSet.add(uName);
+        if (uId && !allowedCodeSet.has(uId)) restrictedSet.add(uId);
+      }
+    }
+
     allProjects.forEach(p => {
-      const rawCodes = (p.linkCodes && p.linkCodes.trim()) ? p.linkCodes : String(p.code || '');
-      const pCodes = rawCodes.split(/[+;,/]/).map(c => c.trim().toLowerCase()).filter(Boolean);
+      const pMeta = extractProjectMetadata(p);
+      if (!projectMatchesScope(pMeta, { store: storeFilter, location: targetLoc, year: effectiveLayoutYear })) return;
+      const pCodes = extractAllProjectCodes(p).map(c => c.toLowerCase());
       pCodes.forEach(code => {
         if (!allowedCodeSet.has(code)) {
           restrictedSet.add(code);
         }
       });
+      for (let i = 0; i < preIndexedUnits.length; i++) {
+        const { uName } = preIndexedUnits[i];
+        if (!uName || allowedCodeSet.has(uName)) continue;
+        if (pCodes.includes(uName) || projectMatchesUnitCode(pCodes, uName)) {
+          restrictedSet.add(uName);
+        }
+      }
     });
 
     return restrictedSet;
-  }, [allProjects, enrichedProjects, currUser]);
+  }, [allProjects, enrichedProjects, currUser, units, storeFilter, targetLoc, effectiveLayoutYear]);
 
   // Build aggregatedData using pure aggregation engine
   const aggregatedData = useMemo(() => {
     const projectLinkData = useDataStore.getState().projectLink || [];
     return buildAggregatedUnitData({
       units,
+      version,
       summaryData,
       enrichedProjects,
       tasks,
@@ -94,63 +150,55 @@ export function useLayoutAggregates({
       restrictedProjectCodes,
       hasStoredUnitImages,
     });
-  }, [units, summaryData, enrichedProjects, tasks, storeFilter, locationFilter, targetLoc, effectiveLayoutYear, delegationGroups, layoutTooltipVisibility, restrictedProjectCodes, hasStoredUnitImages, unitImagesRev]);
+  }, [units, version, summaryData, enrichedProjects, tasks, storeFilter, locationFilter, targetLoc, effectiveLayoutYear, delegationGroups, layoutTooltipVisibility, restrictedProjectCodes, hasStoredUnitImages, unitImagesRev]);
+
+  const layoutPaintCategory = useAppStore(state => state.layoutPaintCategory);
+  const [paintGroupMappings, setPaintGroupMappings] = useState<Record<string, string>>(() => getSavedPaintGroupMappings());
+
+  useEffect(() => {
+    return subscribePaintCategoriesConfig((cfg) => {
+      if (cfg.groupMappings) {
+        setPaintGroupMappings(cfg.groupMappings);
+      }
+    });
+  }, []);
+
+  const filteredVersionForPaint = useMemo(() => {
+    if (!version) return version;
+    if (!layoutPaintCategory || layoutPaintCategory === 'all') return version;
+    if (layoutPaintCategory === 'none') {
+      return { ...version, groups: [] };
+    }
+    const targetCat = layoutPaintCategory.trim().toLowerCase();
+    const filteredGroups = (version.groups || []).filter((g: any) => {
+      const rawCat = resolveGroupPaintCategory(g, paintGroupMappings);
+      if (!rawCat) return false;
+      return rawCat
+        .split(',')
+        .map((c: string) => c.trim().toLowerCase())
+        .includes(targetCat);
+    });
+    return { ...version, groups: filteredGroups };
+  }, [version, layoutPaintCategory, paintGroupMappings]);
 
   const { summaryMap: dynamicSummaryMap } = useDynamicUnitSummary({
     units,
-    activeVersion: version,
+    activeVersion: filteredVersionForPaint,
     store: (version?.store as any) || (storeFilter === 'HN' ? 'HN' : 'HCM'),
     location: version?.location || targetLoc,
     year: effectiveLayoutYear,
   });
 
   // Evaluate rules on the fly: STRICTLY depends ONLY on Task Summaries & Projects in active Year, Store, Location!
-  const { unitColorMap, unitGroupMap, unitOpacityMap, activeGroups } = useMemo(() => {
-    const colorMap: Record<string, string> = {};
-    const groupMap: Record<string, string> = {};
-    const opacityMap: Record<string, number> = {};
-    const groupsInUseMap = new Map<string, any>();
-    
-    if (!version || !version.groups) return { unitColorMap: colorMap, unitGroupMap: groupMap, unitOpacityMap: opacityMap, activeGroups: [] };
-
-    units.forEach((u: any) => {
-      const uName = String(u.name || '').toLowerCase().trim();
-      if (restrictedProjectCodes.has(uName) || aggregatedData[uName]?.isRestricted) return;
-
-      const dynamicItem = dynamicSummaryMap.get(u.id) || (uName ? dynamicSummaryMap.get(uName) : null);
-      if (!dynamicItem?.hasAppProject) {
-        return;
-      }
-
-      if (dynamicItem.matchedGroupId && dynamicItem.color) {
-        colorMap[u.id] = dynamicItem.color;
-        groupMap[u.id] = dynamicItem.matchedGroupId;
-        opacityMap[u.id] = dynamicItem.opacity ?? 0.85;
-      }
+  const { unitColorMap, unitGroupMap, unitOpacityMap, unitHatchMap, unitSymbolMap, activeGroups } = useMemo(() => {
+    return computeActiveGroupsAndColorMaps({
+      units,
+      filteredVersionForPaint,
+      dynamicSummaryMap,
+      aggregatedData,
+      restrictedProjectCodes,
     });
-
-    const matchedUnitsByGroup = new Map<string, any[]>();
-    units.forEach((u: any) => {
-      const gid = groupMap[u.id];
-      if (gid) {
-        let list = matchedUnitsByGroup.get(gid);
-        if (!list) {
-          list = [];
-          matchedUnitsByGroup.set(gid, list);
-        }
-        list.push({ id: u.id, name: u.name });
-      }
-    });
-
-    version.groups.forEach((group: any) => {
-      const matchedUnits = matchedUnitsByGroup.get(group.id) || [];
-      if (matchedUnits.length > 0) {
-        groupsInUseMap.set(group.id, { ...group, matchCount: matchedUnits.length, matchedUnits });
-      }
-    });
-
-    return { unitColorMap: colorMap, unitGroupMap: groupMap, unitOpacityMap: opacityMap, activeGroups: Array.from(groupsInUseMap.values()) };
-  }, [version?.groups, units, aggregatedData, dynamicSummaryMap, restrictedProjectCodes]);
+  }, [filteredVersionForPaint, units, aggregatedData, dynamicSummaryMap, restrictedProjectCodes]);
 
   // Total count of units with alerts on this floor
   const totalFloorAlerts = useMemo(() => {
@@ -202,6 +250,8 @@ export function useLayoutAggregates({
       .map((unit: any) => {
         const targetColor = unitColorMap[unit.id] || null;
         const targetOpacity = unitOpacityMap[unit.id] ?? 0.85;
+        const targetHatchPattern = unitHatchMap[unit.id] || 'none';
+        const targetSymbol = unitSymbolMap[unit.id] || '';
         
         let minX = 0;
         let maxX = 0;
@@ -268,6 +318,8 @@ export function useLayoutAggregates({
           ...unit,
           targetColor,
           targetOpacity,
+          targetHatchPattern,
+          targetSymbol,
           targetGroupId: unitGroupMap[unit.id],
           minX,
           maxX,
@@ -280,7 +332,7 @@ export function useLayoutAggregates({
           textHeight,
         };
       });
-  }, [units, unitColorMap, unitGroupMap, unitOpacityMap, deferredSearchQuery, aggregatedData, dynamicSummaryMap, focusedUnitId, filterOnlyAlerts]);
+  }, [units, unitColorMap, unitGroupMap, unitOpacityMap, unitHatchMap, unitSymbolMap, deferredSearchQuery, aggregatedData, dynamicSummaryMap, focusedUnitId, filterOnlyAlerts]);
 
   // Focused unit object for Isolated Overlay Highlight Layer
   const focusedUnit = useMemo(() => {
@@ -293,12 +345,17 @@ export function useLayoutAggregates({
   const prevVisibleUnitsKeyRef = useRef<string>('');
 
   const visibleUnits = useMemo(() => {
+    // For typical floor plans (<= 400 units), keeping all Konva nodes mounted avoids React/Konva mount-unmount churn during zoom & pan
+    if (displayedUnits.length <= 400) {
+      return displayedUnits;
+    }
+
     const scale = stageScale || 1;
     const vpW = dimensions.width || 800;
     const vpH = dimensions.height || 600;
 
     let filtered = displayedUnits;
-    if (scale > 0.35 && displayedUnits.length > 40) {
+    if (scale > 0.35) {
       const bufferPadding = Math.max(150, 300 / scale);
       const minWorldX = (-stagePos.x / scale) - bufferPadding;
       const maxWorldX = ((vpW - stagePos.x) / scale) + bufferPadding;
@@ -323,7 +380,7 @@ export function useLayoutAggregates({
       return displayedUnits;
     }
 
-    const key = `${effectiveLayoutYear}_${storeFilter}_${targetLoc}_` + filtered.map((u: any) => `${u.id}:${u.targetColor || ''}:${u.targetGroupId || ''}:${u.targetOpacity ?? ''}`).join('|');
+    const key = `${effectiveLayoutYear}_${storeFilter}_${targetLoc}_` + filtered.map((u: any) => `${u.id}:${u.targetColor || ''}:${u.targetGroupId || ''}:${u.targetOpacity ?? ''}:${u.targetHatchPattern || ''}:${u.targetSymbol || ''}`).join('|');
     if (key === prevVisibleUnitsKeyRef.current) {
       return prevVisibleUnitsRef.current;
     }
@@ -332,28 +389,46 @@ export function useLayoutAggregates({
     return filtered;
   }, [displayedUnits, stageScale, stagePos.x, stagePos.y, dimensions.width, dimensions.height, focusedUnitId, deferredSearchQuery, effectiveLayoutYear, storeFilter, targetLoc]);
 
-  // Security defense: If non-admin user has NO accessible tasks or projects in this store & year, do not render layout
+  // Security defense: Enforce Store, Location, Visibility, and Party permissions from Acc Control
   const hasUserAccessInStoreYear = useMemo(() => {
     if (!currUser || currUser.role === 'admin') return true;
 
-    const isInternalRole = ['manager', 'staff', 'cp'].includes(String(currUser.role || '').toLowerCase());
-    const hasStorePerm = storeFilter === 'HN'
-      ? Boolean(currUser.storePermissions?.hn)
-      : (storeFilter === 'HCM' ? Boolean(currUser.storePermissions?.hcm) : true);
+    const allowedStores = getUserAllowedStores(currUser);
+    const normStore = storeFilter && storeFilter !== 'all' ? storeFilter.toUpperCase().trim() : '';
+    if (normStore && !allowedStores.includes(normStore)) {
+      return false;
+    }
 
-    if (isInternalRole && hasStorePerm && !currUser.byPartyAccess) {
+    if (targetLoc && targetLoc.toLowerCase() !== 'all') {
+      const lUpper = targetLoc.toUpperCase().trim();
+      const lLower = targetLoc.toLowerCase().trim();
+      if (locationVisibility[targetLoc] === false || locationVisibility[lUpper] === false || locationVisibility[lLower] === false) {
+        return false;
+      }
+      for (const [k, v] of Object.entries(locationVisibility)) {
+        if (k.toUpperCase().trim() === lUpper && v === false) return false;
+      }
+      const locPerms = currUser.locationPermissions || {};
+      if (!locPerms['all']) {
+        const cleanLoc = lLower.replace(/^md-/, '');
+        if (!(locPerms[cleanLoc] || locPerms[`md-${cleanLoc}`] || locPerms[lLower] || locPerms[lUpper])) {
+          return false;
+        }
+      }
+    }
+
+    const isInternalRole = ['manager', 'staff', 'cp'].includes(String(currUser.role || '').toLowerCase());
+    const isPartyRestricted = currUser.byPartyAccess === true && currUser.partyPermissions?.['all'] !== true;
+
+    if (isInternalRole && !isPartyRestricted) {
       return true;
     }
 
     const yr = effectiveLayoutYear;
     if (yr === 'all') return true;
     const hasProj = enrichedProjects.some(p => {
-      if (storeFilter !== 'all') {
-        const pStore = String(p.store || '').toUpperCase().trim();
-        if (pStore && pStore !== storeFilter.toUpperCase()) return false;
-      }
-      const pYear = String(p.year || '').trim();
-      return pYear === yr;
+      const pMeta = extractProjectMetadata(p);
+      return projectMatchesScope(pMeta, { store: storeFilter, location: targetLoc, year: yr });
     });
     if (hasProj) return true;
     const hasTask = tasks.some(t => {
@@ -365,7 +440,7 @@ export function useLayoutAggregates({
       return tYear === yr;
     });
     return hasTask;
-  }, [currUser, enrichedProjects, tasks, storeFilter, effectiveLayoutYear]);
+  }, [currUser, locationVisibility, enrichedProjects, tasks, storeFilter, targetLoc, effectiveLayoutYear]);
 
   return {
     aggregatedData,

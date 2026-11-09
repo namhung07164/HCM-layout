@@ -12,9 +12,9 @@ import {
 } from "../../lib/backgroundSyncWorker";
 import { getLocalDelegations, deleteLocalRecord } from "../../lib/localDb";
 import { pullAndApplyDeltas } from "../../lib/deltaSyncService";
-import { getLoadedMarkers, hasMarker, markLoaded } from "../../lib/loadedMarkers";
+import { getLoadedMarkers, hasFreshMarker, markLoaded } from "../../lib/loadedMarkers";
 
-// Delta-first: sau lần tải đầy đủ đầu tiên, hủy onSnapshot lớn, dựa vào Dexie + kênh delta.
+// Delta-first with 6-hour warm marker TTL: reopens within 30m-6h use Dexie + taka_deltas (0 collection reads)
 const DELTA_FIRST = { projects: true, tasks: true, costs: true, delegations: true };
 
 
@@ -26,13 +26,21 @@ interface UseDelegationsHydrationProps {
 
 const TTL_DURATION_MS = 15 * 60 * 1000; // 15 minutes
 
-// Chuyển updatedAt (ISO string / Firestore Timestamp / number) về ms
+// Chuyển updatedAt (ISO string / Firestore Timestamp / plain {seconds} / number) về ms
 const tsOf = (v: any): number => {
   if (!v) return 0;
-  const n =
-    typeof v === "string" ? Date.parse(v)
-    : typeof v?.toMillis === "function" ? v.toMillis()
-    : Number(v);
+  if (typeof v === "string") {
+    const n = Date.parse(v);
+    return Number.isFinite(n) ? n : 0;
+  }
+  if (typeof v?.toMillis === "function") {
+    const n = v.toMillis();
+    return Number.isFinite(n) ? n : 0;
+  }
+  if (typeof v?.seconds === "number") {
+    return v.seconds * 1000 + Math.floor((v.nanoseconds || 0) / 1e6);
+  }
+  const n = Number(v);
   return Number.isFinite(n) ? n : 0;
 };
 // Snapshot lấy từ cache cục bộ có thể cũ hơn dữ liệu đã nhận qua delta -> không cho ghi đè.
@@ -115,18 +123,31 @@ export function useDelegationsHydration({
     }, 100);
   }, []);
 
-  // Sleep/Wake Recovery Listener
+  // Sleep/Wake & Network Recovery Listener
   useEffect(() => {
     const handleSleepWakeRecovery = () => {
-      // KHÔNG hủy listener và KHÔNG xóa cache năm khi thức giấc (xem giải thích ở B1).
       if (useAppStore.getState().isDelegationsRequested) {
         hydrateDelegationsFromLocal(useAppStore.getState().globalYearFilter).catch(() => {});
+        import("../../lib/deltaInvalidateService")
+          .then(({ flushDeferredInvalidations }) =>
+            flushDeferredInvalidations("taka_delegations").then((synthetic) => {
+              if (synthetic.length > 0) {
+                import("../../lib/deltaApplyService").then(({ applyIncomingDeltas }) =>
+                  applyIncomingDeltas(synthetic)
+                );
+              }
+            })
+          )
+          .catch(() => {});
+        pullAndApplyDeltas(undefined, true).catch(() => {});
       }
     };
 
     window.addEventListener("taka_sleep_wake_recovery", handleSleepWakeRecovery);
+    window.addEventListener("taka_network_recovered", handleSleepWakeRecovery);
     return () => {
       window.removeEventListener("taka_sleep_wake_recovery", handleSleepWakeRecovery);
+      window.removeEventListener("taka_network_recovered", handleSleepWakeRecovery);
     };
   }, []);
 
@@ -142,26 +163,6 @@ export function useDelegationsHydration({
       delegationsTTLTimeouts.current.clear();
       yearDelegationsCache.current.clear();
       if (delegationsBatchTimer.current) clearTimeout(delegationsBatchTimer.current);
-    };
-  }, []);
-
-  // Safety Net: Handle manual force full sync
-  useEffect(() => {
-    const handleForceSync = () => {
-      delegationsPool.current.forEach((u, key) => {
-        try { u(); } catch {}
-        usePerformanceStore.getState().unregisterListener(`taka_delegation_groups_${key}`);
-      });
-      delegationsPool.current.clear();
-      delegationsTTLTimeouts.current.forEach((t) => clearTimeout(t));
-      delegationsTTLTimeouts.current.clear();
-      yearDelegationsCache.current.clear();
-      prevQuerySigDelegations.current = "";
-    };
-
-    window.addEventListener('taka_force_full_sync', handleForceSync);
-    return () => {
-      window.removeEventListener('taka_force_full_sync', handleForceSync);
     };
   }, []);
 
@@ -227,22 +228,29 @@ export function useDelegationsHydration({
 
     targetYears.forEach(async (year) => {
       if (!delegationsPool.current.has(year)) {
+        // Reserve slot synchronously before awaiting IndexedDB to prevent duplicate listener attachment
+        delegationsPool.current.set(year, () => {});
+
         const localCount = await hydrateDelegationsFromLocal(year);
         const isClosedOrPastYear = Number(year) < new Date().getFullYear();
-        const currentDelegations = useAppStore.getState().delegationGroups || [];
+        const storeState = useAppStore.getState();
+        const currentDelegations = storeState.delegationGroups || [];
         const hasLocalDelegations =
           localCount > 0 ||
           currentDelegations.some((d) => String(d.projectYear || "") === String(year));
+        const markers = await getLoadedMarkers();
+        const hasFreshDelMarker = hasFreshMarker(markers, 'delegations_year', year);
+        const yearHasZeroProjects =
+          hasFreshMarker(markers, 'projects_year', year) &&
+          !(storeState.projects || []).some((p) => String(p.year) === String(year));
 
         const deltaManaged =
           (hasLocalDelegations && isClosedOrPastYear) ||
-          (DELTA_FIRST.delegations && hasMarker(await getLoadedMarkers(), 'delegations_year', year));
+          yearHasZeroProjects ||
+          (DELTA_FIRST.delegations && hasFreshDelMarker);
         if (deltaManaged) {
-          delegationsPool.current.set(year, () => {});
           setIsDelegationsLoading(false);
-          pullAndApplyDeltas(year)
-            .then(() => setCloudStatus("online"))
-            .catch(() => {});
+          setCloudStatus("online");
           usePerformanceStore
             .getState()
             .trackGetDoc(
@@ -254,22 +262,7 @@ export function useDelegationsHydration({
           return;
         }
 
-        delegationsPool.current.set(year, () => {});
         setIsDelegationsLoading(false);
-
-        if (!yearDelegationsCache.current.has(year)) {
-          yearDelegationsCache.current.set(year, new Map());
-        }
-        const yearMap = yearDelegationsCache.current.get(year)!;
-        if (localCount > 0) {
-          const localItems = await getLocalDelegations(year);
-          localItems.forEach((d) => {
-            if (d.id) yearMap.set(d.id, d);
-          });
-          pullAndApplyDeltas(year)
-            .then(() => setCloudStatus("online"))
-            .catch(() => {});
-        }
 
         const colRef = collection(
           db,
@@ -288,6 +281,9 @@ export function useDelegationsHydration({
           allowedStores
         );
 
+        const existingUnsub = delegationsPool.current.get(year);
+        if (existingUnsub) existingUnsub();
+
         usePerformanceStore.getState().registerListener(`taka_delegation_groups_${year}`);
         const unsub = onSnapshot(
           qDelegations,
@@ -296,10 +292,47 @@ export function useDelegationsHydration({
               .getState()
               .trackSnapshot(`taka_delegation_groups_${year}`, snapshot);
             setIsDelegationsLoading(false);
-            batchDelegationsUpdate(snapshot.docChanges(), snapshot.metadata.fromCache);
+            const fromCache = snapshot.metadata.fromCache;
+            let changesToApply: any[] = snapshot.docChanges();
 
-            if (DELTA_FIRST.delegations && !snapshot.metadata.fromCache) {
+            if (!fromCache && !snapshot.metadata.hasPendingWrites) {
+              const serverIds = new Set<string>();
+              snapshot.docs.forEach((d) => serverIds.add(d.id));
+              const nowMs = Date.now();
+              const allowedLower = allowedStores.map((s) => s.toLowerCase());
+              const isStoreRestricted =
+                userRole !== "admin" && allowedLower.length > 0 && !allowedLower.includes("all");
+              const currentDelegationsNow = useAppStore.getState().delegationGroups || [];
+              currentDelegationsNow.forEach((g) => {
+                const gYr = String(g.projectYear ?? (g as any).year ?? "").trim();
+                if (g?.id && gYr === String(year).trim() && !serverIds.has(g.id)) {
+                  const gSt = g.projectStore || (g as any).store;
+                  if (
+                    isStoreRestricted &&
+                    gSt &&
+                    !allowedLower.includes(String(gSt).trim().toLowerCase())
+                  ) {
+                    return;
+                  }
+                  const updatedMs = tsOf(g.updatedAt);
+                  if (!updatedMs || nowMs - updatedMs > 30000) {
+                    changesToApply.push({
+                      type: "removed",
+                      doc: { id: g.id, data: () => ({ ...g, isDeleted: true }) },
+                    });
+                  }
+                }
+              });
+            }
+
+            batchDelegationsUpdate(changesToApply, fromCache);
+            setCloudStatus("online");
+
+            if (!fromCache) {
               markLoaded('delegations_year', year).catch(() => {});
+            }
+
+            if (DELTA_FIRST.delegations && !fromCache) {
               const u = delegationsPool.current.get(year);
               delegationsPool.current.set(year, () => {});
               u?.();
@@ -308,11 +341,15 @@ export function useDelegationsHydration({
           },
           (e) => {
             delegationsPool.current.delete(year);
+            usePerformanceStore.getState().unregisterListener(`taka_delegation_groups_${year}`);
             setIsDelegationsLoading(false);
             console.error("Delegation groups listener error:", e);
           }
         );
         delegationsPool.current.set(year, unsub);
+      } else {
+        hydrateDelegationsFromLocal(year).catch(() => {});
+        setIsDelegationsLoading(false);
       }
     });
   }, [

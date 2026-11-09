@@ -18,6 +18,13 @@ let listeners: Listener[] = [];
 let currentBatch: UndoAction[] | null = null;
 let currentBatchDescription = "";
 
+const IS_LOW_MEM =
+  typeof window !== "undefined" &&
+  (/iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (typeof navigator !== "undefined" && navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1) ||
+    (typeof navigator !== "undefined" && typeof (navigator as any).deviceMemory === "number" && (navigator as any).deviceMemory <= 4));
+const MAX_UNDO_STACK = IS_LOW_MEM ? 20 : 50;
+
 export const logUserAction = async (description: string) => {
   try {
     const authData = safeGetItemLocal("taka_auth_v1");
@@ -39,6 +46,8 @@ export const logUserAction = async (description: string) => {
     console.error("Failed to log action", e);
   }
 };
+
+let isExecutingUndoRedo = false;
 
 export const undoManager = {
   startBatch: (description: string) => {
@@ -90,7 +99,7 @@ export const undoManager = {
       action.timestamp = Date.now();
     }
     stack.push(action);
-    if (stack.length > 50) stack.shift(); // Keep last 50 actions in multi-level stack
+    if (stack.length > MAX_UNDO_STACK) stack.shift();
     
     // Clear redo stack on any new user action (standard undo/redo command pattern)
     redoStack = [];
@@ -102,41 +111,71 @@ export const undoManager = {
   },
 
   pop: async () => {
+    if (isExecutingUndoRedo || stack.length === 0) return;
     const action = stack.pop();
     if (action) {
+      isExecutingUndoRedo = true;
       notify();
       try {
         await action.revert();
         redoStack.push(action);
-        if (redoStack.length > 50) redoStack.shift();
+        if (redoStack.length > MAX_UNDO_STACK) redoStack.shift();
         notify();
+        import("../store/useAppStore")
+          .then(({ useAppStore }) => {
+            useAppStore.getState().setToast({
+              title: "Undone",
+              message: action.description,
+              type: "info",
+            });
+          })
+          .catch(() => {});
         logUserAction(`Undo: ${action.description}`);
       } catch (e) {
         console.error("Failed to revert action:", e);
+        stack.push(action);
+        notify();
+      } finally {
+        isExecutingUndoRedo = false;
       }
     }
   },
 
   redo: async () => {
+    if (isExecutingUndoRedo || redoStack.length === 0) return;
     const action = redoStack.pop();
     if (action) {
+      isExecutingUndoRedo = true;
       notify();
       try {
         if (action.redo) {
           await action.redo();
         }
         stack.push(action);
-        if (stack.length > 50) stack.shift();
+        if (stack.length > MAX_UNDO_STACK) stack.shift();
         notify();
+        import("../store/useAppStore")
+          .then(({ useAppStore }) => {
+            useAppStore.getState().setToast({
+              title: "Redone",
+              message: action.description,
+              type: "info",
+            });
+          })
+          .catch(() => {});
         logUserAction(`Redo: ${action.description}`);
       } catch (e) {
         console.error("Failed to redo action:", e);
+        redoStack.push(action);
+        notify();
+      } finally {
+        isExecutingUndoRedo = false;
       }
     }
   },
 
-  canUndo: () => stack.length > 0,
-  canRedo: () => redoStack.length > 0,
+  canUndo: () => stack.length > 0 && !isExecutingUndoRedo,
+  canRedo: () => redoStack.length > 0 && !isExecutingUndoRedo,
 
   getStack: () => stack,
   getRedoStack: () => redoStack,
@@ -145,6 +184,7 @@ export const undoManager = {
     stack = [];
     redoStack = [];
     currentBatch = null;
+    isExecutingUndoRedo = false;
     notify();
   },
 

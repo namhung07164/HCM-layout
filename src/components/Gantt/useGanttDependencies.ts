@@ -1,8 +1,9 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Task, Project } from '../../types';
 import { DependencyLine, GanttTableRow } from './ganttTypes';
 import { computeAllTaskCodes } from '../../lib/ganttUtils';
 import { parseDateTime } from '../../lib/utils';
+import { findClosestTaskMatch, buildProjectLookupIndex, resolveProjectContext } from '../../lib/predecessorMatchUtils';
 
 interface UseGanttDependenciesParams {
   tasks: Task[];
@@ -23,47 +24,139 @@ interface UseGanttDependenciesParams {
   durationColWidth?: number;
   showPredecessor?: boolean;
   predecessorColWidth?: number;
+  showPredecessorLines?: boolean;
 }
 
-function generateOrthogonalPath(x1: number, y1: number, x2: number, y2: number): string {
-  const r = 5;
-  const minGap = 20;
+interface Point {
+  x: number;
+  y: number;
+}
 
-  if (Math.abs(y1 - y2) < 1) {
-    return `M ${x1} ${y1} L ${x2} ${y2}`;
+function buildRoundedOrthogonalPath(points: Point[], cornerRadius = 5): string {
+  if (points.length < 2) return '';
+  if (points.length === 2) {
+    return `M ${points[0].x} ${points[0].y} L ${points[1].x} ${points[1].y}`;
   }
 
-  const isDown = y2 > y1;
-  const dy = isDown ? r : -r;
+  let path = `M ${points[0].x} ${points[0].y}`;
 
-  if (x2 >= x1 + minGap) {
-    const xMid = Math.round(x1 + Math.min(24, (x2 - x1) / 2));
-    return [
-      `M ${x1} ${y1}`,
-      `L ${xMid - r} ${y1}`,
-      `Q ${xMid} ${y1} ${xMid} ${y1 + dy}`,
-      `L ${xMid} ${y2 - dy}`,
-      `Q ${xMid} ${y2} ${xMid + r} ${y2}`,
-      `L ${x2} ${y2}`,
-    ].join(' ');
+  for (let i = 1; i < points.length - 1; i++) {
+    const pPrev = points[i - 1];
+    const pCurr = points[i];
+    const pNext = points[i + 1];
+
+    const dx1 = pCurr.x - pPrev.x;
+    const dy1 = pCurr.y - pPrev.y;
+    const len1 = Math.hypot(dx1, dy1);
+
+    const dx2 = pNext.x - pCurr.x;
+    const dy2 = pNext.y - pCurr.y;
+    const len2 = Math.hypot(dx2, dy2);
+
+    const r = Math.min(cornerRadius, len1 / 2, len2 / 2);
+
+    if (r < 1 || len1 === 0 || len2 === 0) {
+      path += ` L ${pCurr.x} ${pCurr.y}`;
+    } else {
+      const startX = pCurr.x - (dx1 / len1) * r;
+      const startY = pCurr.y - (dy1 / len1) * r;
+      const endX = pCurr.x + (dx2 / len2) * r;
+      const endY = pCurr.y + (dy2 / len2) * r;
+
+      path += ` L ${startX} ${startY} Q ${pCurr.x} ${pCurr.y} ${endX} ${endY}`;
+    }
   }
 
-  const marginOut = 14;
-  const marginIn = 14;
+  const last = points[points.length - 1];
+  path += ` L ${last.x} ${last.y}`;
+
+  return path;
+}
+
+export function generateGanttPath(
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  relType: string = 'FS',
+  laneIndex: number = 0
+): { d: string; arrowDir: 'left' | 'right' } {
+  const laneOffset = (laneIndex % 5 - 2) * 4;
+
+  if (Math.abs(y1 - y2) < 2) {
+    if (relType === 'FS' || relType === 'SS') {
+      return { d: `M ${x1} ${y1} L ${x2} ${y2}`, arrowDir: 'right' };
+    }
+    return { d: `M ${x1} ${y1} L ${x2} ${y2}`, arrowDir: 'left' };
+  }
+
+  if (relType === 'FS') {
+    const arrowDir = 'right';
+    if (x2 >= x1 + 16) {
+      const xMid = Math.round(x1 + Math.min(18 + Math.abs(laneOffset), (x2 - x1) / 2));
+      const points: Point[] = [
+        { x: x1, y: y1 },
+        { x: xMid, y: y1 },
+        { x: xMid, y: y2 },
+        { x: x2, y: y2 },
+      ];
+      return { d: buildRoundedOrthogonalPath(points, 5), arrowDir };
+    } else {
+      const xExit = Math.round(x1 + 12 + Math.max(0, laneOffset));
+      const xEntry = Math.round(x2 - 12 - Math.max(0, -laneOffset));
+      const yMid = Math.round(y1 + (y2 - y1) / 2);
+
+      const points: Point[] = [
+        { x: x1, y: y1 },
+        { x: xExit, y: y1 },
+        { x: xExit, y: yMid },
+        { x: xEntry, y: yMid },
+        { x: xEntry, y: y2 },
+        { x: x2, y: y2 },
+      ];
+      return { d: buildRoundedOrthogonalPath(points, 5), arrowDir };
+    }
+  }
+
+  if (relType === 'SS') {
+    const arrowDir = 'right';
+    const xExit = Math.round(Math.min(x1, x2) - 14 - Math.abs(laneOffset));
+    const points: Point[] = [
+      { x: x1, y: y1 },
+      { x: xExit, y: y1 },
+      { x: xExit, y: y2 },
+      { x: x2, y: y2 },
+    ];
+    return { d: buildRoundedOrthogonalPath(points, 5), arrowDir };
+  }
+
+  if (relType === 'FF') {
+    const arrowDir = 'left';
+    const xExit = Math.round(Math.max(x1, x2) + 14 + Math.abs(laneOffset));
+    const points: Point[] = [
+      { x: x1, y: y1 },
+      { x: xExit, y: y1 },
+      { x: xExit, y: y2 },
+      { x: x2, y: y2 },
+    ];
+    return { d: buildRoundedOrthogonalPath(points, 5), arrowDir };
+  }
+
+  // SF (Start-to-Finish)
+  const arrowDir = 'left';
+  const xExit = Math.round(x1 - 12 - Math.abs(laneOffset));
+  const xEntry = Math.round(x2 + 12 + Math.abs(laneOffset));
   const yMid = Math.round(y1 + (y2 - y1) / 2);
 
-  return [
-    `M ${x1} ${y1}`,
-    `L ${x1 + marginOut - r} ${y1}`,
-    `Q ${x1 + marginOut} ${y1} ${x1 + marginOut} ${y1 + dy}`,
-    `L ${x1 + marginOut} ${yMid - dy}`,
-    `Q ${x1 + marginOut} ${yMid} ${x1 + marginOut - r} ${yMid}`,
-    `L ${x2 - marginIn + r} ${yMid}`,
-    `Q ${x2 - marginIn} ${yMid} ${x2 - marginIn} ${yMid + dy}`,
-    `L ${x2 - marginIn} ${y2 - dy}`,
-    `Q ${x2 - marginIn} ${y2} ${x2 - marginIn + r} ${y2}`,
-    `L ${x2} ${y2}`,
-  ].join(' ');
+  const points: Point[] = [
+    { x: x1, y: y1 },
+    { x: xExit, y: y1 },
+    { x: xExit, y: yMid },
+    { x: xEntry, y: yMid },
+    { x: xEntry, y: y2 },
+    { x: x2, y: y2 },
+  ];
+  return { d: buildRoundedOrthogonalPath(points, 5), arrowDir };
 }
 
 export function useGanttDependencies({
@@ -85,63 +178,46 @@ export function useGanttDependencies({
   durationColWidth = 50,
   showPredecessor = false,
   predecessorColWidth = 90,
+  showPredecessorLines = true,
 }: UseGanttDependenciesParams) {
   const [activeTooltip, setActiveTooltip] = useState<string | null>(null);
 
-  const taskNoMap = useMemo(() => {
-    const map = new Map<string, Task>();
-    tasks.forEach(t => {
-      if (t.taskCodePhu) {
-        map.set(String(t.taskCodePhu).trim().toUpperCase(), t);
+  useEffect(() => {
+    if (!activeTooltip) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setActiveTooltip(null);
       }
-      if (t.id) {
-        map.set(String(t.id).trim().toUpperCase(), t);
-      }
-    });
-    return map;
-  }, [tasks]);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activeTooltip]);
 
   const allCodesMap = useMemo(() => {
     return computeAllTaskCodes(projects, tasks);
   }, [projects, tasks]);
 
-  const taskCodeMap = useMemo(() => {
-    const map = new Map<string, Task>();
-    tasks.forEach(t => {
-      const code = allCodesMap.get(t.id);
-      if (code) {
-        map.set(code.trim().toUpperCase(), t);
-      }
-      if (t.taskCodePhu) {
-        map.set(t.taskCodePhu.trim().toUpperCase(), t);
-      }
-    });
-    return map;
-  }, [tasks, allCodesMap]);
-
-  const delegationGroupByTaskId = useMemo(() => {
-    const map = new Map<string, any>();
-    delegationGroups.forEach(g => {
-      if (g.subTasks) {
-        g.subTasks.forEach((st: any) => {
-          if (st.taskId) {
-            map.set(st.taskId, g);
-          }
-        });
-      }
-    });
-    return map;
-  }, [delegationGroups]);
+  const projectIndex = useMemo(() => {
+    return buildProjectLookupIndex(projects);
+  }, [projects]);
 
   const dependencyLines = useMemo(() => {
-    if (!startDate || visibleGanttRows.length === 0) return [];
+    if (!showPredecessorLines || !startDate || visibleGanttRows.length === 0) return [];
+
+    // Fast pre-check: if no visible task row has a predecessor string, skip building position maps
+    const hasAnyPredecessor = visibleGanttRows.some(
+      (row) => row.type === 'task' && row.task && Boolean(row.task.predecessor && String(row.task.predecessor).trim())
+    );
+    if (!hasAnyPredecessor) return [];
 
     const taskPosMap = new Map<string, { xStart: number; xEnd: number; yCenter: number; t: Task }>();
+    const visibleTasks: Task[] = [];
     let currentY = paddingTop;
-    const timelineLeft = sideWidth + (showStart ? startColWidth : 0) + (showFinish ? finishColWidth : 0) + (showParty ? partyColWidth : 0) + (showDuration ? durationColWidth : 0) + (showPredecessor ? predecessorColWidth : 0);
+    const timelineLeft = sideWidth;
 
     visibleGanttRows.forEach((row) => {
-      const rowHeight = row.type === 'project' ? 40 : 36;
+      if (row.isHidden) return;
+      const rowHeight = row.type === 'project' ? 48 : 40;
       const yCenter = currentY + rowHeight / 2;
       currentY += rowHeight;
 
@@ -150,53 +226,130 @@ export function useGanttDependencies({
         const dStart = t.start ? parseDateTime(t.start) : null;
         const dEnd = t.finish ? parseDateTime(t.finish) : null;
         if (dStart && dEnd) {
-          const startDays = (dStart.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24);
-          const endDays = (dEnd.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24) + 1;
-          const xStart = timelineLeft + Math.max(0, startDays * dayWidth);
-          const xEnd = timelineLeft + Math.max(0, endDays * dayWidth);
+          const isMilestone = Number(t.duration) === 0 || Math.abs(dStart.getTime() - dEnd.getTime()) < 3600000;
+          const offsetDays = (dStart.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24);
+          const durationDays = Math.max((dEnd.getTime() - dStart.getTime()) / (1000 * 60 * 60 * 24) + 1, 1);
+          const barLeft = offsetDays * dayWidth;
+          const barWidth = isMilestone ? 16 : Math.max(durationDays * dayWidth, 8);
+
+          const xStart = timelineLeft + barLeft;
+          const xEnd = timelineLeft + barLeft + barWidth;
 
           const posObj = { xStart, xEnd, yCenter, t };
+          visibleTasks.push(t);
           taskPosMap.set(t.id, posObj);
+          const pIdScope = t.projectId ? `PID:${String(t.projectId).trim().toUpperCase()}__` : '';
+          const pCodeScope = t.projectCode ? `PCODE:${String(t.projectCode).trim().toUpperCase()}__` : '';
           if (t.taskCodePhu) {
-            taskPosMap.set(t.taskCodePhu.trim().toUpperCase(), posObj);
+            const phuUpper = t.taskCodePhu.trim().toUpperCase();
+            if (pIdScope) taskPosMap.set(`${pIdScope}${phuUpper}`, posObj);
+            if (pCodeScope) taskPosMap.set(`${pCodeScope}${phuUpper}`, posObj);
+            if (!taskPosMap.has(phuUpper)) taskPosMap.set(phuUpper, posObj);
           }
           const computedCode = allCodesMap.get(t.id);
           if (computedCode) {
-            taskPosMap.set(computedCode.trim().toUpperCase(), posObj);
+            const compUpper = computedCode.trim().toUpperCase();
+            if (pIdScope) taskPosMap.set(`${pIdScope}${compUpper}`, posObj);
+            if (pCodeScope) taskPosMap.set(`${pCodeScope}${compUpper}`, posObj);
+            if (!taskPosMap.has(compUpper)) taskPosMap.set(compUpper, posObj);
+            const hashIdx = compUpper.lastIndexOf('#');
+            if (hashIdx !== -1) {
+              const shortHash = compUpper.slice(hashIdx); // "#N"
+              if (pIdScope) taskPosMap.set(`${pIdScope}${shortHash}`, posObj);
+              if (pCodeScope) taskPosMap.set(`${pCodeScope}${shortHash}`, posObj);
+            }
           }
         }
       }
     });
 
     const lines: DependencyLine[] = [];
+    let laneCounter = 0;
+    const closestMatchCache = new Map<string, { xStart: number; xEnd: number; yCenter: number; t: Task } | null>();
 
     visibleGanttRows.forEach((row) => {
-      if (row.type !== 'task' || !row.task) return;
+      if (row.isHidden || row.type !== 'task' || !row.task) return;
       const succTask = row.task;
       if (!succTask.predecessor) return;
 
       const succPos = taskPosMap.get(succTask.id);
       if (!succPos) return;
 
+      const pIdScope = succTask.projectId ? `PID:${String(succTask.projectId).trim().toUpperCase()}__` : '';
+      const pCodeScope = succTask.projectCode ? `PCODE:${String(succTask.projectCode).trim().toUpperCase()}__` : '';
+
       const predCodes = String(succTask.predecessor)
         .split(/[,;]/)
-        .map((s) => s.trim().toUpperCase())
+        .map((s) => s.trim())
         .filter(Boolean);
 
-      predCodes.forEach((code) => {
-        const predPos = taskPosMap.get(code);
+      predCodes.forEach((token, idx) => {
+        const typeMatch = token.match(/^(.*?)(FS|SS|FF|SF)(\s*[+-]\s*\d+(?:\.\d+)?)?$/i);
+        const cleanQuery = typeMatch ? typeMatch[1].trim() : token.replace(/(\s*[+-]\s*\d+(?:\.\d+)?)?$/, '').trim();
+        const relType = typeMatch ? typeMatch[2].toUpperCase() : 'FS';
+        const cleanUpper = cleanQuery.toUpperCase();
+        const tokenUpper = token.toUpperCase();
+
+        const linkedTaskId = succTask.predecessorTaskIds?.[idx] || succTask.predecessors?.[idx]?.taskId;
+        let predPos = linkedTaskId ? taskPosMap.get(String(linkedTaskId)) : undefined;
+        if (!predPos && pIdScope) {
+          predPos = taskPosMap.get(`${pIdScope}${cleanUpper}`) || taskPosMap.get(`${pIdScope}${tokenUpper}`);
+        }
+        if (!predPos && pCodeScope) {
+          predPos = taskPosMap.get(`${pCodeScope}${cleanUpper}`) || taskPosMap.get(`${pCodeScope}${tokenUpper}`);
+        }
+        if (!predPos) {
+          predPos = taskPosMap.get(cleanUpper) || taskPosMap.get(tokenUpper);
+        }
+        if (!predPos && visibleTasks.length > 0 && cleanQuery.length >= 2) {
+          const cacheKey = `${pIdScope || pCodeScope}|${cleanUpper}`;
+          if (closestMatchCache.has(cacheKey)) {
+            predPos = closestMatchCache.get(cacheKey) || undefined;
+          } else {
+            const match = findClosestTaskMatch(
+              cleanQuery,
+              visibleTasks,
+              projects,
+              tasks,
+              succTask.projectCode,
+              650,
+              {
+                projectId: succTask.projectId,
+                projectCode: succTask.projectCode,
+                projectYear: succTask.projectYear,
+                projectStore: succTask.projectStore,
+              },
+              undefined,
+              { projectIndex, allTaskCodesMap: allCodesMap }
+            );
+            predPos = match && match.task ? taskPosMap.get(match.task.id) : undefined;
+            closestMatchCache.set(cacheKey, predPos || null);
+          }
+        }
         if (!predPos) return;
 
-        const x1 = predPos.xEnd;
+        let x1 = predPos.xEnd;
+        let x2 = succPos.xStart;
+        if (relType === 'SS') {
+          x1 = predPos.xStart;
+          x2 = succPos.xStart;
+        } else if (relType === 'FF') {
+          x1 = predPos.xEnd;
+          x2 = succPos.xEnd;
+        } else if (relType === 'SF') {
+          x1 = predPos.xStart;
+          x2 = succPos.xEnd;
+        }
+
         const y1 = predPos.yCenter;
-        const x2 = succPos.xStart;
         const y2 = succPos.yCenter;
 
-        const d = generateOrthogonalPath(x1, y1, x2, y2);
+        const pathResult = generateGanttPath(x1, y1, x2, y2, relType, laneCounter++);
 
         lines.push({
-          id: `${predPos.t.id}->${succTask.id}`,
-          d,
+          id: `${predPos.t.id}->${succTask.id}-${relType}-${laneCounter}`,
+          d: pathResult.d,
+          arrowDir: pathResult.arrowDir,
           fromTaskId: predPos.t.id,
           toTaskId: succTask.id,
           fromTaskCode: predPos.t.taskCodePhu || allCodesMap.get(predPos.t.id) || "",
@@ -210,6 +363,7 @@ export function useGanttDependencies({
 
     return lines;
   }, [
+    showPredecessorLines,
     visibleGanttRows,
     startDate,
     dayWidth,
@@ -227,14 +381,14 @@ export function useGanttDependencies({
     predecessorColWidth,
     projects,
     tasks,
+    allCodesMap,
+    projectIndex,
   ]);
 
   return {
     activeTooltip,
     setActiveTooltip,
     dependencyLines,
-    taskNoMap,
-    taskCodeMap,
-    delegationGroupByTaskId,
+    allCodesMap,
   };
 }

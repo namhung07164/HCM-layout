@@ -2,17 +2,9 @@ import { doc, deleteField } from 'firebase/firestore';
 import { db, APP_ID, writeBatch } from '../../lib/firebase';
 import { addPendingUpdate } from '../../lib/syncQueue';
 import { undoManager } from '../../lib/undoManager';
-import {
-  getPredecessorCodeUpdates,
-  updatePredecessorsStrings,
-  parsePredecessors,
-  computeTaskCode,
-  buildTaskNoMap,
-  scheduleDependentTasks,
-  splitPredecessors
-} from '../../lib/ganttUtils';
+import { getPredecessorCodeUpdates, updatePredecessorsStrings, parsePredecessors, computeTaskCode, buildTaskNoMap, scheduleDependentTasks, splitPredecessors, calculateTaskDatesFromPredecessors } from '../../lib/ganttUtils';
 import { resolvePredecessorString, PredecessorContext } from '../../lib/predecessorMatchUtils';
-import { generateId, getDefaultDatetimeLocal, formatToDatetimeLocal, parseDateTime } from '../../lib/utils';
+import { generateId, getDefaultDatetimeLocal, formatToDatetimeLocal, parseDateTime, isTaskBelongsToProject, normalizeDashes } from '../../lib/utils';
 import { syncProjectDatesByCode } from '../../lib/projectDatesService';
 import { saveTaskStateUnified } from '../../lib/taskStateService';
 import { useAppStore } from '../../store/useAppStore';
@@ -20,6 +12,8 @@ import { Project, Task, AppUser } from '../../types';
 import { buildCanonicalProjectKey, normalizeTaskNameForComparison } from '../../lib/taskDeduplicationService';
 import { recordBatchDeltas } from '../../lib/deltaSyncService';
 import { createPatchDeltaItem } from '../../lib/deltaPatchService';
+import { isTaskBelongToSameParentScope } from '../../lib/parentHierarchyUtils';
+import { prepareMissingDelegationsForTasks } from '../../lib/taskImportService';
 
 export interface TaskSaveParams {
   formData: Partial<Task>;
@@ -35,15 +29,7 @@ export interface TaskSaveParams {
 }
 
 export async function executeTaskSave({
-  formData,
-  task,
-  projects,
-  tasks,
-  cloudStatus,
-  currentUser,
-  setToast,
-  onClose,
-  setIsSubmitting
+  formData, task, projects, tasks, cloudStatus, currentUser, setToast, onClose, setIsSubmitting
 }: TaskSaveParams): Promise<boolean> {
   const currentProject = projects.find(p => 
     p.code === formData.projectCode &&
@@ -61,37 +47,17 @@ export async function executeTaskSave({
     ? Number(currentProject.year) 
     : (formData.projectYear && !isNaN(Number(formData.projectYear)) ? Number(formData.projectYear) : new Date().getFullYear());
 
-  const targetPrjKey = buildCanonicalProjectKey(
-    currentProject.code || formData.projectCode,
-    currentProject.year || formData.projectYear,
-    currentProject.store || formData.projectStore,
-    projects
-  );
-
-  // Check for duplicate task name or code in the same project
+  const targetPrjKey = buildCanonicalProjectKey(currentProject.code || formData.projectCode, currentProject.year || formData.projectYear, currentProject.store || formData.projectStore, projects);
   const normFormName = normalizeTaskNameForComparison(formData.name, formData.projectCode || currentProject?.code);
   const formTaskCode = formData.taskCodePhu ? String(formData.taskCodePhu).trim().toLowerCase() : '';
 
   const isDuplicate = tasks.some(t => {
     if (t.id === task?.id || t.isDeleted) return false;
-    
-    const tPrjKey = buildCanonicalProjectKey(t.projectCode, t.projectYear, t.projectStore, projects);
-    const sameProject = (tPrjKey === targetPrjKey);
-    if (!sameProject) return false;
-
-    // Check exact name
-    if (t.name && String(t.name).trim().toLowerCase() === String(formData.name || '').trim().toLowerCase()) {
-      return true;
-    }
-    // Check normalized name
-    const tNorm = normalizeTaskNameForComparison(t.name, t.projectCode);
-    if (normFormName && tNorm && normFormName === tNorm) {
-      return true;
-    }
-    // Check taskCodePhu
-    if (formTaskCode && t.taskCodePhu && String(t.taskCodePhu).trim().toLowerCase() === formTaskCode) {
-      return true;
-    }
+    if (!isTaskBelongsToProject(t, currentProject, projects)) return false;
+    if (t.name && String(t.name).trim().toLowerCase() === String(formData.name || '').trim().toLowerCase()) return true;
+    const tNorm = normalizeTaskNameForComparison(t.name);
+    if (normFormName && tNorm && normFormName === tNorm) return true;
+    if (formTaskCode && t.taskCodePhu && String(t.taskCodePhu).trim().toLowerCase() === formTaskCode) return true;
     return false;
   });
 
@@ -113,27 +79,24 @@ export async function executeTaskSave({
     );
     if (!realTask && currentProject?.code) {
       try {
-        const { getLocalTasksForProjects } = await import('../../lib/localDb');
+        const { ensureProjectTasksLoaded } = await import('../../lib/taskStateService');
         const sameIdentity = (x: Task) =>
           String(x.projectStore || '').trim().toLowerCase() === String(currentProject.store || '').trim().toLowerCase() &&
           String(x.projectYear ?? '').trim() === String(currentProject.year ?? '').trim();
-        const loaded: Task[] = (await getLocalTasksForProjects([currentProject.code])).filter(dt => !dt.isDeleted);
-        // Chỉ nhận task đúng store + year của dự án đang sửa, và không thêm trùng id vào store
+        const loaded: Task[] = await ensureProjectTasksLoaded(currentProject.code, {
+          projectId: currentProject.id,
+          store: currentProject.store,
+          year: currentProject.year,
+        });
         const loadedSame = loaded.filter(sameIdentity);
         if (loadedSame.length > 0) {
-          const latestTasks = useAppStore.getState().tasks || tasks;
-          const existingIds = new Set(latestTasks.map(tsk => tsk.id));
-          useAppStore.getState().setTasks([
-            ...latestTasks.filter(tsk => !tsk.id.startsWith('ts_')),
-            ...loadedSame.filter(x => !existingIds.has(x.id)),
-          ]);
           realTask = loadedSame.find(t =>
             (task?.taskCodePhu && t.taskCodePhu === task.taskCodePhu) ||
             (task?.name && t.name && t.name.trim().toLowerCase() === task.name.trim().toLowerCase())
           );
         }
       } catch (err) {
-        console.warn("Failed to find real task for ts_ in localDb:", err);
+        console.warn("Failed to find real task for ts_ in local/cache:", err);
       }
     }
     if (realTask) {
@@ -160,6 +123,7 @@ export async function executeTaskSave({
 
   if (formData.predecessor !== undefined && (!task || formData.predecessor !== task.predecessor)) {
     if (formData.predecessor) {
+      const normPred = normalizeDashes(formData.predecessor);
       const predContext: PredecessorContext = {
         projectId: formData.projectId || task?.projectId || currentProject?.id,
         projectCode: formData.projectCode || task?.projectCode || currentProject?.code,
@@ -167,8 +131,8 @@ export async function executeTaskSave({
         projectStore: formData.projectStore || task?.projectStore || currentProject?.store,
         projectLocation: formData.location || task?.location || currentProject?.location
       };
-      formData.predecessor = resolvePredecessorString(formData.predecessor, tasks, projects, formData.projectCode, predContext, formData.predecessorTaskIds);
-      const taskNoMap = buildTaskNoMap(projects, tasks);
+      formData.predecessor = resolvePredecessorString(normPred, tasks, projects, formData.projectCode, predContext, formData.predecessorTaskIds);
+      let taskNoMap = buildTaskNoMap(projects, tasks);
       let parts = splitPredecessors(formData.predecessor, taskNoMap);
       if (parts.length >= 2) {
         if (!/FF|SF/i.test(parts[1])) {
@@ -177,57 +141,89 @@ export async function executeTaskSave({
         }
         formData.predecessor = parts.join(", ");
       }
+
+      const dummyTask: any = {
+        projectId: formData.projectId || task?.projectId || currentProject?.id,
+        projectCode: formData.projectCode || task?.projectCode || currentProject?.code,
+        projectYear: formData.projectYear || task?.projectYear || currentProject?.year,
+        projectStore: formData.projectStore || task?.projectStore || currentProject?.store,
+        location: formData.location || task?.location || currentProject?.location
+      };
+      let parsed = parsePredecessors(formData.predecessor, taskNoMap, dummyTask);
+
+      if (formData.predecessor.trim() && (!parsed.length || parsed.some((p: any) => !p.task))) {
+        for (const token of parts) {
+          const cleanToken = normalizeDashes(token).replace(/(fs|ss|ff|sf|[+-]\s*\d+|\s+\d+)$/i, '').trim();
+          const cleanTokenLower = cleanToken.toLowerCase();
+          const matchedProj = projects.find(
+            (p) =>
+              p.code &&
+              cleanTokenLower.startsWith(normalizeDashes(p.code).toLowerCase())
+          );
+          if (matchedProj && (matchedProj.id !== dummyTask.projectId || matchedProj.code !== dummyTask.projectCode)) {
+            const { ensureProjectTasksLoaded } = await import('../../lib/taskStateService');
+            const loaded = await ensureProjectTasksLoaded(matchedProj.code, {
+              projectId: matchedProj.id,
+              store: matchedProj.store,
+              year: matchedProj.year,
+            });
+            if (loaded.length > 0) {
+              tasks = useAppStore.getState().tasks || tasks;
+              taskNoMap = buildTaskNoMap(projects, tasks);
+              parsed = parsePredecessors(formData.predecessor, taskNoMap, dummyTask);
+            }
+          }
+        }
+      }
+
+      if (parsed.length >= 2) formData.durationManual = false;
+      const calcResult = calculateTaskDatesFromPredecessors(formData, parsed);
+      if (calcResult) {
+        formData.start = calcResult.start;
+        formData.finish = calcResult.finish;
+        formData.duration = calcResult.duration;
+        formData.durationManual = calcResult.durationManual;
+      }
     }
-    const taskNoMap = buildTaskNoMap(projects, tasks);
-    const dummyTask: any = {
-      projectId: formData.projectId || task?.projectId || currentProject?.id,
-      projectCode: formData.projectCode || task?.projectCode || currentProject?.code,
-      projectYear: formData.projectYear || task?.projectYear || currentProject?.year,
-      projectStore: formData.projectStore || task?.projectStore || currentProject?.store,
-      location: formData.location || task?.location || currentProject?.location
-    };
-    parsePredecessors(formData.predecessor, taskNoMap, dummyTask);
   }
 
   try {
     const todayDate = getDefaultDatetimeLocal();
     let finalFormData = { ...formData };
-    if (!finalFormData.start) finalFormData.start = todayDate;
-    if (!finalFormData.finish) finalFormData.finish = finalFormData.start || todayDate;
-    if (!finalFormData.baselineStart) finalFormData.baselineStart = finalFormData.start || todayDate;
-    if (!finalFormData.baselineFinish) finalFormData.baselineFinish = finalFormData.finish || todayDate;
-    if (finalFormData.duration === undefined || finalFormData.duration === null || String(finalFormData.duration).trim() === '') {
-      finalFormData.duration = "0";
-    }
-    let durationVal = parseFloat(String(finalFormData.duration || "0"));
-    if (durationVal < 0) {
+    finalFormData.start = finalFormData.start || todayDate;
+    finalFormData.finish = finalFormData.finish || finalFormData.start || todayDate;
+    finalFormData.duration = (finalFormData.duration === undefined || finalFormData.duration === null || String(finalFormData.duration).trim() === '') ? "0" : String(finalFormData.duration);
+    if (parseFloat(finalFormData.duration) < 0) {
       finalFormData.duration = "0";
       finalFormData.finish = finalFormData.start;
     }
     if (finalFormData.durationManual ?? true) {
       finalFormData.durationManual = true;
-      if (finalFormData.start && finalFormData.duration !== undefined && finalFormData.duration !== '') {
+      if (finalFormData.start && finalFormData.duration !== '') {
         const s = parseDateTime(finalFormData.start);
-        const days = parseFloat(String(finalFormData.duration));
+        const days = parseFloat(finalFormData.duration);
         if (s && !isNaN(s.getTime()) && !isNaN(days)) {
-          const f = new Date(s.getTime() + days * 24 * 60 * 60 * 1000);
-          finalFormData.finish = formatToDatetimeLocal(f);
+          finalFormData.finish = formatToDatetimeLocal(new Date(s.getTime() + days * 86400000));
         }
       }
     }
-    if (!finalFormData.party) {
-      finalFormData.party = currentProject?.party || 'Takashimaya';
-    }
+    finalFormData.baselineStart = task?.baselineStart || finalFormData.start || todayDate;
+    finalFormData.baselineFinish = task?.baselineFinish || finalFormData.finish || todayDate;
+    if (!finalFormData.party) finalFormData.party = currentProject?.party || 'Takashimaya';
 
     if (cloudStatus === 'offline') {
-      let payload = {
+      let payload: any = {
         ...finalFormData,
         id,
+        projectId: finalFormData.projectId || task?.projectId || currentProject.id,
+        projectCode: finalFormData.projectCode || currentProject.code,
+        projectStore: finalFormData.projectStore || currentProject.store,
         projectYear: Number(currentYear) || new Date().getFullYear(),
         comments: task?.comments || finalFormData.comments || [],
         updatedAt: new Date().toISOString(),
         orderIndex: newOrderIndex
       };
+      delete payload._isVirtualSummary;
       addPendingUpdate({ collectionPath: `artifacts/${APP_ID}/public/data/taka_tasks`, action: 'set', docId: id, data: payload } as any);
       setToast({ title: 'Draft Saved', message: 'Task saved offline. Will sync when connection returns.' });
       onClose();
@@ -238,22 +234,35 @@ export async function executeTaskSave({
     let dataToSave: any = {
       ...finalFormData,
       id,
+      projectId: finalFormData.projectId || task?.projectId || currentProject.id,
+      projectCode: finalFormData.projectCode || currentProject.code,
+      projectStore: finalFormData.projectStore || currentProject.store,
       projectYear: Number(currentYear) || new Date().getFullYear(),
       comments: task?.comments || finalFormData.comments || [],
       updatedAt: new Date().toISOString(),
       orderIndex: newOrderIndex
     };
+    delete dataToSave._isVirtualSummary;
 
-    if (dataToSave.predecessor && dataToSave.predecessor.trim()) {
-      dataToSave.realtimeUpdate = true;
-    } else {
-      dataToSave.realtimeUpdate = false;
-    }
+    dataToSave.realtimeUpdate = Boolean(dataToSave.predecessor && dataToSave.predecessor.trim());
 
     // Explicitly delete fields from Firestore if unlinked or cleared
     if (task?.parentTaskId && !finalFormData.parentTaskId) {
       dataToSave.parentTaskId = deleteField();
       dataToSave.parentId = null;
+    } else if (finalFormData.parentTaskId) {
+      const parentTask = tasks.find(t => String(t.id) === String(finalFormData.parentTaskId) || (t.taskCodePhu && String(t.taskCodePhu).trim().toLowerCase() === String(finalFormData.parentTaskId).trim().toLowerCase()));
+      if (parentTask && isTaskBelongToSameParentScope(dataToSave, parentTask)) {
+        dataToSave.parentTaskId = String(parentTask.id);
+        dataToSave.parentId = String(parentTask.id);
+        dataToSave.projectId = dataToSave.projectId || parentTask.projectId;
+        dataToSave.projectStore = dataToSave.projectStore || parentTask.projectStore;
+        dataToSave.projectYear = dataToSave.projectYear !== undefined ? dataToSave.projectYear : parentTask.projectYear;
+        dataToSave.projectCode = dataToSave.projectCode || parentTask.projectCode;
+      } else if (parentTask && !isTaskBelongToSameParentScope(dataToSave, parentTask)) {
+        delete dataToSave.parentTaskId;
+        delete dataToSave.parentId;
+      }
     }
     if (task?.taskCodePhu && (!finalFormData.taskCodePhu || !finalFormData.taskCodePhu.trim())) {
       dataToSave.taskCodePhu = deleteField();
@@ -265,106 +274,116 @@ export async function executeTaskSave({
       }
     });
 
-    const oldTaskNoMap = buildTaskNoMap(projects, tasks);
-    const newTasksForMap = task 
-       ? tasks.map(t => t.id === id ? dataToSave as Task : t) 
-       : [...tasks, dataToSave as Task];
-    const newTaskNoMap = buildTaskNoMap(projects, newTasksForMap);
-    const oldCodeToNewCode = getPredecessorCodeUpdates(oldTaskNoMap, newTaskNoMap, projects, newTasksForMap);
-
-    if (task) {
-      const oldCode = (task.taskCodePhu || computeTaskCode(projects, tasks, task)).trim();
-      const newCode = (dataToSave.taskCodePhu || computeTaskCode(projects, newTasksForMap, dataToSave as Task)).trim();
-      if (oldCode && newCode && oldCode.toLowerCase() !== newCode.toLowerCase()) {
-        oldCodeToNewCode.set(oldCode.toLowerCase(), newCode);
-      }
-    }
-
-    const predecessorUpdatesOrig = updatePredecessorsStrings(oldCodeToNewCode, tasks, projects, oldTaskNoMap);
-    const predecessorUpdates = predecessorUpdatesOrig.filter(pu => pu.id !== id);
-    const predecessorUpdatesMap = new Map(predecessorUpdates.map(pu => [pu.id, pu]));
-
-    const updatesToDependents = scheduleDependentTasks(dataToSave as Task, tasks, projects);
-    
-    const scheduledUpdatedTask = updatesToDependents.find(d => d.id === dataToSave.id);
-    if (scheduledUpdatedTask) {
-      dataToSave = scheduledUpdatedTask as any;
-    }
-
-    const batch = writeBatch(db);
-    if (task) {
-      batch.update(doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_tasks', id), dataToSave);
-    } else {
-      batch.set(doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_tasks', id), dataToSave);
-    }
-
-    const depUpdates = updatesToDependents.filter(d => d.id !== id);
-    const mappedDepUpdates = new Set<string>();
-
-    depUpdates.forEach(depTask => {
-      const depProj = projects.find(p => p.code === depTask.projectCode);
-      const depYear = (depTask.projectYear !== undefined && depTask.projectYear !== null && !isNaN(Number(depTask.projectYear)))
-        ? Number(depTask.projectYear)
-        : (depProj?.year && !isNaN(Number(depProj.year)) ? Number(depProj.year) : new Date().getFullYear());
-      const pu = predecessorUpdatesMap.get(depTask.id);
-      const data = pu 
-        ? { ...depTask, projectYear: depYear, predecessor: pu.predecessor, updatedAt: new Date().toISOString() } 
-        : { ...depTask, projectYear: depYear, updatedAt: new Date().toISOString() };
-      Object.keys(data).forEach(key => {
-        if ((data as any)[key] === undefined) {
-          delete (data as any)[key];
-        }
-      });
-      batch.set(doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_tasks', depTask.id), data, { merge: true });
-      mappedDepUpdates.add(depTask.id);
-    });
-
-    predecessorUpdates.forEach(pu => {
-      if (!mappedDepUpdates.has(pu.id)) {
-         batch.set(doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_tasks', pu.id), { predecessor: pu.predecessor, updatedAt: pu.updatedAt }, { merge: true });
-      }
-    });
-
-    const optimisticList: any[] = [dataToSave];
-    depUpdates.forEach(depTask => {
-      const pu = predecessorUpdatesMap.get(depTask.id);
-      if (pu) {
-        optimisticList.push({ ...depTask, predecessor: pu.predecessor, updatedAt: pu.updatedAt });
-      } else {
-        optimisticList.push(depTask);
-      }
-    });
-    predecessorUpdates.forEach(pu => {
-      if (!mappedDepUpdates.has(pu.id)) {
-        optimisticList.push({ id: pu.id, predecessor: pu.predecessor, updatedAt: pu.updatedAt });
-      }
-    });
-    
-    saveTaskStateUnified(optimisticList);
-
-    const isNewTask = !task;
-    const oldAny = (task || {}) as any;
-    const newAny = dataToSave as any;
-    const datesOrStatusChanged =
-      isNewTask ||
-      task?.start !== dataToSave.start ||
-      task?.finish !== dataToSave.finish ||
-      task?.runningStatus !== dataToSave.runningStatus ||
-      task?.approval !== dataToSave.approval ||
-      Boolean(oldAny.isCompleted) !== Boolean(newAny.isCompleted) ||
-      (oldAny.status || '') !== (newAny.status || '') ||
-      task?.projectCode !== dataToSave.projectCode ||
-      task?.projectStore !== dataToSave.projectStore ||
-      task?.projectYear !== dataToSave.projectYear ||
-      depUpdates.length > 0;
-
-    // Close modal INSTANTLY (0ms UI lag)
+    // 1. Close modal INSTANTLY (0ms UI lag) & update primary task in Zustand immediately
     onClose();
     setIsSubmitting(false);
+    useAppStore.getState().optimisticUpdateTasks([dataToSave]);
 
-    // Offload network commit, delta emission, and project date rollups to non-blocking background microtask
+    // 2. Offload heavy dependent cascades, predecessor string re-indexing, Dexie persistence, and Firestore batch commit to background microtask
     setTimeout(async () => {
+      let depUpdates: Task[] = [];
+      let predecessorUpdates: any[] = [];
+      const predecessorUpdatesMap = new Map<string, any>();
+      const mappedDepUpdates = new Set<string>();
+      let optimisticList: any[] = [dataToSave];
+
       try {
+        const didCodeOrOrderChange = Boolean(
+          task &&
+          (String(task.taskCodePhu || '').trim() !== String(dataToSave.taskCodePhu || '').trim() ||
+            task.orderIndex !== dataToSave.orderIndex ||
+            task.projectCode !== dataToSave.projectCode ||
+            task.parentTaskId !== dataToSave.parentTaskId)
+        );
+
+        const didScheduleChange = Boolean(
+          !task ||
+          task.start !== dataToSave.start ||
+          task.finish !== dataToSave.finish ||
+          String(task.duration || '') !== String(dataToSave.duration || '') ||
+          String(task.predecessor || '').trim() !== String(dataToSave.predecessor || '').trim() ||
+          Boolean(task.realtimeUpdate) !== Boolean(dataToSave.realtimeUpdate)
+        );
+
+        if (didCodeOrOrderChange) {
+          const oldTaskNoMap = buildTaskNoMap(projects, tasks);
+          const newTasksForMap = task
+            ? tasks.map(t => (t.id === id ? (dataToSave as Task) : t))
+            : [...tasks, dataToSave as Task];
+          const newTaskNoMap = buildTaskNoMap(projects, newTasksForMap);
+          const oldCodeToNewCode = getPredecessorCodeUpdates(oldTaskNoMap, newTaskNoMap, projects, newTasksForMap);
+
+          if (task) {
+            const oldCode = (task.taskCodePhu || computeTaskCode([currentProject], tasks, task)).trim();
+            const newCode = (dataToSave.taskCodePhu || computeTaskCode([currentProject], newTasksForMap, dataToSave as Task)).trim();
+            if (oldCode && newCode && oldCode.toLowerCase() !== newCode.toLowerCase()) {
+              oldCodeToNewCode.set(oldCode.toLowerCase(), newCode);
+            }
+          }
+
+          if (oldCodeToNewCode.size > 0) {
+            const predecessorUpdatesOrig = updatePredecessorsStrings(oldCodeToNewCode, tasks, projects, oldTaskNoMap);
+            predecessorUpdates = predecessorUpdatesOrig.filter(pu => pu.id !== id);
+            predecessorUpdates.forEach(pu => predecessorUpdatesMap.set(pu.id, pu));
+          }
+        }
+
+        if (didScheduleChange || didCodeOrOrderChange) {
+          const updatesToDependents = scheduleDependentTasks(dataToSave as Task, tasks, projects);
+          const scheduledUpdatedTask = updatesToDependents.find(d => d.id === dataToSave.id);
+          if (scheduledUpdatedTask) {
+            dataToSave = { ...(scheduledUpdatedTask as any) };
+            if (!task?.baselineStart) dataToSave.baselineStart = dataToSave.start;
+            if (!task?.baselineFinish) dataToSave.baselineFinish = dataToSave.finish;
+            delete dataToSave._isVirtualSummary;
+            optimisticList[0] = dataToSave;
+          }
+          depUpdates = updatesToDependents.filter(d => d.id !== id);
+        }
+
+        const batch = writeBatch(db);
+        batch.set(doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_tasks', id), dataToSave, { merge: true });
+        const { newDelegations } = dataToSave.delegation
+          ? prepareMissingDelegationsForTasks([dataToSave as Task], currentUser)
+          : { newDelegations: [] };
+        newDelegations.forEach((delGroup) => {
+          batch.set(doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_delegation_groups', delGroup.id), delGroup, { merge: true });
+        });
+
+        depUpdates.forEach(depTask => {
+          const depProj = projects.find(p => p.code === depTask.projectCode);
+          const depYear = (depTask.projectYear !== undefined && depTask.projectYear !== null && !isNaN(Number(depTask.projectYear)))
+            ? Number(depTask.projectYear)
+            : (depProj?.year && !isNaN(Number(depProj.year)) ? Number(depProj.year) : new Date().getFullYear());
+          const pu = predecessorUpdatesMap.get(depTask.id);
+          const data: any = pu
+            ? { ...depTask, projectYear: depYear, predecessor: pu.predecessor, updatedAt: new Date().toISOString() }
+            : { ...depTask, projectYear: depYear, updatedAt: new Date().toISOString() };
+          delete data._isVirtualSummary;
+          Object.keys(data).forEach(key => {
+            if ((data as any)[key] === undefined) {
+              delete (data as any)[key];
+            }
+          });
+          batch.set(doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_tasks', depTask.id), data, { merge: true });
+          mappedDepUpdates.add(depTask.id);
+          optimisticList.push(data);
+        });
+
+        predecessorUpdates.forEach(pu => {
+          if (!mappedDepUpdates.has(pu.id)) {
+            batch.set(doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_tasks', pu.id), { predecessor: pu.predecessor, updatedAt: pu.updatedAt }, { merge: true });
+            optimisticList.push({ id: pu.id, predecessor: pu.predecessor, updatedAt: pu.updatedAt });
+          }
+        });
+
+        if (optimisticList.length > 1) {
+          useAppStore.getState().optimisticUpdateTasks(optimisticList);
+        }
+
+        if (newDelegations.length > 0) {
+          import('../../lib/localDb').then(({ bulkPersistDelegations }) => bulkPersistDelegations(newDelegations)).catch(() => {});
+        }
         const deltaItems = optimisticList.map(item => {
           const prev = tasks.find(t => t.id === item.id);
           return createPatchDeltaItem({
@@ -376,52 +395,93 @@ export async function executeTaskSave({
             year: item.projectYear ? String(item.projectYear) : (task?.projectYear ? String(task.projectYear) : undefined),
           });
         });
+        newDelegations.forEach((delGroup) => {
+          deltaItems.push({
+            docId: delGroup.id,
+            collectionName: 'taka_delegations',
+            action: 'create',
+            isPatch: false,
+            data: delGroup,
+            year: delGroup.projectYear ? String(delGroup.projectYear) : undefined,
+            projectId: delGroup.projectId ? String(delGroup.projectId) : undefined,
+            projectCode: delGroup.projectCode ? String(delGroup.projectCode) : undefined,
+            projectStore: delGroup.projectStore ? String(delGroup.projectStore) : undefined,
+          });
+        });
         const { markExplicitDelta } = await import('../../lib/autoDeltaQueue');
         markExplicitDelta(deltaItems);
-        await batch.commit();
+        await Promise.all([
+          batch.commit(),
+          saveTaskStateUnified(optimisticList, { syncProjects: true }).catch(() => {}),
+        ]);
         recordBatchDeltas(deltaItems, currentUser?.email || currentUser?.username).catch(() => {});
 
-        if (datesOrStatusChanged) {
+        // If task moved from an older project/store/year, also resync the previous project's taskSummaries
+        if (
+          task &&
+          (task.projectId !== dataToSave.projectId ||
+            task.projectCode !== dataToSave.projectCode ||
+            task.projectStore !== dataToSave.projectStore ||
+            task.projectYear !== dataToSave.projectYear)
+        ) {
           const allTasksCurrent = useAppStore.getState().tasks;
-          const targetProjId = dataToSave.projectId ? String(dataToSave.projectId) : (currentProject?.id ? String(currentProject.id) : undefined);
-          syncProjectDatesByCode(dataToSave.projectCode, dataToSave.projectStore, dataToSave.projectYear, allTasksCurrent, targetProjId);
-          if (task && (task.projectCode !== dataToSave.projectCode || task.projectStore !== dataToSave.projectStore || task.projectYear !== dataToSave.projectYear)) {
-            const oldProjId = task.projectId ? String(task.projectId) : targetProjId;
-            syncProjectDatesByCode(task.projectCode, task.projectStore, task.projectYear, allTasksCurrent, oldProjId);
-          }
+          const oldProjId = task.projectId ? String(task.projectId) : undefined;
+          syncProjectDatesByCode(task.projectCode, task.projectStore, task.projectYear, allTasksCurrent, oldProjId);
         }
+
+        const prevNeighborTasks: Task[] = [];
+        const seenNeighborIds = new Set<string>();
+        depUpdates.forEach((depTask) => {
+          const orig = tasks.find((tsk) => tsk.id === depTask.id);
+          if (orig && !seenNeighborIds.has(orig.id)) {
+            seenNeighborIds.add(orig.id);
+            prevNeighborTasks.push(orig);
+          }
+        });
+        predecessorUpdates.forEach((pu) => {
+          const orig = tasks.find((tk) => tk.id === pu.id);
+          if (orig && !seenNeighborIds.has(orig.id)) {
+            seenNeighborIds.add(orig.id);
+            prevNeighborTasks.push(orig);
+          }
+        });
+
+        const redoTasksSnapshot: Task[] = optimisticList.map((item) => {
+          const prev = tasks.find((t) => t.id === item.id);
+          return (prev ? { ...prev, ...item } : item) as Task;
+        });
+
+        undoManager.push({
+          description: task ? `Update Task: ${formData.name}` : `Create Task: ${formData.name}`,
+          revert: async () => {
+            const { restoreTasksSnapshot } = await import('../../lib/undoStateHelpers');
+            await restoreTasksSnapshot({
+              tasksToRestore: task ? [task, ...prevNeighborTasks] : prevNeighborTasks,
+              taskIdsToDelete: task ? [] : [id],
+              delegationIdsToDelete: newDelegations.map((d) => d.id),
+            });
+          },
+          redo: async () => {
+            const { restoreTasksSnapshot } = await import('../../lib/undoStateHelpers');
+            await restoreTasksSnapshot({
+              tasksToRestore: redoTasksSnapshot,
+              delegationsToRestore: newDelegations,
+            });
+          },
+        });
       } catch (error: any) {
         console.error("Background task save failed:", error);
-        useAppStore.getState().setToast({ title: "Save Failed", message: "Network error or permission denied. Data was not saved.", type: "error" });
+        optimisticList.forEach(item => {
+          addPendingUpdate({
+            collectionPath: `artifacts/${APP_ID}/public/data/taka_tasks`,
+            action: 'set',
+            docId: item.id,
+            data: item
+          } as any);
+        });
+        useAppStore.getState().setToast({ title: "Offline Saved", message: "Saved to offline queue. Will sync when connection is restored.", type: "warning" });
       }
     }, 0);
-
-    undoManager.push({
-      description: task ? `Update Task: ${formData.name}` : `Create Task: ${formData.name}`,
-      revert: async () => {
-        const revertBatch = writeBatch(db);
-        if (task) {
-          revertBatch.set(doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_tasks', id), { ...task, updatedAt: new Date().toISOString() });
-        } else {
-          revertBatch.set(doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_tasks', id), { isDeleted: true, updatedAt: new Date().toISOString() }, { merge: true });
-        }
-        updatesToDependents.forEach(depTask => {
-          const originalDep = tasks.find(tsk => tsk.id === depTask.id);
-          if (originalDep) {
-            revertBatch.set(doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_tasks', depTask.id), originalDep);
-          }
-        });
-        predecessorUpdates.forEach(pu => {
-          if (!mappedDepUpdates.has(pu.id)) {
-             const originalTask = tasks.find(tk => tk.id === pu.id);
-             if (originalTask) {
-               revertBatch.update(doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_tasks', originalTask.id), { predecessor: originalTask.predecessor || '' });
-             }
-          }
-        });
-        revertBatch.commit().catch(console.error);
-      }
-    });
 
     return true;
   } catch (e: any) { 

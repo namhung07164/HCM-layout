@@ -1,12 +1,14 @@
 import React from 'react';
-import { MessageSquare, BarChartHorizontal } from 'lucide-react';
+import { BarChartHorizontal } from 'lucide-react';
 import { Project } from '../../../types';
 import { cn, parseDateTime } from '../../../lib/utils';
 
 interface TooltipMetaRowProps {
   v: any;
   p?: Project;
+  canWrite?: boolean;
   floorValue?: any;
+  shopTypeValue?: string;
   dataSize?: number;
   commentsCount: number;
   computedTakStart?: string;
@@ -15,10 +17,12 @@ interface TooltipMetaRowProps {
   onOpenMiniGantt?: (project: Project) => void;
 }
 
-export const TooltipMetaRow: React.FC<TooltipMetaRowProps> = ({
+export const TooltipMetaRow: React.FC<TooltipMetaRowProps> = React.memo(({
   v,
   p,
+  canWrite = false,
   floorValue,
+  shopTypeValue,
   dataSize = 0,
   commentsCount,
   computedTakStart,
@@ -26,52 +30,26 @@ export const TooltipMetaRow: React.FC<TooltipMetaRowProps> = ({
   onEditProject,
   onOpenMiniGantt,
 }) => {
-  if (!v.floor && !v.area && !v.startDate && !v.endDate && commentsCount === 0) {
+  const effectiveSize = p?.sizeM2 ?? (p as any)?.size ?? (p as any)?.area ?? dataSize ?? 0;
+  const effectiveShopType = shopTypeValue || p?.shopType || (p as any)?.shop_type || '';
+
+  if (!v.floor && !v.area && !v.shopType && !v.startDate && !v.endDate && commentsCount === 0 && !onOpenMiniGantt && effectiveSize === 0 && !effectiveShopType) {
     return null;
   }
 
   return (
-    <div className="flex items-center justify-between gap-2 px-0.5 pt-1.5 border-t border-slate-100 dark:border-slate-800/80 flex-wrap sm:flex-nowrap">
-      {/* Left Side: Floor, Area & Comment Symbol */}
-      <div className="flex items-center gap-1.5 flex-wrap">
+    <div className="flex items-center justify-between gap-1.5 px-0.5 pt-1.5 border-t border-slate-100 dark:border-slate-800/80 flex-nowrap min-w-0">
+      {/* Left Side: Floor, Mini Gantt, Shop Type & Area/Size */}
+      <div className="flex items-center gap-1 shrink min-w-0 flex-nowrap">
         {/* Floor Badge */}
         {v.floor && floorValue && (
-          <div className="bg-slate-100 dark:bg-slate-800/80 px-2 py-0.5 rounded-md border border-slate-200 dark:border-slate-700/80 flex items-center gap-1 shrink-0">
-            <span className="text-[9px] text-slate-400 font-medium uppercase">Floor:</span>
-            <span className="font-bold text-xs text-slate-700 dark:text-slate-200">{floorValue}</span>
+          <div className="bg-slate-100 dark:bg-slate-800/80 px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700/80 flex items-center gap-0.5 shrink-0">
+            <span className="text-[8px] text-slate-400 font-medium uppercase">Floor:</span>
+            <span className="font-bold text-[10px] text-slate-700 dark:text-slate-200">{floorValue}</span>
           </div>
         )}
 
-        {/* Area (if available) */}
-        {v.area && dataSize > 0 && (
-          <div className="bg-slate-100 dark:bg-slate-800/80 px-2 py-0.5 rounded-md border border-slate-200 dark:border-slate-700/80 flex items-center gap-1 shrink-0">
-            <span className="text-[9px] text-slate-400 font-medium uppercase">DT:</span>
-            <span className="font-bold text-xs text-slate-700 dark:text-slate-200">{Number(dataSize).toLocaleString('en-US')} m²</span>
-          </div>
-        )}
-
-        {/* Project Chat / Comment Symbol Button */}
-        {p && (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onEditProject?.(p, false, 'chat');
-            }}
-            className={cn(
-              "flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded border transition-all active:scale-95 touch-manipulation cursor-pointer shrink-0",
-              commentsCount > 0 
-                ? "bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-[#8ab4f8] border-blue-200 dark:border-blue-800/80 hover:bg-blue-100" 
-                : "bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-[#444446] hover:text-blue-500"
-            )}
-            title="Open Project Comments"
-          >
-            <MessageSquare className="w-3.5 h-3.5" />
-            {commentsCount > 0 && <span>{commentsCount}</span>}
-          </button>
-        )}
-
-        {/* Modular Mini Gantt Button (Next to comments button) */}
+        {/* Modular Mini Gantt Button */}
         {p && onOpenMiniGantt && (
           <button
             type="button"
@@ -79,18 +57,43 @@ export const TooltipMetaRow: React.FC<TooltipMetaRowProps> = ({
               e.stopPropagation();
               onOpenMiniGantt(p);
             }}
-            className="flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded border border-indigo-200 dark:border-indigo-800/80 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 transition-all active:scale-95 touch-manipulation cursor-pointer shrink-0 shadow-xs"
+            className="flex items-center gap-1 text-[9px] font-semibold px-1.5 py-0.5 rounded border border-indigo-200 dark:border-indigo-800/80 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 transition-all active:scale-95 touch-manipulation cursor-pointer shrink-0 shadow-2xs"
             title="Open Mini Gantt Timeline"
           >
-            <BarChartHorizontal className="w-3.5 h-3.5" />
+            <BarChartHorizontal className="w-3 h-3" />
             <span>Gantt</span>
           </button>
+        )}
+
+        {/* Shop Type Badge - Displayed right before Area / Size (m²) */}
+        {(v.shopType !== false) && effectiveShopType && (
+          <div 
+            className="bg-purple-50 dark:bg-purple-950/70 px-1.5 py-0.5 rounded border border-purple-200 dark:border-purple-800/80 flex items-center gap-0.5 shrink-0"
+            title={`Shop Type: ${effectiveShopType}`}
+          >
+            <span className="font-bold text-[9.5px] text-purple-700 dark:text-purple-300 font-mono truncate max-w-[105px]">
+              {effectiveShopType}
+            </span>
+          </div>
+        )}
+
+        {/* Area / Size (m²) Badge - Displayed right next to mini gantt / shop type */}
+        {(v.area !== false) && effectiveSize > 0 && (
+          <div 
+            className="bg-slate-100 dark:bg-slate-800/80 px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700/80 flex items-center gap-0.5 shrink-0"
+            title={`Size (m²): ${Number(effectiveSize).toLocaleString('en-US', { maximumFractionDigits: 1 })} m²`}
+          >
+            <span className="text-[7.5px] text-slate-400 font-semibold uppercase tracking-tight">Size:</span>
+            <span className="font-bold text-[9.5px] text-slate-700 dark:text-slate-200 font-mono">
+              {Number(effectiveSize).toLocaleString('en-US', { maximumFractionDigits: 1 })} m²
+            </span>
+          </div>
         )}
       </div>
 
       {/* Right Side: Start Date (Blue) & Finish Date (Pink) */}
       {(v.startDate || v.endDate) && (computedTakStart || computedTakCompl) && (
-        <div className="flex gap-2 sm:gap-2.5 text-[11px] font-bold leading-tight shrink-0 ml-auto items-center">
+        <div className="flex gap-1.5 text-[10px] font-bold leading-tight shrink-0 ml-auto items-center">
           {v.startDate && computedTakStart && (
             <div className="text-blue-600 dark:text-[#8ab4f8] text-right">
               {(() => {
@@ -123,4 +126,4 @@ export const TooltipMetaRow: React.FC<TooltipMetaRowProps> = ({
       )}
     </div>
   );
-};
+});

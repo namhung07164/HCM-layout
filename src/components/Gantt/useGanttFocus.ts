@@ -167,7 +167,7 @@ export function useGanttFocus({
     if (!activeFocusId) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && !useAppStore.getState().isPrintPreview) {
         handleClearFocus();
       }
     };

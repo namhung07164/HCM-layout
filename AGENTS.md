@@ -1,117 +1,58 @@
 # Project Architecture & Coding Conventions
 
-> ⛔ **QUY TẮC BẤT KHẢ XÂM PHẠM**: Toàn bộ logic nghiệp vụ, UI/UX, tính năng và luồng dữ liệu TUYỆT ĐỐI KHÔNG ĐƯỢC XÓA, DISABLE HAY LÀM SUY GIẢM khi cập nhật, trừ khi người dùng yêu cầu rõ ràng. Mọi thay đổi phải là mở rộng (additive) hoặc tối ưu (optimization).
+> ⛔ **INVIOLABLE RULE**: Never delete, disable, or degrade existing business logic, UI/UX, features, or data flows unless explicitly requested. All changes must be additive or optimizations.
+> ⚡ **AGENTS.MD MAINTENANCE**: Whenever updating `AGENTS.md`, preserve 100% rule integrity and write strictly in **Telegraphic Imperative English** to minimize token usage.
 
-## 1. On-Demand Business Logic
-- **Kho quy chuẩn**: `BUSINESS_LOGIC.md` lưu trữ toàn bộ công thức tài chính, schema, RBAC và quy tắc nghiệp vụ.
-- **Quy trình**: Tác vụ UI/màu sắc không cần đọc. Tác vụ can thiệp sâu vào tính toán, phân quyền hoặc nghiệp vụ (Budget, Gantt, RBAC) **bắt buộc** dùng `view_file` tra cứu `BUSINESS_LOGIC.md` qua Navigation Index trước khi sửa code.
+## 0. Core Operating Mindset
+1. **Think Before Coding & Clarify Ambiguity**: Cross-check `ARCHITECTURE.md` and `src/api-contracts.ts` before coding to assess impact (Dynamic Hierarchy, Rule-Based Groups, Gantt Predecessors, Cloud R2, Delta Sync). **If any requirement, scope, or edge case is unclear or uncertain, ask the user to clarify for 100% accuracy before writing code.**
+2. **Simplicity First**: Reuse existing helpers in `src/lib/` and hooks in `src/hooks/`. Strictly enforce `< 500` lines/file, write via `firestoreWrites.ts` / `saveTaskStateUnified`, and preserve 0ms Optimistic UI.
+3. **Surgical Changes**: Modify only the exact file/function required. Never rewrite entire files, strip business comments, or touch unrelated modules.
+4. **Goal-Driven Execution**: Implement -> Verify (`lint_applet` / `tsc --noEmit` & `compile_applet`) -> Fix until 0 syntax/logic errors.
 
-## 2. Core Architecture & Build Constraints
-- **Safe Boot**: Luôn boot tại tab General; cấm lưu `taka_last_tab` vào `localStorage`.
-- **Global State (Zustand)**: Quản lý toàn bộ state qua `useAppStore.ts`. Dùng Atomic Selectors (vd: `state => state.projects`) và shallow hooks (`useUISlice`, `useDataSlice`) để chống re-render. Cấm truyền prop quá sâu.
-- **Package Manager (NPM ONLY)**: Chỉ dùng NPM. Cấm Bun/Yarn/Pnpm (nếu có lockfile khác phải xóa ngay). Build SPA luôn trỏ vào `dist/`.
-- **Zero-Delay Optimistic UI & Offline Queue**: Lưu/sửa/xóa cập nhật ngay vào Zustand (0ms). Đẩy tác vụ Firestore ra chạy ngầm; bắt buộc bọc `try/catch` đẩy tác vụ lỗi vào Offline Queue (`src/lib/syncQueue.ts`) để chống mất dữ liệu ngầm (Silent Data Loss). Nút bấm dùng `active:scale-95 touch-manipulation`.
-- **Tính toàn vẹn Schema**: Cấm thêm field rác hoặc đổi tên schema ngoài `src/types.ts`. Bảo toàn 100% tính năng xuất file, watermark, delegation, export.
+## 1. Single Source of Truth (SSoT) & 3-Step Workflow
+- **SSoT Lookup Order**:
+  1. `ARCHITECTURE.md`: Folder map, `*Parts/` submodules, `src/lib/` & `src/hooks/` catalog. Never create non-conforming folders.
+  2. `src/api-contracts.ts`: Interfaces, types, enums, Zustand store & API signatures. Check signatures here without reading full implementation files. Never hallucinate names/props.
+  3. `BUSINESS_LOGIC.md`: Read on-demand via `view_file` (Navigation Index) when modifying Budget, Gantt, RBAC, or financial formulas. Never modify `BUSINESS_LOGIC.md`.
+- **3-Step Workflow**:
+  1. **Check Map & Contracts**: Locate submodule in `ARCHITECTURE.md` and verify types/actions in `src/api-contracts.ts`.
+  2. **Implement**: Keep files `< 500` lines, strict TypeScript (no `any`), decouple UI from Zustand Store.
+  3. **Selective Sync & Validate**: Update `src/api-contracts.ts` ONLY when types/store/signatures change; update `ARCHITECTURE.md` ONLY when adding modules/folders. **NEVER** auto-write logs or update docs (`manual_usual.md`, `README.md`, etc.) on bug fixes/UI edits. Co-run `lint_applet` and `compile_applet` (0 errors) before finishing.
 
-## 3. Data Fetching & Performance Guards (Firebase)
-- **Tri-Gate Lazy Loading**: Bảo toàn 3 cờ (`isTasksRequested`, `isCostsRequested`, `isDelegationsRequested`); không query khi user chưa yêu cầu.
-- **Dot-Notation & Atomic Aggregates**: Cập nhật tài chính lồng sâu bắt buộc dùng chuỗi chấm (`'financial.byStore...'` + `increment()`), gom 1 update/doc/batch để chống xung đột ghi đè đồng thời giữa các kế toán.
-- **Anti-Read-Storm**: Không query thừa; cấm đưa object vào deps của `useEffect`. Khi chuyển tab, luôn ưu tiên đọc cache Zustand.
-- **Multi-listener Pooling ("All Years")**: Quản lý listener từng năm qua `useRef<Map>` pool (giữ Delta Sync), không unmount khi chuyển năm cũ để Zero-Read từ cache.
-- **IDB Locks & Trần Bộ Nhớ iOS 40MB**: Iframe/PWA dùng `persistentSingleTabManager({ forceOwnership: true })`; Desktop chuẩn dùng `persistentMultipleTabManager`. Bắt buộc giới hạn cache iOS ở mức 40MB (`cacheSizeBytes: isIOS ? 41943040 : CACHE_SIZE_UNLIMITED`) để tránh WebKit dọn sạch IDB gây bão đọc.
+## 2. Core Architecture, State & Build Constraints
+- **Safe Boot & NPM**: Always boot at `'general'` tab (never save `taka_last_tab` in `localStorage`). Use **NPM ONLY** (remove Bun/Yarn/Pnpm lockfiles); build outputs to `dist/`.
+- **Zustand (`useAppStore.ts`)**: Use atomic selectors (`state => state.projects`) and shallow hooks (`useUISlice`, `useDataSlice`) to prevent re-renders; no deep prop drilling.
+- **0ms Optimistic UI & Offline Queue**: Apply create/update/delete to Zustand immediately (0ms) and sync Firestore in background; wrap in `try/catch` to enqueue failures into `src/lib/syncQueue.ts`. Buttons require `active:scale-95 touch-manipulation`.
+- **Schema Integrity**: Never add junk fields or rename schemas outside `src/types.ts`. Preserve 100% export, watermark, delegation, and file import/export features.
+- **Safe Module Integration**: Isolate new features/ZIP imports in `src/components/<FeatureName>/` with independent Zustand slices and types appended to `src/types.ts` (plug-and-play via 1 nav tab/button).
 
-## 4. Hardware, Storage & Financial Audit Safety
-- **Camera/Scanner**: Luôn kiểm tra quyền `getUserMedia`; gọi `track.stop()` khi unmount. Giới hạn 3-5 FPS khi scan Face/QR để chống đơ UI.
-- **Storage Deep Clean**: Khi xóa (soft/hard delete) Task/Project/Cost, bắt buộc dùng `extractStorageUrls` và `deleteStorageFiles` (trong `src/lib/storageUtils.ts`) để xóa sạch file đính kèm trên Firebase Storage, chống rác mồ côi.
-- **Config Realtime & Audit Logging**: Bảng config (`taka_users`, `taka_config`) phải dùng `onSnapshot`. Mọi biến động luồng tiền (Budget/Cost) bắt buộc ghi log vào `audit_logs` (Append-only) để truy vết kiểm toán.
+## 3. Local-First Dexie, Firebase Guards & Realtime Delta Sync
+- **Primary Storage (`src/lib/localDb.ts` - `TakaLocalDB`)**: `bootstrapLocalStore()` hydrates Zustand from Dexie in 5–10ms (0 loading spinner; auto-fallback to Firestore if IDB blocked/empty). Offload heavy sync/writes (`offloadPersistSnapshot`, `bulkPut`, `applyDeltasToLocalDatabase`) to microtasks (`setTimeout(..., 0)`). Skip self-echoes (`delta.updatedBy === currentUser.email`).
+- **Tri-Gate Lazy Loading & Pooling**: Respect `isTasksRequested`, `isCostsRequested`, `isDelegationsRequested`. Pool per-year listeners in `useRef<Map>` (no unmount on year switch for Zero-Read cache hits). Never pass object literals in `useEffect` deps.
+- **IDB Locks & iOS 40MB Cap**: Use `persistentSingleTabManager({ forceOwnership: true })` for Iframe/PWA and `persistentMultipleTabManager` for Desktop. Cap iOS cache at 40MB (`cacheSizeBytes: isIOS ? 41943040 : CACHE_SIZE_UNLIMITED`).
+- **Mandatory Write Wrapper & Delta Channel**: Maintain a single `onSnapshot` on `taka_deltas` via `deltaRealtimeListener.ts` (5m polling safety net only), ordered by `serverTimestamp()` (`serverTime`, never local `numericTime`). Ignore partial `update` deltas for missing local records (Ghost Record Guard). **ALL** writes to `taka_projects`, `taka_tasks`, `taka_costs`, `taka_delegation_groups`, `taka_users` **MUST** import `setDoc`, `updateDoc`, `deleteDoc`, `writeBatch` from `src/lib/firestoreWrites.ts` (or `src/lib/firebase.ts`) to trigger `autoDeltaQueue.ts` (**NEVER** import write functions directly from `firebase/firestore`).
+- **Atomic Financials & Realtime Economy**: Deep financial updates must use dot-notation (`'financial.byStore...'` + `increment()`), 1 update/doc/batch. Modals read from Zustand (0 Firestore queries). Use `arrayUnion()` for comments/chat/activity logs. Debounce quick inputs 400ms before `syncQueue`.
 
-## 5. Safe Integration (Tích Hợp Module Mới / ZIP)
-- **Strict Isolation**: Gom toàn bộ UI/Logic mới vào thư mục riêng (vd: `src/components/NewFeature/`). Không trộn lẫn vào core components.
-- **Zero-Modification**: Tuyệt đối không sửa/ghi đè UI layout, CSS, hooks hiện có. Chỉ kết nối qua 1 nút/tab navigation (Plug-and-play).
-- **State & Schema Safety**: State mới tạo slice độc lập trong Zustand; type mới viết nối cuối `src/types.ts` hoặc file riêng. Cấm sửa `BUSINESS_LOGIC.md`.
+## 4. Multi-Device Sync, 4-Key Isolation & Rollup Engine
+- **4-Key Composite Isolation (`projectId` + `projectCode` + `year` + `store`)**: Never link/group/query by `projectCode` alone. Persist all 4 fields (`projectId`, `projectCode`, `projectYear`/`year`, `projectStore`/`store`) across Firestore, Dexie, and Zustand.
+- **Entity Matching Priority** (`isTaskBelongsToProject`, `isDelegationGroupBelongsToProject`, `getTasksForProject`, `computeProjectActStatus`, `resolveProjectContext`, `computeTaskCode`, `buildTaskNoMap`, `resolvePredecessorString`):
+  1. Exclude deleted (`isDeleted: true` or in `taskDeletedTracker`).
+  2. **Project ID (#1)**: `task.projectId === project.id`. If both have IDs and differ -> immediately `return false` (no `projectCode` fallback).
+  3. **Store (#2)**: Normalized `toLowerCase().trim()`. Mismatch -> `return false`.
+  4. **Year (#3)**: Normalized `String(year).trim()`. Mismatch -> `return false`.
+  5. **Legacy Fallback**: Only if `projectId` is missing on legacy data, match `projectCode` + `store` + `year` simultaneously.
+- **Overnight Wake-up Guard**: Listen to `visibilitychange`, `pageshow`, `online`, `focus` + 15–30s Heartbeat Gap Detection (>60s sleep gap -> reset stalled Firestore socket, run `pullAndApplyDeltas(undefined, true)`, and reconcile).
+- **Bi-directional Reconciliation (Patch 1L)**: On clean server snapshots (`!fromCache && !hasPendingWrites`), apply `docChanges()` forward and purge local zombies (`buildZombieRemovalsForYear`, `buildZombieRemovalsForProject`) with a 30s edit guard (`RECENT_EDIT_GUARD_MS = 30000`), strictly scoped to query `projectYear`/`projectStore`/`projectId`, deleting locally only (never write deletes back to Firestore).
+- **In-Memory Rollup & Deletion Flow**: Compute parent task and project dates/duration/progress 100% client-side (`taskRollupService.ts`, `projectDatesService.ts`, `calculateProjectComputedDates`) with a `visited` Set circular guard (no Cloud Functions). On task delete: purge from `localDb.tasks` & Zustand -> add `id` to `taskDeletedTracker` -> prune `p.taskSummaries` -> run `calculateProjectComputedDates`.
 
-## 6. UI/UX & Responsive Architecture
-- **Tách biệt UI Controls**: Nút điều khiển phức tạp (Ribbon/Toolbar) tách thành standalone component quản lý qua `UISlice`, không nhồi vào data slices.
-- **Mobile Responsive**: Trên di động, dùng `hidden lg:inline-flex` để ẩn Ribbon/Toolbar phức tạp trên Header và gom gọn vào Navigation Drawer.
-- **Sticky & Reflow Guard**: Thanh công cụ/nút chính dùng `sticky top-0 z-[100] backdrop-blur-md` để cuộn mượt mà, chống layout reflow.
-- **Shortcuts & Memory**: Full-screen/Focus mode gắn phím `Escape` trên `window` và cleanup listener khi unmount.
+## 5. UI/UX, Modular Splitting, Draggable Modals & Konva Guards
+- **100% Enterprise English UI**: All titles, labels, tooltips, descriptions, alerts/toasts, and badges must use professional English.
+- **500-Line Ceiling & JIT Code Splitting**: Max `500` lines/file; split submodules into `src/components/<TabName>Parts/` while keeping `<TabName>.tsx` (`< 300–400` lines) as a pure orchestrator. Wrap form sub-components in `React.memo`. Mount heavy modals JIT (`{isOpen && <Modal />}`) with `React.lazy`/`lazyWithRetry` & `<Suspense fallback={null}>`. Dynamically `await import(...)` heavy libs (`xlsx`, `html2canvas`, `konva`, `jspdf`) to keep main bundle `< 1MB`.
+- **Draggable Modals & Responsive Toolbars**: Every modal (`ProjectModal`, `TaskModal`, `UserModal`, `ConfirmModal`, `CalendarSync`, `QuickNav`...) and modular tooltip must support dragging (`dragControls` / `.modal-handle`, `cursor-grab active:cursor-grabbing`, `GripHorizontal`). Manage toolbars via `UISlice`, hide complex ribbons on mobile (`hidden lg:inline-flex`) into Drawer, use `sticky top-0 z-[100] backdrop-blur-md`, and clean up `Escape` listeners on unmount.
+- **Konva & SVG Performance**: Static Konva elements require `listening={false}` and `perfectDrawEnabled={false}`. Throttle wheel/pan/pinch/drag in `requestAnimationFrame` (Direct Node Transform + `batchDraw()`) and `cancelAnimationFrame` on unmount. Decode floorplans via `useOffscreenImage` (no reload on filter/floor change). Pre-index data into `O(1)` `Map<string, T[]>` inside `useMemo` (never nest `.filter()` inside `.map()`).
 
-## 7. Graphics & Canvas Guards (Konva & SVG)
-- **Hit-Graph Elimination**: Mọi Konva element không nhận sự kiện click (Labels, Badges, Rings, Grid, Background Map) **bắt buộc** gắn `listening={false}` và `perfectDrawEnabled={false}`.
-- **Event Throttling**: Wheel, Pan, Pinch, Drag phải bọc trong `requestAnimationFrame` và hủy bằng `cancelAnimationFrame` khi unmount.
-- **Image Caching**: Mặt bằng nặng giải mã qua `useOffscreenImage` hoặc memoized HTMLImage; cấm reload lại ảnh khi đổi filter/tầng.
-- **O(1) Data Pre-Indexing**: Không lồng `.filter()` trong `.map()`. Tiền xử lý dữ liệu qua `Map<string, T[]>` trong `useMemo` trước khi render.
+## 6. Hardware, Storage & Financial Audit Safety
+- **Camera/Scanner**: Verify `getUserMedia`, call `track.stop()` on unmount, and cap QR/Face scanning at 3–5 FPS.
+- **Storage Deep Clean**: When soft/hard deleting Task/Project/Cost, call `extractStorageUrls` & `deleteStorageFiles` (`src/lib/storageUtils.ts`) for Firebase Storage and `deleteR2ImageCleanly` for Cloudflare R2.
+- **Realtime Config & Audit Log**: Subscribe to `taka_users` and `taka_config` via `onSnapshot`. Record all Budget/Cost or RBAC mutations append-only to `audit_logs` via `auditLogService.ts`.
 
-## 8. Realtime Mutation & Chat Economy
-- **Zero-Query for Modals**: Modal chi tiết (Task/Project Detail, QuickNav) đọc trực tiếp từ Zustand, cấm gọi query/getDoc Firestore độc lập.
-- **Targeted ArrayUnion**: Thêm bình luận (`project.comments`), activity log, chat phải dùng `arrayUnion()` trên doc, tránh ghi đè toàn bộ doc.
-- **Debounced Auto-Save**: Ô nhập nhanh cập nhật tức thì vào Zustand (0ms) và debounce 400ms trước khi đưa vào hàng đợi `syncQueue` (Firestore Batch Write).
-
-## 9. Task Hierarchy & Rollup Engine
-- **In-Memory Computed Rollup**: Ngày bắt đầu, kết thúc, duration, tiến độ (%) của Task mẹ tính tự động từ Task con 100% trong bộ nhớ client (Pure Function). Cấm dùng Cloud Function trigger ghi ngược Firestore.
-- **Circular Guard**: Dùng `visited` Set khi duyệt cây task để chống treo trình duyệt do vòng lặp cha - con.
-
-## 10. Language Standard (English UI Mandate)
-- **100% English UI**: Toàn bộ tiêu đề (Titles), nhãn (Labels), chú thích (Tooltips), diễn giải (Descriptions), cảnh báo (Alerts/Toasts), trạng thái (Badges) phải dùng tiếng Anh chuyên nghiệp chuẩn Enterprise.
-
-## 11. Universal Draggable Modals & Tooltips
-- Mọi modal (`ProjectModal`, `TaskModal`, `UserModal`, `ConfirmModal`, `CalendarSync`, `QuickNav`...) và modular tooltip bắt buộc hỗ trợ kéo thả (Draggable/Pointer Drag) với handle (`.modal-handle`, `cursor-grab active:cursor-grabbing` hoặc icon `GripHorizontal`).
-
-## 12. Modal Performance, Code Splitting & Modular Architecture
-- **Trần Giới Hạn File (Hard File Size Cap < 500 lines)**: Mỗi component / file `.tsx` / `.ts` **tuyệt đối không vượt quá 500 dòng code**. Khi nâng cấp hoặc thêm tính năng mới làm file vượt quá ranh giới này, AI **bắt buộc** phải băm nhỏ/tách submodule vào thư mục tương ứng (`src/components/<TabName>Parts/`).
-- **Mô Hình Module Hóa Tiêu Chuẩn (Modular Directory Standard)**: Mọi Tab và Module phức tạp bắt buộc tuân theo mô hình phân tách 4 lớp:
-  ```
-  src/components/<TabName>Parts/
-  ├── <TabName>FilterToolbar.tsx   (Thanh công cụ, bộ lọc, tìm kiếm, xuất/nhập)
-  ├── <TabName>TableView.tsx       (Giao diện View chính: Bảng/Lưới/Cây)
-  ├── <TabName>MobileView.tsx      (Giao diện tối ưu di động iOS/Android)
-  ├── <TabName>RowItem.tsx         (Hàng dữ liệu con bọc React.memo)
-  ├── <TabName>Modal.tsx           (Modal phụ bọc React.lazy & JIT Mounting)
-  ├── <tabName>Types.ts            (Type/Interface riêng của module)
-  └── use<TabName>Data.ts          (Custom Hook xử lý tính toán/memo/filter)
-  ```
-- **Container Orchestrator**: Container file chính (`<TabName>.tsx`) chỉ giữ vai trò điều phối (dưới 300-400 dòng), đọc state từ Zustand (`useAppStore`) và truyền props phẳng xuống submodules.
-- **Cấm Tái Tạo File Nguyên Khối (Zero Monolithic Logic)**: Tuyệt đối cấm gộp lại hoặc nhồi code mới trực tiếp vào file chính. Mọi nâng cấp mới phải là mở rộng submodule độc lập hoặc viết hook riêng (Additive/Modular Pattern).
-- **JIT Mounting**: Modal nặng bắt buộc dùng Dynamic Import (`React.lazy`), bọc `<Suspense fallback={null}>` và chỉ mount khi mở (`{isOpen && <Modal />}`). Cấm DOM ẩn chạy ngầm.
-- **Thư Viện Nặng & Code Splitting**: Cấm import tĩnh các thư viện nặng (`xlsx`, `html2canvas`, `konva`, `jspdf`) vào bundle chính. Bắt buộc dùng `await import(...)` hoặc `React.lazy` để file bundle chính luôn dưới 1MB, tối ưu thời gian khởi động (FCP) trên máy POS/di động.
-- **Form Sub-Components**: Form phức tạp tách thành các component con bọc `React.memo` để gõ phím không re-render cả modal.
-
-## 13. Quy Chuẩn Đồng Bộ Source Code (Single Source of Truth)
-
-1. 🛑 CẤM Cập Nhật Tài Liệu Lắt Nhắt (No Docs Spam)
-Tuyệt đối KHÔNG tự động viết log, tóm tắt, hay cập nhật các file tài liệu (như `manual_usual.md`, `README.md`, v.v.) sau mỗi lần sửa/viết code. Việc thay đổi tính năng chỉ được phản ánh trực tiếp vào code.
-
-2. 🔄 Cập Nhật Thẳng Vào Mã Nguồn Gốc (Update The Source)
-Sau mỗi lần tái cấu trúc, băm nhỏ file, hoặc viết thêm tính năng mới thành công, AI bắt buộc phải cập nhật (ghi đè đoạn code cũ bằng đoạn code mới) trực tiếp vào file `TAKASHIMAYA_FULL_SOURCE.txt`.
-
-3. 🎯 Nguyên Tắc "Single Source of Truth"
-File `TAKASHIMAYA_FULL_SOURCE.txt` đóng vai trò là kho lưu trữ trung tâm duy nhất chứa trạng thái code hiện tại. Bất kỳ Agent nào trước khi bắt tay vào sửa logic đều phải đảm bảo mã nguồn trong file này luôn đồng bộ với các thay đổi mới nhất để không ghi đè làm mất các bản vá lỗi (hotfix) hoặc các module vừa được tách nhỏ.
-
-## 14. Local-First & Delta Synchronization Architecture (Dexie & Delta Pipeline)
-- **Primary Storage (Dexie.js / IndexedDB)**: Coi `src/lib/localDb.ts` (`TakaLocalDB`) và in-memory Zustand là Primary Data Source cho client. Khi boot app, luôn ưu tiên đọc cache Dexie (`bootstrapLocalStore()`) nạp ngay 100% dữ liệu trong 5ms – 10ms, triệt tiêu hoàn toàn loading spinner.
-- **Delta Sync Pipeline (`taka_deltas`)**: Mọi đột biến (mutation) sau khi xả ghi xuống Firestore bắt buộc ghi nhận bản ghi delta qua `recordDelta()` (`src/lib/deltaSyncService.ts`). Background worker định kỳ kéo delta (`numericTime > lastSyncTime`) và áp dụng nguyên tử vào Zustand + Dexie, cắt giảm 80%–95% lượt Firestore READ.
-- **Non-blocking UI Thread**: Mọi tác vụ ghi nặng (`offloadPersistSnapshot`, `bulkPut`, `applyDeltasToLocalDatabase`) bắt buộc đẩy sang background microtasks (`setTimeout(..., 0)`), cấm thực hiện I/O làm nghẽn luồng render chính của React, bảo đảm 60 FPS.
-- **Self-Mutation Skipping & Tri-Gate Guards**: Tránh echo giật con trỏ khi đang gõ phím (`delta.updatedBy === currentUser.email`) và tuân thủ tuyệt đối 3 cờ Tri-Gate (`isTasksRequested`, `isCostsRequested`, `isDelegationsRequested`) không nhồi dữ liệu vào slice chưa kích hoạt.
-- **Fault-Tolerant Fallback & Sync Queue**: Khi IndexedDB bị chặn (Incognito/Private) hoặc rỗng dữ liệu, tự động fallback về nạp Firestore. Mọi tác vụ ghi tiếp tục được bảo vệ bởi hàng đợi `syncQueue.ts` chống mất mát dữ liệu ngoại tuyến.
-
-
-## 15. Real-time Delta Channel & Auto Delta (Sync Consistency)
-- **Realtime**: `deltaRealtimeListener.ts` giữ 1 `onSnapshot` trên `taka_deltas` (thay polling 25s). Polling chỉ còn là safety net 5 phút. Cấm đưa lại polling ngắn hạn.
-- **Auto Delta**: mọi ghi vào `taka_projects/tasks/costs/delegation_groups` qua wrapper trong `firebase.ts` tự phát delta `invalidate` (`autoDeltaQueue.ts`). Code mới KHÔNG cần tự gọi `recordDelta`, nhưng nếu gọi thì phải gọi trong vòng vài giây sau lệnh ghi để tránh phát trùng.
-- **Ghost record guard**: delta `update` cho doc chưa có trong store/Dexie phải bị bỏ qua, cấm tạo bản ghi từ patch một phần.
-- **Write imports (BẮT BUỘC)**: file ghi vào `taka_projects/tasks/costs/delegation_groups` phải import `setDoc/updateDoc/deleteDoc/writeBatch` từ `src/lib/firestoreWrites.ts` (hoặc `src/lib/firebase.ts`), CẤM import trực tiếp từ `firebase/firestore`, nếu không các máy khác sẽ không nhận được thay đổi.
-- **Sync cursor**: delta được sắp/lọc theo `serverTime` (serverTimestamp), không dùng `numericTime` (giờ máy) để truy vấn, để delta tạo lúc offline vẫn tới được các máy khác.
-
-## 16. Quy Chuẩn Đồng Bộ Đa Thiết Bị & Cô Lập Khóa Dữ Liệu Tuyệt Đối (Multi-Device Sync & Composite Key Isolation)
-- **Cô Lập Tuyệt Đối 4 Khóa (`projectId` + `projectCode` + `year` + `store`)**:
-  - Không bao giờ dùng riêng lẻ `projectCode` để đối chiếu, gom nhóm, hoặc truy vấn dữ liệu.
-  - Mọi hàm liên kết thực thể (Task, Delegation, Cost) với Project (như `isTaskBelongsToProject`, `isDelegationGroupBelongsToProject`, `getTasksForProject`, `computeProjectActStatus`, `resolveProjectContext`, `computeTaskCode`, `buildTaskNoMap`) bắt buộc kiểm tra:
-    1. Bỏ qua bản ghi có `isDeleted: true` hoặc nằm trong `taskDeletedTracker`.
-    2. Khớp theo `projectId` / `id` làm ưu tiên cao nhất. Nếu cả 2 bên có ID nhưng khác nhau -> lập tức loại trừ (`return false`), cấm fallback sang `projectCode` làm gộp nhầm dữ liệu.
-    3. Nếu cả 2 bên có `store`: bắt buộc cùng chi nhánh (so khớp không phân biệt hoa thường). Nếu khác nhau -> loại trừ ngay.
-    4. Nếu cả 2 bên có `year`: bắt buộc cùng năm tài chính. Nếu khác nhau -> loại trừ ngay.
-- **Đồng Bộ Đa Màn Hình / Đa Thiết Bị (iPhone, iPad, Desktop)**:
-  - Khi thao tác Thêm / Sửa / Xóa trên thiết bị A, cập nhật ngay tức thì vào Zustand và Dexie local (0ms lag), đồng thời phát sinh `taka_deltas` lên Firestore với đầy đủ thông tin định danh (`id`, `projectId`, `projectCode`, `projectYear`, `projectStore`).
-  - Thiết bị B đón nhận qua `deltaRealtimeListener.ts` và áp dụng tức thì vào Zustand + Dexie.
-  - Khi xóa Task/Project trên một thiết bị: Các thiết bị khác khi nhận delta xóa phải ngay lập tức loại bỏ task khỏi `localDb.tasks`, đánh dấu vào `taskDeletedTracker`, cắt đứt task khỏi `p.taskSummaries`, và tự động kích hoạt tính toán lại `calculateProjectComputedDates` cho dự án tương ứng.
-  - Cơ chế hồi phục kết nối iOS/Safari: Khi thiết bị mở lại từ chế độ ngủ / ẩn màn hình (`visibilitychange`, `pageshow`, `online`), hệ thống tự động kiểm tra socket, khôi phục listener và kích hoạt `pullAndApplyDeltas(undefined, true)` để bù đắp các delta phát sinh trong thời gian ngoại tuyến.

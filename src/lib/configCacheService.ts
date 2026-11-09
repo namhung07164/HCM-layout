@@ -11,10 +11,10 @@ export interface ConfigVersions {
   ratesVersion?: number;
   rulesVersion?: number;
   r2Version?: number;
-  pictureMappingVersion?: number;
   permissionsVersion?: number;
   subAppUsersVersion?: number;
   appUsersVersion?: number;
+  pictureMappingVersion?: number;
   globalRestoreCutoff?: number;
   dataFingerprint?: string;
   updatedAt?: string;
@@ -244,84 +244,98 @@ export async function bumpConfigVersion(
 export function setupStaticConfigSync(): Unsubscribe {
   const versionRef = doc(db, "artifacts", APP_ID, "public", "data", "taka_config", "versions");
   usePerformanceStore.getState().registerListener("taka_config/versions");
+  let syncQueuePromise: Promise<void> = Promise.resolve();
 
   const unsubscribe = onSnapshot(
     versionRef,
-    async (docSnap) => {
-      usePerformanceStore.getState().trackSnapshot("taka_config/versions", docSnap);
-      useAppStore.getState().setCloudStatus("online");
-      const localVersions = getLocalConfigVersions();
-      const store = useAppStore.getState();
+    (docSnap) => {
+      syncQueuePromise = syncQueuePromise
+        .then(async () => {
+          usePerformanceStore.getState().trackSnapshot("taka_config/versions", docSnap);
+          useAppStore.getState().setCloudStatus("online");
+          const localVersions = getLocalConfigVersions();
+          const store = useAppStore.getState();
 
-      const remoteData: ConfigVersions = docSnap.exists() ? (docSnap.data() as ConfigVersions) : {};
-      const needsInit = !docSnap.exists();
-
-      // 1. Locations
-      const localLocs = store.locations;
-      const remoteLocVer = remoteData.locationsVersion || 1;
-      if (localVersions.locationsVersion !== remoteLocVer || localLocs.length === 0 || needsInit) {
-        try {
-          const locDoc = await getDoc(
-            doc(db, "artifacts", APP_ID, "public", "data", "taka_config", "locations")
-          );
-          if (locDoc.exists()) {
-            const list = locDoc.data()?.list || [];
-            const visibility = locDoc.data()?.visibility || {};
-            const uniqueList = [...new Set(list)] as string[];
-            store.setLocations(uniqueList);
-            store.setLocationVisibility(visibility);
-            cacheLocations(uniqueList, visibility);
+          if (!docSnap.exists() && (docSnap as any).metadata?.fromCache) {
+            return;
           }
-        } catch (err) {
-          console.error("Error fetching locations config:", err);
-        }
-      }
+          const remoteData: ConfigVersions = docSnap.exists() ? (docSnap.data() as ConfigVersions) : {};
+          const needsInit = !docSnap.exists();
 
-      // 2. Parties
-      const localParties = store.parties;
-      const remotePartyVer = remoteData.partiesVersion || 1;
-      if (localVersions.partiesVersion !== remotePartyVer || localParties.length === 0 || needsInit) {
-        try {
-          const partyDoc = await getDoc(
-            doc(db, "artifacts", APP_ID, "public", "data", "taka_config", "parties")
-          );
-          if (partyDoc.exists() && partyDoc.data()?.list) {
-            const list = partyDoc.data()?.list;
-            store.setParties(list);
-            cacheParties(list);
-          } else {
-            const defaultParties = ["Shimizu", "Landlord", "Takashimaya", "CP"];
-            store.setParties(defaultParties);
-            cacheParties(defaultParties);
+          // 1. Locations
+          const localLocs = store.locations;
+          const remoteLocVer = remoteData.locationsVersion || 1;
+          const hasCachedLocs = safeGetItemLocal(CACHE_KEYS.LOCATIONS) !== null;
+          if (localVersions.locationsVersion !== remoteLocVer || (!hasCachedLocs && localLocs.length === 0) || needsInit) {
+            try {
+              const locDoc = await getDoc(
+                doc(db, "artifacts", APP_ID, "public", "data", "taka_config", "locations")
+              );
+              if (locDoc.exists()) {
+                const list = locDoc.data()?.list || [];
+                const visibility = locDoc.data()?.visibility || {};
+                const uniqueList = [...new Set(list)] as string[];
+                store.setLocations(uniqueList);
+                store.setLocationVisibility(visibility);
+                cacheLocations(uniqueList, visibility);
+              } else {
+                cacheLocations(localLocs, store.locationVisibility);
+              }
+            } catch (err) {
+              console.error("Error fetching locations config:", err);
+            }
           }
-        } catch (err) {
-          console.error("Error fetching parties config:", err);
-        }
-      }
 
-      // 3. Exchange Rates
-      const remoteRateVer = remoteData.ratesVersion || 1;
-      if (localVersions.ratesVersion !== remoteRateVer || needsInit) {
-        try {
-          const rateDoc = await getDoc(
-            doc(db, "artifacts", APP_ID, "public", "data", "taka_settings", "exchange_rates")
-          );
-          if (rateDoc.exists()) {
-            const data = rateDoc.data();
-            const jpy = data.jpyRate !== undefined ? Number(data.jpyRate) : 160;
-            const usd = data.usdRate !== undefined ? Number(data.usdRate) : 25000;
-            store.setJpyRate(jpy);
-            store.setUsdRate(usd);
-            cacheExchangeRates(jpy, usd);
+          // 2. Parties
+          const localParties = store.parties;
+          const remotePartyVer = remoteData.partiesVersion || 1;
+          const hasCachedParties = safeGetItemLocal(CACHE_KEYS.PARTIES) !== null;
+          if (localVersions.partiesVersion !== remotePartyVer || (!hasCachedParties && localParties.length === 0) || needsInit) {
+            try {
+              const partyDoc = await getDoc(
+                doc(db, "artifacts", APP_ID, "public", "data", "taka_config", "parties")
+              );
+              if (partyDoc.exists() && partyDoc.data()?.list) {
+                const list = partyDoc.data()?.list;
+                store.setParties(list);
+                cacheParties(list);
+              } else {
+                const defaultParties = ["Shimizu", "Landlord", "Takashimaya", "CP"];
+                store.setParties(defaultParties);
+                cacheParties(defaultParties);
+              }
+            } catch (err) {
+              console.error("Error fetching parties config:", err);
+            }
           }
-        } catch (err) {
-          console.error("Error fetching exchange rates config:", err);
-        }
-      }
+
+          // 3. Exchange Rates
+          const remoteRateVer = remoteData.ratesVersion || 1;
+          const hasCachedRates = safeGetItemLocal(CACHE_KEYS.JPY_RATE) !== null;
+          if (localVersions.ratesVersion !== remoteRateVer || !hasCachedRates || needsInit) {
+            try {
+              const rateDoc = await getDoc(
+                doc(db, "artifacts", APP_ID, "public", "data", "taka_settings", "exchange_rates")
+              );
+              if (rateDoc.exists()) {
+                const data = rateDoc.data();
+                const jpy = data.jpyRate !== undefined ? Number(data.jpyRate) : 160;
+                const usd = data.usdRate !== undefined ? Number(data.usdRate) : 25000;
+                store.setJpyRate(jpy);
+                store.setUsdRate(usd);
+                cacheExchangeRates(jpy, usd);
+              } else {
+                cacheExchangeRates(store.jpyRate || 160, store.usdRate || 25000);
+              }
+            } catch (err) {
+              console.error("Error fetching exchange rates config:", err);
+            }
+          }
 
       // 4. Notification Rules
       const remoteRuleVer = remoteData.rulesVersion || 1;
-      if (localVersions.rulesVersion !== remoteRuleVer || store.notificationRules.length === 0 || needsInit) {
+      const hasCachedRules = safeGetItemLocal(CACHE_KEYS.RULES) !== null;
+      if (localVersions.rulesVersion !== remoteRuleVer || !hasCachedRules || needsInit) {
         try {
           const rulesSnap = await getDocs(
             collection(db, "artifacts", APP_ID, "public", "data", "taka_rules")
@@ -339,7 +353,8 @@ export function setupStaticConfigSync(): Unsubscribe {
 
       // 5. R2 Config
       const remoteR2Ver = remoteData.r2Version || 1;
-      if (localVersions.r2Version !== remoteR2Ver || store.r2Config === null || needsInit) {
+      const hasCachedR2 = safeGetItemLocal(CACHE_KEYS.R2_CONFIG) !== null;
+      if (localVersions.r2Version !== remoteR2Ver || !hasCachedR2 || needsInit) {
         try {
           const r2Doc = await getDoc(
             doc(db, "artifacts", APP_ID, "public", "data", "taka_config", "r2_credentials")
@@ -349,7 +364,11 @@ export function setupStaticConfigSync(): Unsubscribe {
             if (data.accountId && data.accessKeyId) {
                store.setR2Config(data);
                cacheR2Config(data);
+            } else {
+               cacheR2Config(null);
             }
+          } else {
+            cacheR2Config(null);
           }
         } catch (err) {
           console.error("Error fetching r2 config:", err);
@@ -358,7 +377,8 @@ export function setupStaticConfigSync(): Unsubscribe {
 
       // 6. Permissions Matrix
       const remotePermsVer = remoteData.permissionsVersion || 1;
-      if (localVersions.permissionsVersion !== remotePermsVer || Object.keys(store.permissionMatrix || {}).length === 0 || needsInit) {
+      const hasCachedPerms = safeGetItemLocal(CACHE_KEYS.PERMISSIONS) !== null;
+      if (localVersions.permissionsVersion !== remotePermsVer || (!hasCachedPerms && Object.keys(store.permissionMatrix || {}).length === 0) || needsInit) {
         try {
           const permsDoc = await getDoc(
             doc(db, "artifacts", APP_ID, "public", "data", "taka_settings", "permissions")
@@ -367,6 +387,8 @@ export function setupStaticConfigSync(): Unsubscribe {
             const data = permsDoc.data() as PermissionMatrix;
             store.setPermissionMatrix(data);
             cachePermissions(data);
+          } else {
+            cachePermissions(store.permissionMatrix || ({} as PermissionMatrix));
           }
         } catch (err) {
           console.error("Error fetching permissions config:", err);
@@ -375,7 +397,8 @@ export function setupStaticConfigSync(): Unsubscribe {
 
       // 7. Sub App Users
       const remoteSubUsersVer = remoteData.subAppUsersVersion || 1;
-      if (localVersions.subAppUsersVersion !== remoteSubUsersVer || store.subAppUsers.length === 0 || needsInit) {
+      const hasCachedSubUsers = safeGetItemLocal(CACHE_KEYS.SUB_APP_USERS) !== null;
+      if (localVersions.subAppUsersVersion !== remoteSubUsersVer || !hasCachedSubUsers || needsInit) {
         try {
           const subUsersSnap = await getDocs(
             collection(db, "artifacts", APP_ID, "public", "data", "taka_sub_app_users")
@@ -393,7 +416,8 @@ export function setupStaticConfigSync(): Unsubscribe {
 
       // 8. App Users (taka_users versioning)
       const remoteAppUsersVer = remoteData.appUsersVersion || 1;
-      if (localVersions.appUsersVersion !== remoteAppUsersVer || store.appUsers.length === 0 || needsInit) {
+      const hasCachedAppUsers = safeGetItemLocal(CACHE_KEYS.APP_USERS) !== null;
+      if (localVersions.appUsersVersion !== remoteAppUsersVer || (!hasCachedAppUsers && store.appUsers.length === 0) || needsInit) {
         try {
           const usersSnap = await getDocs(
             collection(db, "artifacts", APP_ID, "public", "data", "taka_users")
@@ -409,30 +433,32 @@ export function setupStaticConfigSync(): Unsubscribe {
         }
       }
 
-      // 9. Picture Mapping config update notification
-      const remotePicVer = (remoteData as any).pictureMappingVersion || 0;
-      const localPicVer = (localVersions as any).pictureMappingVersion || 0;
-      if (remotePicVer && remotePicVer !== localPicVer) {
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new Event('taka_cloud_sync_updated'));
-        }
+      const remotePicMapVer = remoteData.pictureMappingVersion || 0;
+      if (
+        localVersions.pictureMappingVersion !== undefined &&
+        localVersions.pictureMappingVersion !== remotePicMapVer &&
+        typeof window !== "undefined"
+      ) {
+        window.dispatchEvent(new Event("taka_cloud_sync_updated"));
       }
 
-      // Cập nhật lại versions vào local cache
-      setLocalConfigVersions({
-        locationsVersion: remoteLocVer,
-        partiesVersion: remotePartyVer,
-        ratesVersion: remoteRateVer,
-        rulesVersion: remoteRuleVer,
-        r2Version: remoteR2Ver,
-        pictureMappingVersion: remotePicVer,
-        permissionsVersion: remotePermsVer,
-        subAppUsersVersion: remoteSubUsersVer,
-        appUsersVersion: remoteAppUsersVer,
-        globalRestoreCutoff: remoteData.globalRestoreCutoff,
-        dataFingerprint: remoteData.dataFingerprint,
-        updatedAt: remoteData.updatedAt || new Date().toISOString(),
-      });
+          // Cập nhật lại versions vào local cache
+          setLocalConfigVersions({
+            locationsVersion: remoteLocVer,
+            partiesVersion: remotePartyVer,
+            ratesVersion: remoteRateVer,
+            rulesVersion: remoteRuleVer,
+            r2Version: remoteR2Ver,
+            permissionsVersion: remotePermsVer,
+            subAppUsersVersion: remoteSubUsersVer,
+            appUsersVersion: remoteAppUsersVer,
+            pictureMappingVersion: remotePicMapVer,
+            globalRestoreCutoff: remoteData.globalRestoreCutoff,
+            dataFingerprint: remoteData.dataFingerprint,
+            updatedAt: remoteData.updatedAt || new Date().toISOString(),
+          });
+        })
+        .catch(() => {});
     },
     (err) => {
       console.warn("Config versions listener error:", err);

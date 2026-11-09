@@ -41,8 +41,46 @@ export function useDetailFocusTracking({
   setExpandedCodes,
 }: UseDetailFocusTrackingParams) {
   const setDetailTabFilterCode = useAppStore(state => state.setDetailTabFilterCode);
+  const fixedProjectCode = useAppStore(state => state.fixedProjectCode);
   const [activeProjectInView, setActiveProjectInView] = useState<Project | null>(null);
   const lastFocusedTaskIdRef = useRef<string | null>(null);
+
+  // Immediately lock activeProjectInView when a project code is fixed (or filtered/searched to a single project)
+  useEffect(() => {
+    const cleanFix = String(fixedProjectCode || '').trim().toLowerCase();
+    if (cleanFix) {
+      const exact = projects.find(
+        (p) =>
+          !p.isDeleted &&
+          (String(p.code || '').trim().toLowerCase() === cleanFix ||
+            String(p.id || '').trim().toLowerCase() === cleanFix) &&
+          (globalYearFilter === 'all' || !p.year || String(p.year).trim() === String(globalYearFilter).trim()) &&
+          (globalStoreFilter === 'all' || !p.store || String(p.store).trim().toLowerCase() === String(globalStoreFilter).trim().toLowerCase())
+      );
+      const fallbackExact =
+        exact ||
+        projects.find(
+          (p) =>
+            !p.isDeleted &&
+            (String(p.code || '').trim().toLowerCase() === cleanFix ||
+              String(p.id || '').trim().toLowerCase() === cleanFix ||
+              String(p.name || '').trim().toLowerCase() === cleanFix)
+        );
+      const fuzzy =
+        fallbackExact ||
+        projects.find((p) => {
+          if (p.isDeleted) return false;
+          const pCode = String(p.code || '').trim().toLowerCase();
+          const pName = String(p.name || '').trim().toLowerCase();
+          const pLink = String(p.linkCodes || '').trim().toLowerCase();
+          return pCode.includes(cleanFix) || pName.includes(cleanFix) || pLink.includes(cleanFix);
+        });
+      if (fuzzy) {
+        setActiveProjectInView(fuzzy);
+        return;
+      }
+    }
+  }, [fixedProjectCode, projects, globalYearFilter, globalStoreFilter]);
 
   // Smart Viewport Project Tracking using IntersectionObserver (Debounced to protect 60fps scrolling)
   useEffect(() => {
@@ -51,6 +89,22 @@ export function useDetailFocusTracking({
     let debounceTimer: NodeJS.Timeout | null = null;
 
     const updateActiveProject = () => {
+      // If user explicitly fixed a project code, keep activeProjectInView locked to the fixed project
+      const currentFix = String(useAppStore.getState().fixedProjectCode || '').trim().toLowerCase();
+      if (currentFix) {
+        const fixedMatch = projects.find(
+          (p) =>
+            !p.isDeleted &&
+            (String(p.code || '').trim().toLowerCase() === currentFix ||
+              String(p.code || '').trim().toLowerCase().includes(currentFix) ||
+              String(p.name || '').trim().toLowerCase().includes(currentFix))
+        );
+        if (fixedMatch) {
+          setActiveProjectInView((prev) => (prev?.id === fixedMatch.id ? prev : fixedMatch));
+          return;
+        }
+      }
+
       let topProjectEl: Element | null = null;
       let minTop = Infinity;
 
@@ -130,7 +184,7 @@ export function useDetailFocusTracking({
       observer.disconnect();
       visibleEntriesMap.clear();
     };
-  }, [projects]);
+  }, [projects, fixedProjectCode]);
 
   const handleClearFocus = useCallback(() => {
     let parentProjectCode = '';
@@ -142,9 +196,12 @@ export function useDetailFocusTracking({
     }
     if (!parentProjectCode && initialFilterCode) {
       const matched = projects.find(p => p.code && (initialFilterCode === p.code || initialFilterCode.startsWith(p.code + '-')));
-      parentProjectCode = matched?.code || initialFilterCode;
+      parentProjectCode = matched?.code || String(initialFilterCode).split('#')[0].trim();
     }
-    setSearchTerm(parentProjectCode);
+    if (parentProjectCode) {
+      useAppStore.getState().setFixedProjectCode(String(parentProjectCode).split('#')[0].trim().toUpperCase());
+    }
+    setSearchTerm('');
     setDetailTabFilterCode(parentProjectCode);
     lastFocusedTaskIdRef.current = null;
     onClearFocus?.();
@@ -170,8 +227,6 @@ export function useDetailFocusTracking({
             (activeElement as HTMLElement).blur();
           }
           setSearchTerm("");
-          setDetailTabFilterCode("");
-          onClearFocus?.();
         } else if (initialFocusTaskId) {
           e.preventDefault();
           const activeElement = document.activeElement;
@@ -197,49 +252,115 @@ export function useDetailFocusTracking({
 
   useEffect(() => {
     if (initialFocusTaskId && initialFocusTaskId !== lastFocusedTaskIdRef.current) {
-      const task = tasks.find((t) => t.id === initialFocusTaskId);
-      if (task) {
-        const p = projects.find(
-          (proj) =>
-            String(proj.code || "").trim().toLowerCase() === String(task.projectCode || "").trim().toLowerCase() &&
-            (!task.projectStore || !proj.store || String(proj.store).trim().toLowerCase() === String(task.projectStore).trim().toLowerCase()) &&
-            (!task.projectYear || !proj.year || String(proj.year).trim() === String(task.projectYear).trim())
-        ) || projects.find(
-          (proj) => String(proj.code || "").trim().toLowerCase() === String(task.projectCode || "").trim().toLowerCase()
-        );
+      const focusIdStr = String(initialFocusTaskId);
+      let task = tasks.find((t) => String(t.id) === focusIdStr);
+      let summaryProject: Project | undefined;
+
+      // Support synthetic summary task IDs (summary_<projectId>_<idx>) created when Tri-Gate tasks were not yet hydrated
+      if (!task && focusIdStr.startsWith('summary_')) {
+        const lastUnderscore = focusIdStr.lastIndexOf('_');
+        if (lastUnderscore > 8) {
+          const extractedProjId = focusIdStr.slice(8, lastUnderscore);
+          const extractedIdx = Number(focusIdStr.slice(lastUnderscore + 1));
+          summaryProject = projects.find((proj) => String(proj.id) === extractedProjId);
+          if (summaryProject) {
+            const projTasks = tasks.filter(
+              (t) =>
+                !t.isDeleted &&
+                ((t.projectId && String(t.projectId) === String(summaryProject!.id)) ||
+                  (!t.projectId &&
+                    String(t.projectCode || '').trim().toLowerCase() === String(summaryProject!.code || '').trim().toLowerCase() &&
+                    String(t.projectStore || '').trim().toLowerCase() === String(summaryProject!.store || '').trim().toLowerCase() &&
+                    String(t.projectYear || '').trim() === String(summaryProject!.year || '').trim()))
+            );
+            const summaryItem = summaryProject.taskSummaries?.[extractedIdx];
+            if (summaryItem) {
+              task =
+                projTasks.find((t) => summaryItem.id && String(t.id) === String(summaryItem.id)) ||
+                projTasks.find((t) => t.name === summaryItem.name) ||
+                projTasks[extractedIdx];
+            }
+          }
+        }
+      }
+
+      if (task || summaryProject) {
+        const p =
+          summaryProject ||
+          (task?.projectId
+            ? projects.find((proj) => String(proj.id) === String(task!.projectId))
+            : projects.find((proj) => {
+                if (proj.isDeleted) return false;
+                if (
+                  String(proj.code || '').trim().toLowerCase() !==
+                  String(task?.projectCode || '').trim().toLowerCase()
+                ) {
+                  return false;
+                }
+                const expectedStore = String(
+                  task?.projectStore || (globalStoreFilter !== 'all' ? globalStoreFilter : '')
+                )
+                  .trim()
+                  .toLowerCase();
+                if (expectedStore && String(proj.store || '').trim().toLowerCase() !== expectedStore) {
+                  return false;
+                }
+                const expectedYear = String(
+                  task?.projectYear || (globalYearFilter !== 'all' ? globalYearFilter : '')
+                ).trim();
+                if (expectedYear && String(proj.year || '').trim() !== expectedYear) {
+                  return false;
+                }
+                return true;
+              }));
+
         lastFocusedTaskIdRef.current = initialFocusTaskId;
-        const subTaskCode = task.taskCodePhu || (p ? `${p.code}#${(task.orderIndex !== undefined ? task.orderIndex : 0) + 1}` : '') || task.projectCode;
+        const subTaskCode = task
+          ? task.taskCodePhu ||
+            (p ? `${p.code}#${(task.orderIndex !== undefined ? task.orderIndex : 0) + 1}` : '') ||
+            task.projectCode
+          : p?.code || '';
+        const fixCode = String(p?.code || task?.projectCode || String(subTaskCode || '').split('#')[0]).trim().toUpperCase();
+        if (fixCode) {
+          useAppStore.getState().setFixedProjectCode(fixCode);
+        }
+        setSearchTerm('');
         if (subTaskCode) {
-          setSearchTerm(subTaskCode);
           setDetailTabFilterCode(subTaskCode);
         }
         if (p) {
           if (p.year && globalYearFilter !== 'all' && String(p.year) !== String(globalYearFilter)) {
             setGlobalYearFilter(String(p.year));
           }
-          if (p.store && globalStoreFilter !== 'all' && String(p.store) !== String(globalStoreFilter)) {
-            setGlobalStoreFilter(p.store);
+          if (
+            p.store &&
+            globalStoreFilter !== 'all' &&
+            String(p.store).toUpperCase() !== String(globalStoreFilter).toUpperCase()
+          ) {
+            setGlobalStoreFilter(String(p.store).toUpperCase());
           }
           if (statusFilter !== 'all') {
             setStatusFilter('all');
           }
           const newCodes = new Set(expandedCodes);
           if (p.id) newCodes.add(String(p.id));
-          if (p.code) newCodes.add(p.code);
-          if (p.no !== undefined && p.no !== null) newCodes.add(String(p.no));
+          else if (p.code) newCodes.add(p.code);
           if (newCodes.size !== expandedCodes.length) {
             setExpandedCodes(Array.from(newCodes));
           }
+          const domTargetId = task ? `detail-task-${task.id}` : `detail-project-${p.no ?? p.code}`;
           const tryScroll = (attempts = 0) => {
-            const el = document.getElementById(`detail-task-${initialFocusTaskId}`);
-            if (el) {
+            const el =
+              document.getElementById(domTargetId) ||
+              (p.id ? document.querySelector(`[data-project-id="${p.id}"]`) : null);
+            if (el && el instanceof HTMLElement) {
               scrollToElement(el);
             } else if (attempts < 15) {
               setTimeout(() => tryScroll(attempts + 1), 80);
             }
           };
           requestAnimationFrame(() => tryScroll(0));
-        } else if (task.projectCode) {
+        } else if (task?.projectCode) {
           if (statusFilter !== 'all') {
             setStatusFilter('all');
           }

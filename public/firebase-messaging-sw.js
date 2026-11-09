@@ -1,5 +1,6 @@
-// Service Worker Version: 1.0.4 - Static Asset Caching & Firebase Push Notifications
-const CACHE_NAME = "taka-static-v1.0.4";
+// Service Worker Version: 1.1.0 - Static Asset Caching & Firebase Push Notifications
+const CACHE_NAME = "taka-static-v1.1.0";
+
 const PRECACHE_ASSETS = [
   "/",
   "/index.html",
@@ -45,11 +46,10 @@ self.addEventListener("activate", (event) => {
 // 3. Fetch Event: Intelligent Tiered Caching Strategy
 self.addEventListener("fetch", (event) => {
   const req = event.request;
-
-  // Only intercept GET requests
-  if (req.method !== "GET") return;
-
   const url = new URL(req.url);
+
+  // Only intercept GET requests for caching
+  if (req.method !== "GET") return;
 
   // Ignore unsupported protocols (chrome-extension, blob, etc.)
   if (!url.protocol.startsWith("http")) return;
@@ -139,29 +139,35 @@ self.addEventListener("fetch", (event) => {
   }
 });
 
-// --- Firebase Cloud Messaging Section ---
-importScripts(
-  "https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js",
-);
-importScripts(
-  "https://www.gstatic.com/firebasejs/10.8.0/firebase-messaging-compat.js",
-);
+// --- Firebase Cloud Messaging Section (Wrapped in try/catch for Offline Boot Safety) ---
+try {
+  importScripts(
+    "https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js",
+  );
+  importScripts(
+    "https://www.gstatic.com/firebasejs/10.8.0/firebase-messaging-compat.js",
+  );
 
-const firebaseConfig = {
-  apiKey: "AIzaSyCsL4MZ76PLxV5-n0BHHLyb5dR_p5UmvTc",
-  authDomain: "taka---projec-1.firebaseapp.com",
-  projectId: "taka---projec-1",
-  storageBucket: "taka---projec-1.firebasestorage.app",
-  messagingSenderId: "1016991080794",
-  appId: "1:1016991080794:web:c447d870815a5ea2135363",
-  measurementId: "G-5MNHZBR47R",
-};
+  const firebaseConfig = {
+    apiKey: "AIzaSyCsL4MZ76PLxV5-n0BHHLyb5dR_p5UmvTc",
+    authDomain: "taka---projec-1.firebaseapp.com",
+    projectId: "taka---projec-1",
+    storageBucket: "taka---projec-1.firebasestorage.app",
+    messagingSenderId: "1016991080794",
+    appId: "1:1016991080794:web:c447d870815a5ea2135363",
+    measurementId: "G-5MNHZBR47R",
+  };
 
-firebase.initializeApp(firebaseConfig);
+  firebase.initializeApp(firebaseConfig);
 
-const messaging = firebase.messaging();
+  const messaging = firebase.messaging();
+  self.__takaMessaging = messaging;
+} catch (fcmErr) {
+  console.warn("[SW] Offline mode or FCM unavailable:", fcmErr);
+}
 
-messaging.onBackgroundMessage((payload) => {
+if (self.__takaMessaging) {
+  self.__takaMessaging.onBackgroundMessage((payload) => {
   console.log(
     "[firebase-messaging-sw.js] Received background message ",
     payload,
@@ -197,7 +203,8 @@ messaging.onBackgroundMessage((payload) => {
   };
 
   self.registration.showNotification(notificationTitle, notificationOptions);
-});
+  });
+}
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();

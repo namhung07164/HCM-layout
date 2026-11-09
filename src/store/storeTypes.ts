@@ -33,6 +33,8 @@ export interface UISlice {
   setSearchActiveProjectIds: (ids: string[]) => void;
   printFilterHeader: boolean;
   setPrintFilterHeader: (val: boolean) => void;
+  printShowColorLegend: boolean;
+  setPrintShowColorLegend: (val: boolean) => void;
   printScaleMode: "default" | "fit-cols" | "fit-rows" | "fit-page" | "fill-page" | "custom";
   setPrintScaleMode: (val: "default" | "fit-cols" | "fit-rows" | "fit-page" | "fill-page" | "custom") => void;
   printScaleCustom: number;
@@ -119,6 +121,8 @@ export interface UISlice {
   setPrefillProjectYear: (year: number | string | null) => void;
   prefillProjectStore: string | null;
   setPrefillProjectStore: (store: string | null) => void;
+  prefillProjectId: string | null;
+  setPrefillProjectId: (id: string | null) => void;
 
   // Filters & Navigation
   costTabSearchTerm: string;
@@ -135,6 +139,8 @@ export interface UISlice {
   setGlobalLocationFilter: (location: string[]) => void;
   pinnedProjects: string[];
   setPinnedProjects: (pinned: string[]) => void;
+  fixedProjectCode: string;
+  setFixedProjectCode: (code: string) => void;
   setDetailTabStoreFilter: (store: string) => void;
   detailTabFocusTaskId: string;
   setDetailTabFocusTaskId: (id: string) => void;
@@ -154,8 +160,12 @@ export interface UISlice {
   layoutTooltipVisibility: LayoutTooltipVisibility;
   setLayoutTooltipVisibility: (updater: Partial<LayoutTooltipVisibility> | ((prev: LayoutTooltipVisibility) => LayoutTooltipVisibility)) => void;
   resetLayoutTooltipVisibility: () => void;
+  layoutPaintCategory: string;
+  setLayoutPaintCategory: (cat: string) => void;
   zoomableImageSrc: string | null;
   setZoomableImageSrc: (src: string | null) => void;
+  isDetailEditMode: boolean;
+  setIsDetailEditMode: (v: boolean) => void;
 }
 
 export interface LayoutTooltipVisibility {
@@ -170,6 +180,7 @@ export interface LayoutTooltipVisibility {
   detail: boolean;
   description: boolean;
   progressBars: boolean;
+  shopType?: boolean;
   area: boolean;
   // Smart Notifications & Alerts Config
   notifications?: boolean;

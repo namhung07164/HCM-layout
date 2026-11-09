@@ -1,20 +1,26 @@
 import React, { Suspense, useState } from 'react';
 import { useLanguage } from "../lib/LanguageContext";
-import { RefreshCw, Smartphone, Monitor, Bell, Activity, Database, ChevronDown, ChevronUp } from "lucide-react";
+import { RefreshCw, Smartphone, Monitor, Bell, Activity, Database, Cloud, ChevronDown, ChevronUp, Download, Link2 } from "lucide-react";
 import { cn } from "../lib/utils";
-import { doc, setDoc } from 'firebase/firestore';
+import { doc } from 'firebase/firestore';
+import { setDoc } from '../lib/firestoreWrites';
 import { db, APP_ID } from "../lib/firebase";
 import { requestNotificationPermission } from "../lib/notifications";
 import { useAppStore } from "../store/useAppStore";
 import { bumpConfigVersion } from "../lib/configCacheService";
+import { recordAuditLog } from "../lib/auditLogService";
 import { lazyWithRetry } from "../lib/lazyWithRetry";
 import { FirestorePerformanceDashboard } from "./FirestorePerformanceDashboard";
 import { SettingNotificationRules } from "./SettingTabParts/SettingNotificationRules";
 import { SettingDataMaintenance } from "./SettingTabParts/SettingDataMaintenance";
+import { R2AutoBackupPanel } from "./SettingTabParts/R2AutoBackupPanel";
+import { executeZeroReadForceUpdate } from "./SettingTabParts/maintenanceHelpers";
 import { SettingTabProps, ConfirmModalState } from "./SettingTabParts/settingTypes";
 
 const ConfirmModal = lazyWithRetry(() => import('./ConfirmModal').then(m => ({ default: m.ConfirmModal })), 'ConfirmModal');
 const DesktopOptimizationModal = lazyWithRetry(() => import('./DesktopOptimizationModal').then(m => ({ default: m.DesktopOptimizationModal })), 'DesktopOptimizationModal');
+const FirestoreSummarizedExportModal = lazyWithRetry(() => import('./SettingTabParts/FirestoreSummarizedExportModal').then(m => ({ default: m.FirestoreSummarizedExportModal })), 'FirestoreSummarizedExportModal');
+const ProjectLinksImagesManagerModal = lazyWithRetry(() => import('./SettingTabParts/ProjectLinksImagesManagerModal').then(m => ({ default: m.ProjectLinksImagesManagerModal })), 'ProjectLinksImagesManagerModal');
 
 export function SettingTab({ rules }: SettingTabProps) {
   const currentUser = useAppStore(state => state.currentUser)!;
@@ -22,7 +28,10 @@ export function SettingTab({ rules }: SettingTabProps) {
   
   const [showPerformanceDashboard, setShowPerformanceDashboard] = useState(false);
   const [showDataMaintenance, setShowDataMaintenance] = useState(false);
+  const [showR2AutoBackup, setShowR2AutoBackup] = useState(false);
   const [showDesktopOptModal, setShowDesktopOptModal] = useState(false);
+  const [showSummaryExportModal, setShowSummaryExportModal] = useState(false);
+  const [showLinksImagesModal, setShowLinksImagesModal] = useState(false);
 
   const [confirmModal, setConfirmModal] = useState<ConfirmModalState>({
     isOpen: false,
@@ -33,6 +42,8 @@ export function SettingTab({ rules }: SettingTabProps) {
 
   const canWrite = currentUser.role === 'admin' || currentUser.canWrite;
   const isAdmin = currentUser.role === 'admin';
+  const roleLower = String(currentUser.role || '').toLowerCase();
+  const canViewPerformance = isAdmin || roleLower === 'manager' || roleLower === 'cp';
 
   const jpyRate = useAppStore(state => state.jpyRate);
   const usdRate = useAppStore(state => state.usdRate);
@@ -48,15 +59,22 @@ export function SettingTab({ rules }: SettingTabProps) {
       return;
     }
     
+    const prevRates = { jpyRate, usdRate };
+    const nextRates = { jpyRate: parsedJpy, usdRate: parsedUsd };
     useAppStore.getState().setJpyRate(parsedJpy);
     useAppStore.getState().setUsdRate(parsedUsd);
     
     try {
-      await setDoc(doc(db, "artifacts", APP_ID, "public", "data", "taka_settings", "exchange_rates"), { 
-        jpyRate: parsedJpy,
-        usdRate: parsedUsd
-      }, { merge: true });
+      await setDoc(doc(db, "artifacts", APP_ID, "public", "data", "taka_settings", "exchange_rates"), nextRates, { merge: true });
       bumpConfigVersion('rates');
+      recordAuditLog({
+        action: 'UPDATE',
+        entityType: 'config',
+        docPath: `artifacts/${APP_ID}/public/data/taka_settings/exchange_rates`,
+        docId: 'exchange_rates',
+        data: nextRates,
+        previousData: prevRates,
+      }).catch(() => {});
       useAppStore.getState().setToast({ title: "Notice", message: "Exchange rates updated successfully." });
     } catch (error) { 
       console.error(error); 
@@ -76,14 +94,25 @@ export function SettingTab({ rules }: SettingTabProps) {
     await requestNotificationPermission(currentUser.id);
   };
 
-  const triggerConfirmAction = (title: string, message: string, onConfirm: () => Promise<void>) => {
+  const triggerConfirmAction = (
+    title: string,
+    message: string,
+    onConfirm: () => Promise<void> | void,
+    confirmStyle: "primary" | "danger" = "primary",
+    confirmText: string = "OK"
+  ) => {
     setConfirmModal({
       isOpen: true,
       title,
       message,
+      confirmStyle,
+      confirmText,
       onConfirm: async () => {
-        await onConfirm();
-        setConfirmModal(prev => ({ ...prev, isOpen: false }));
+        try {
+          await onConfirm();
+        } finally {
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
+        }
       }
     });
   };
@@ -96,6 +125,8 @@ export function SettingTab({ rules }: SettingTabProps) {
             isOpen={confirmModal.isOpen}
             title={confirmModal.title}
             message={confirmModal.message}
+            confirmStyle={confirmModal.confirmStyle || "primary"}
+            confirmText={confirmModal.confirmText || "OK"}
             onConfirm={confirmModal.onConfirm}
             onCancel={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
           />
@@ -106,17 +137,21 @@ export function SettingTab({ rules }: SettingTabProps) {
         <h2 className="text-lg font-bold text-slate-800 dark:text-[#e3e3e3]">{t("Settings")}</h2>
       </div>
       
-      <div className="p-5 flex flex-col md:flex-row gap-4 border-b border-slate-200 dark:border-[#444446] bg-white dark:bg-[#1e1e20] items-center">
+      <div className="p-5 flex flex-col md:flex-row flex-wrap gap-4 border-b border-slate-200 dark:border-[#444446] bg-white dark:bg-[#1e1e20] items-center">
         {currentUser.role !== 'guest' && (
           <>
             <button 
-              title="Refresh"
+              title="Update to latest Cloudflare build without clearing local database cache (0 Firestore Reads/Writes)"
               onClick={() => {
-                if (window.confirm("Do you want to refresh the app to update to the latest version?")) {
-                  window.location.reload();
-                }
+                triggerConfirmAction(
+                  "Force Update App (Zero-Read Smart Update)",
+                  "This will fetch the latest application build from Cloudflare and refresh static assets while preserving your local database (IndexedDB/Dexie) and Delta Sync state (0 extra Firestore Reads/Writes). Proceed?",
+                  executeZeroReadForceUpdate,
+                  "primary",
+                  "OK"
+                );
               }}
-              className="px-5 py-3 rounded-lg border border-slate-200 dark:border-[#444446] hover:bg-slate-50 dark:hover:bg-[#28282a]/50 transition-colors flex items-center gap-3 font-medium text-slate-700 dark:text-[#c3c3c3] w-full md:w-auto shadow-sm"
+              className="px-5 py-3 rounded-lg border border-slate-200 dark:border-[#444446] hover:bg-slate-50 dark:hover:bg-[#28282a]/50 transition-colors flex items-center gap-3 font-medium text-slate-700 dark:text-[#c3c3c3] w-full md:w-auto shadow-sm cursor-pointer active:scale-95 touch-manipulation"
             >
               <RefreshCw className="w-5 h-5 text-emerald-500" />
               Force Update App
@@ -151,27 +186,49 @@ export function SettingTab({ rules }: SettingTabProps) {
               Test Local Notification
             </button>
 
+            <button
+              type="button"
+              onClick={() => setShowSummaryExportModal(true)}
+              title="Download Summarized Data on Firestore (Task Rollups, Financial Aggregates, Layout Summaries, Years Meta)"
+              className="px-5 py-3 rounded-lg border border-slate-200 dark:border-[#444446] hover:bg-slate-50 dark:hover:bg-[#28282a]/50 transition-colors flex items-center gap-3 font-medium text-slate-700 dark:text-[#c3c3c3] w-full md:w-auto shadow-sm cursor-pointer active:scale-95 touch-manipulation"
+            >
+              <Download className="w-5 h-5 text-blue-500" />
+              Download Firestore Summaries
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowLinksImagesModal(true)}
+              title="Audit and delete links & images attached to Project Codes in Comment Modular and Layout Picture"
+              className="px-5 py-3 rounded-lg border border-slate-200 dark:border-[#444446] hover:bg-slate-50 dark:hover:bg-[#28282a]/50 transition-colors flex items-center gap-3 font-medium text-slate-700 dark:text-[#c3c3c3] w-full md:w-auto shadow-sm cursor-pointer active:scale-95 touch-manipulation"
+            >
+              <Link2 className="w-5 h-5 text-indigo-500" />
+              Manage Project Links & Images
+            </button>
+
+            {canViewPerformance && (
+              <button 
+                onClick={() => setShowPerformanceDashboard(prev => !prev)}
+                title="Toggle Firestore Performance & Read Monitor"
+                className={cn(
+                  "px-5 py-3 rounded-lg border transition-colors flex items-center gap-3 font-medium w-full md:w-auto shadow-sm",
+                  showPerformanceDashboard 
+                    ? "bg-blue-50 dark:bg-blue-950/40 border-blue-300 dark:border-blue-800 text-blue-700 dark:text-blue-300"
+                    : "border-slate-200 dark:border-[#444446] hover:bg-slate-50 dark:hover:bg-[#28282a]/50 text-slate-700 dark:text-[#c3c3c3]"
+                )}
+              >
+                <Activity className="w-5 h-5 text-blue-500" />
+                Performance Monitor
+                {showPerformanceDashboard ? (
+                  <ChevronUp className="w-4 h-4 ml-auto md:ml-1 text-blue-500" />
+                ) : (
+                  <ChevronDown className="w-4 h-4 ml-auto md:ml-1 text-slate-400" />
+                )}
+              </button>
+            )}
+
             {isAdmin && (
               <>
-                <button 
-                  onClick={() => setShowPerformanceDashboard(prev => !prev)}
-                  title="Toggle Firestore Performance & Read Monitor"
-                  className={cn(
-                    "px-5 py-3 rounded-lg border transition-colors flex items-center gap-3 font-medium w-full md:w-auto shadow-sm",
-                    showPerformanceDashboard 
-                      ? "bg-blue-50 dark:bg-blue-950/40 border-blue-300 dark:border-blue-800 text-blue-700 dark:text-blue-300"
-                      : "border-slate-200 dark:border-[#444446] hover:bg-slate-50 dark:hover:bg-[#28282a]/50 text-slate-700 dark:text-[#c3c3c3]"
-                  )}
-                >
-                  <Activity className="w-5 h-5 text-blue-500" />
-                  Performance Monitor
-                  {showPerformanceDashboard ? (
-                    <ChevronUp className="w-4 h-4 ml-auto md:ml-1 text-blue-500" />
-                  ) : (
-                    <ChevronDown className="w-4 h-4 ml-auto md:ml-1 text-slate-400" />
-                  )}
-                </button>
-
                 <button 
                   onClick={() => setShowDataMaintenance(prev => !prev)}
                   title="Bảo trì Dữ liệu & Bộ nhớ đệm (Database Maintenance)"
@@ -190,11 +247,37 @@ export function SettingTab({ rules }: SettingTabProps) {
                     <ChevronDown className="w-4 h-4 ml-auto md:ml-1 text-slate-400" />
                   )}
                 </button>
+
+                <button 
+                  onClick={() => setShowR2AutoBackup(prev => !prev)}
+                  title="Cloudflare R2 Auto-Backup & 2027 Data Protection Cron"
+                  className={cn(
+                    "px-5 py-3 rounded-lg border transition-colors flex items-center gap-3 font-medium w-full md:w-auto shadow-sm",
+                    showR2AutoBackup 
+                      ? "bg-cyan-50 dark:bg-cyan-950/40 border-cyan-300 dark:border-cyan-800 text-cyan-700 dark:text-cyan-300"
+                      : "border-slate-200 dark:border-[#444446] hover:bg-slate-50 dark:hover:bg-[#28282a]/50 text-slate-700 dark:text-[#c3c3c3]"
+                  )}
+                >
+                  <Cloud className="w-5 h-5 text-cyan-500" />
+                  R2 Auto-Backup (2027)
+                  {showR2AutoBackup ? (
+                    <ChevronUp className="w-4 h-4 ml-auto md:ml-1 text-cyan-500" />
+                  ) : (
+                    <ChevronDown className="w-4 h-4 ml-auto md:ml-1 text-slate-400" />
+                  )}
+                </button>
               </>
             )}
           </>
         )}
       </div>
+
+      {isAdmin && showR2AutoBackup && (
+        <R2AutoBackupPanel
+          isAdmin={isAdmin}
+          onConfirmAction={triggerConfirmAction}
+        />
+      )}
 
       {isAdmin && showDataMaintenance && (
         <SettingDataMaintenance 
@@ -203,7 +286,7 @@ export function SettingTab({ rules }: SettingTabProps) {
         />
       )}
 
-      {isAdmin && showPerformanceDashboard && (
+      {canViewPerformance && showPerformanceDashboard && (
         <FirestorePerformanceDashboard onClose={() => setShowPerformanceDashboard(false)} />
       )}
 
@@ -255,6 +338,20 @@ export function SettingTab({ rules }: SettingTabProps) {
           <DesktopOptimizationModal 
             isOpen={showDesktopOptModal} 
             onClose={() => setShowDesktopOptModal(false)} 
+          />
+        )}
+        {showSummaryExportModal && (
+          <FirestoreSummarizedExportModal
+            isOpen={showSummaryExportModal}
+            onClose={() => setShowSummaryExportModal(false)}
+          />
+        )}
+        {showLinksImagesModal && (
+          <ProjectLinksImagesManagerModal
+            isOpen={showLinksImagesModal}
+            onClose={() => setShowLinksImagesModal(false)}
+            canWrite={canWrite}
+            onConfirmAction={triggerConfirmAction}
           />
         )}
       </Suspense>

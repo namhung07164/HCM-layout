@@ -4,7 +4,7 @@ import { Layers, X, Filter, RotateCcw } from 'lucide-react';
 import { Project } from '../../types';
 import { ProjectFinancials } from './budgetTypes';
 import { useLanguage } from '../../lib/LanguageContext';
-import { getZIndexClass } from '../../lib/zIndexManager';
+import { getZIndexClass, getZIndexValue } from '../../lib/zIndexManager';
 import { BudgetLinkParentColumn } from './BudgetLinkParentColumn';
 import { BudgetLinkChildColumn } from './BudgetLinkChildColumn';
 
@@ -94,14 +94,14 @@ export function BudgetLinkModal({
     const term = parentSearchTerm.trim().toLowerCase();
     return allProjects.filter(p => {
       if (modalYearFilter !== 'all') {
-        const pYear = p.year ? String(p.year).trim() : (p.start ? String(p.start).substring(0, 4) : '');
+        const pYear = p.year ? String(p.year).trim() : '';
         if (pYear && pYear !== modalYearFilter) return false;
       }
       if (modalStoreFilter !== 'all') {
         const pStore = String(p.store || '').trim().toUpperCase();
         if (pStore && pStore !== modalStoreFilter.toUpperCase()) return false;
       }
-      if (modalLocationFilter !== 'all') {
+      if (modalLocationFilter !== 'all' && !term) {
         if (p.location !== modalLocationFilter) return false;
       }
       if (!term) return true;
@@ -134,7 +134,7 @@ export function BudgetLinkModal({
         ? String(selectedParentProject.year).trim() 
         : (modalYearFilter !== 'all' ? modalYearFilter : '');
       if (targetYear) {
-        const pYear = p.year ? String(p.year).trim() : (p.start ? String(p.start).substring(0, 4) : '');
+        const pYear = p.year ? String(p.year).trim() : '';
         if (pYear && pYear !== targetYear) return false;
       }
 
@@ -146,7 +146,8 @@ export function BudgetLinkModal({
         if (pStore && pStore !== targetStore) return false;
       }
 
-      if (modalLocationFilter !== 'all') {
+      const isLinkedToCurrent = Boolean(parentCode && p.parentId && String(p.parentId).trim().toUpperCase() === parentCode);
+      if (modalLocationFilter !== 'all' && !isLinkedToCurrent && !term) {
         if (p.location !== modalLocationFilter) return false;
       }
 
@@ -179,7 +180,10 @@ export function BudgetLinkModal({
   const parentStats = selectedParentProject ? getProjectFinancials(selectedParentProject) : null;
 
   return (
-    <div className={`fixed inset-0 ${getZIndexClass('MODAL_MODULAR')} flex items-center justify-center bg-black/60 backdrop-blur-xs p-2 sm:p-4 overflow-hidden pointer-events-auto`}>
+    <div 
+      className="fixed inset-0 flex items-center justify-center bg-black/60 backdrop-blur-xs p-2 sm:p-4 overflow-hidden pointer-events-auto"
+      style={{ zIndex: getZIndexValue('MODAL_MODULAR') }}
+    >
       <motion.div
         drag
         dragControls={dragControls}

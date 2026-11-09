@@ -1,7 +1,8 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { createPortal } from 'react-dom';
 import { useShallow } from 'zustand/react/shallow';
 import { motion, AnimatePresence } from 'motion/react';
-import { Split, Edit3, GitMerge, Eye, Maximize2, X, Building2, MapPin, Layers, Calendar } from 'lucide-react';
+import { Split, Edit3, GitMerge, Eye, Maximize2, Minimize2, X, Building2, MapPin, Layers, Calendar } from 'lucide-react';
 import { cn } from '../lib/utils';
 import EditTab from './DataMapping/EditTab';
 import DynamicHierarchyTab from './DataMapping/DynamicHierarchyTab';
@@ -21,6 +22,28 @@ export default React.memo(function DataMappingTab() {
   const [isTabFullscreen, setIsTabFullscreen] = useState(false);
   
   const [isHeaderVisible, setIsHeaderVisible] = useState(false);
+
+  useEffect(() => {
+    const handleToggleEvent = () => {
+      setIsTabFullscreen(prev => !prev);
+    };
+    window.addEventListener('taka_toggle_mapping_fullscreen', handleToggleEvent);
+    return () => window.removeEventListener('taka_toggle_mapping_fullscreen', handleToggleEvent);
+  }, []);
+
+  useEffect(() => {
+    if (!isTabFullscreen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') {
+          return;
+        }
+        setIsTabFullscreen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isTabFullscreen]);
 
   const currentUser = useAppStore(state => state.currentUser);
   const isAdmin = currentUser.role === 'admin';
@@ -113,8 +136,38 @@ export default React.memo(function DataMappingTab() {
     }
   }, [location, userAllowedLocations, setLocation]);
 
+  const prevUnitsCacheRef = React.useRef<{
+    store: string;
+    mapUnitsRef: any;
+    partitionUnitRefs: any[];
+    result: any[];
+  } | null>(null);
+
   const allStoreUnits = React.useMemo(() => {
-    return getAllStoreUnits(store);
+    const partitionUnitRefs: any[] = [];
+    for (const key in storeLocationData) {
+      if (key.startsWith(`${store}_`)) {
+        partitionUnitRefs.push(key, storeLocationData[key]?.mapUnits);
+      }
+    }
+    const prev = prevUnitsCacheRef.current;
+    if (
+      prev &&
+      prev.store === store &&
+      prev.mapUnitsRef === mapUnits &&
+      prev.partitionUnitRefs.length === partitionUnitRefs.length &&
+      prev.partitionUnitRefs.every((val, idx) => val === partitionUnitRefs[idx])
+    ) {
+      return prev.result;
+    }
+    const nextResult = getAllStoreUnits(store);
+    prevUnitsCacheRef.current = {
+      store,
+      mapUnitsRef: mapUnits,
+      partitionUnitRefs,
+      result: nextResult,
+    };
+    return nextResult;
   }, [store, mapUnits, storeLocationData, getAllStoreUnits]);
 
   const allStoreVersions = React.useMemo(() => {
@@ -122,12 +175,15 @@ export default React.memo(function DataMappingTab() {
   }, [store, mapVersions, storeLocationData, getAllStoreVersions]);
 
   // Pre-cache all floor maps into IndexedDB for instant switching
+  const preloadedUrlsKeyRef = React.useRef<string>('');
   React.useEffect(() => {
     if (allStoreVersions.length > 0) {
       const urls = allStoreVersions
         .map(v => v?.backgroundUrl)
         .filter((u): u is string => typeof u === 'string' && u.length > 0 && !u.startsWith('r2://'));
-      if (urls.length > 0) {
+      const key = urls.join('|');
+      if (urls.length > 0 && key !== preloadedUrlsKeyRef.current) {
+        preloadedUrlsKeyRef.current = key;
         preloadFloorImages(urls);
       }
     }
@@ -188,139 +244,162 @@ export default React.memo(function DataMappingTab() {
     }
   };
 
-  return (
-    <div className="flex flex-col h-full w-full overflow-hidden pb-1 relative min-h-0">
-      <div className="relative z-10 p-1 shrink-0">
-        <div className="glass rounded-xl p-2 px-3 border border-slate-800/80 shadow-lg flex items-center justify-between bg-slate-950/90 backdrop-blur-xl flex-wrap gap-2">
-          <div className="flex items-center gap-3 flex-wrap">
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 bg-brand-600/20 border border-brand-500/30 rounded-lg flex items-center justify-center text-brand-400 shrink-0">
-                <Split size={14} />
+  const workspaceBody = (
+    <div className={cn(
+      "flex flex-col w-full overflow-hidden min-h-0",
+      isTabFullscreen
+        ? "fixed inset-0 z-[200000] bg-slate-950 text-slate-100 p-1.5 sm:p-2.5 h-screen"
+        : "h-full relative"
+    )}>
+      <div className="relative z-10 px-0.5 py-0.5 shrink-0">
+        <div className="glass rounded-md py-1 px-1.5 border border-slate-800/80 shadow-sm flex flex-wrap items-center justify-between bg-slate-950/90 backdrop-blur-xl gap-1 min-w-0">
+          {/* Top Row on Mobile: Title & SubTab Switcher + Fullscreen */}
+          <div className="flex flex-wrap items-center justify-between sm:justify-start gap-1 w-full sm:w-auto min-w-0">
+            <div className="flex items-center gap-1 flex-wrap min-w-0">
+              <div className="w-4 h-4 bg-brand-600/20 border border-brand-500/30 rounded flex items-center justify-center text-brand-400 shrink-0">
+                <Split size={10} />
               </div>
-              <div>
-                <h3 className="text-xs font-bold italic serif tracking-wide text-white flex items-center gap-2">
-                  Picture Mapping
-                  <span id="data-mapping-toolbar-portal" className="flex items-center gap-1"></span>
-                </h3>
-              </div>
+              <h3 className="text-[10px] font-bold italic serif tracking-wide text-white flex items-center gap-1 flex-wrap min-w-0">
+                <span className="whitespace-nowrap">Picture Mapping</span>
+                <span id="data-mapping-toolbar-portal" className="flex items-center gap-0.5 flex-wrap"></span>
+              </h3>
             </div>
 
-              {/* Store & Location Filter Dropdown */}
-              <div className="flex items-center gap-2 bg-slate-900/90 px-2 py-1 rounded-lg border border-slate-700/80 shadow-inner">
-                <div className="flex items-center gap-1.5" title="Chọn Chi nhánh (Store)">
-                  <Building2 size={13} className="text-brand-400" />
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Store:</span>
-                  <select
-                    value={store}
-                    onChange={(e) => setStore(e.target.value as 'HCM' | 'HN')}
-                    className="bg-transparent border-none text-xs text-white font-bold uppercase tracking-wide outline-none cursor-pointer hover:text-brand-300 transition-colors"
-                  >
-                    {allowedStores.map(s => (
-                      <option key={s} value={s} className="bg-slate-950 text-slate-200 font-semibold">{s}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="w-px h-3.5 bg-slate-700/80"></div>
-
-                {/* Location Filter on all tabs */}
-                <div className="flex items-center gap-1.5" title="Chọn Tầng / Vị trí (Location)">
-                  <MapPin size={13} className="text-purple-400" />
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Location:</span>
-                  <select
-                    value={location}
-                    onChange={(e) => setLocation(e.target.value)}
-                    className="bg-transparent border-none text-xs text-white font-bold uppercase tracking-wide outline-none cursor-pointer hover:text-purple-300 transition-colors"
-                  >
-                    {userAllowedLocations.map(loc => (
-                      <option key={loc} value={loc} className="bg-slate-950 text-slate-200 font-semibold">{loc}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Year Filter: ONLY on dynamic-hierarchy and review tabs, HIDDEN on edit tab */}
-                {activeSubTab !== 'edit' && (
-                  <>
-                    <div className="w-px h-3.5 bg-slate-700/80"></div>
-                    <div className="flex items-center gap-1.5" title="Chọn Năm quy hoạch (Year)">
-                      <Calendar size={13} className="text-amber-400" />
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Year:</span>
-                      <select
-                        value={effectiveYear}
-                        onChange={(e) => setGlobalYearFilter(e.target.value)}
-                        className="bg-transparent border-none text-xs text-white font-bold uppercase tracking-wide outline-none cursor-pointer hover:text-amber-300 transition-colors"
-                      >
-                        {availableYears.map(y => (
-                          <option key={y} value={y} className="bg-slate-950 text-slate-200 font-semibold">{y}</option>
-                        ))}
-                      </select>
-                    </div>
-                  </>
-                )}
-
-                <div className="w-px h-3.5 bg-slate-700/80"></div>
-
-                <span className="text-[10px] font-medium text-slate-400">
-                  {mapUnits.length} {mapUnits.length === 1 ? 'unit' : 'units'} ({location})
-                </span>
+            {/* Sub-tab Selector & Fullscreen on Mobile Right */}
+            <div className="flex items-center gap-1 ml-auto sm:ml-0 shrink-0">
+              <div className="flex bg-slate-900/70 p-0.5 rounded border border-slate-800/80">
+                <button
+                  onClick={() => setActiveSubTab('edit')}
+                  className={cn(
+                    "flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider transition-all duration-200",
+                    activeSubTab === 'edit' 
+                      ? "bg-brand-600/30 text-brand-300 border border-brand-500/40 shadow-sm" 
+                      : "text-slate-400 hover:text-slate-200"
+                  )}
+                >
+                  <Edit3 size={9} />
+                  Edit
+                </button>
+                <button
+                  onClick={() => setActiveSubTab('dynamic-hierarchy')}
+                  className={cn(
+                    "flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider transition-all duration-200",
+                    activeSubTab === 'dynamic-hierarchy' 
+                      ? "bg-brand-600/30 text-brand-300 border border-brand-500/40 shadow-sm" 
+                      : "text-slate-400 hover:text-slate-200"
+                  )}
+                >
+                  <GitMerge size={9} />
+                  Dynamic
+                </button>
+                <button
+                  onClick={() => setActiveSubTab('review')}
+                  className={cn(
+                    "flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider transition-all duration-200",
+                    activeSubTab === 'review' 
+                      ? "bg-brand-600/30 text-brand-300 border border-brand-500/40 shadow-sm" 
+                      : "text-slate-400 hover:text-slate-200"
+                  )}
+                >
+                  <Eye size={9} />
+                  Review
+                </button>
               </div>
+
+              <button 
+                onClick={() => setIsTabFullscreen(prev => !prev)}
+                className={cn(
+                  "px-1.5 py-0.5 border rounded transition-all shadow-sm flex items-center gap-1 text-[9px] font-semibold shrink-0 active:scale-95 touch-manipulation cursor-pointer",
+                  isTabFullscreen
+                    ? "bg-red-600/20 hover:bg-red-600 text-red-300 hover:text-white border-red-500/40"
+                    : "bg-slate-900 hover:bg-slate-800 border-slate-700 text-slate-300 hover:text-white"
+                )}
+                title={isTabFullscreen ? "Exit Fullscreen (Esc)" : "Fullscreen Workspace"}
+              >
+                {isTabFullscreen ? <Minimize2 size={10} /> : <Maximize2 size={10} />}
+                <span className="hidden md:inline">{isTabFullscreen ? 'Thoát Toàn Màn Hình' : 'Toàn Màn Hình'}</span>
+              </button>
+            </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <CloudSyncManager scope={activeSubTab === 'dynamic-hierarchy' ? 'dynamic' : activeSubTab} />
-            <div className="flex bg-slate-900/70 p-0.5 rounded-lg border border-slate-800/80">
-              <button
-                onClick={() => setActiveSubTab('edit')}
-                className={cn(
-                  "flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all duration-200",
-                  activeSubTab === 'edit' 
-                    ? "bg-brand-600/30 text-brand-300 border border-brand-500/40 shadow-sm" 
-                    : "text-slate-400 hover:text-slate-200"
-                )}
-              >
-                <Edit3 size={11} />
-                Edit
-              </button>
-              <button
-                onClick={() => setActiveSubTab('dynamic-hierarchy')}
-                className={cn(
-                  "flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all duration-200",
-                  activeSubTab === 'dynamic-hierarchy' 
-                    ? "bg-brand-600/30 text-brand-300 border border-brand-500/40 shadow-sm" 
-                    : "text-slate-400 hover:text-slate-200"
-                )}
-              >
-                <GitMerge size={11} />
-                Dynamic
-              </button>
-              <button
-                onClick={() => setActiveSubTab('review')}
-                className={cn(
-                  "flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider transition-all duration-200",
-                  activeSubTab === 'review' 
-                    ? "bg-brand-600/30 text-brand-300 border border-brand-500/40 shadow-sm" 
-                    : "text-slate-400 hover:text-slate-200"
-                )}
-              >
-                <Eye size={11} />
-                Review
-              </button>
+          {/* Bottom Row on Mobile / Right Filters on Desktop: Store & Location Filter Dropdown */}
+          <div className="flex items-center justify-between sm:justify-start gap-1 flex-wrap w-full sm:w-auto border-t sm:border-t-0 pt-0.5 sm:pt-0 border-slate-800/80">
+            <div className="flex items-center gap-1 bg-slate-900/90 px-1.5 py-0.5 rounded border border-slate-700/80 shadow-inner flex-wrap">
+              <div className="flex items-center gap-0.5" title="Chọn Chi nhánh (Store)">
+                <Building2 size={10} className="text-brand-400" />
+                <span className="text-[8px] font-bold uppercase text-slate-400">Store:</span>
+                <select
+                  value={store}
+                  onChange={(e) => setStore(e.target.value as 'HCM' | 'HN')}
+                  className="bg-transparent border-none text-[10px] text-white font-bold uppercase tracking-wide outline-none cursor-pointer hover:text-brand-300 transition-colors"
+                >
+                  {allowedStores.map(s => (
+                    <option key={s} value={s} className="bg-slate-950 text-slate-200 font-semibold">{s}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="w-px h-2 bg-slate-700/80"></div>
+
+              {/* Location Filter on all tabs */}
+              <div className="flex items-center gap-0.5" title="Chọn Tầng / Vị trí (Location)">
+                <MapPin size={10} className="text-purple-400" />
+                <span className="text-[8px] font-bold uppercase text-slate-400">Loc:</span>
+                <select
+                  value={location}
+                  onChange={(e) => setLocation(e.target.value)}
+                  className="bg-transparent border-none text-[10px] text-white font-bold uppercase tracking-wide outline-none cursor-pointer hover:text-purple-300 transition-colors"
+                >
+                  {userAllowedLocations.map(loc => (
+                    <option key={loc} value={loc} className="bg-slate-950 text-slate-200 font-semibold">{loc}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Year Filter: ONLY on dynamic-hierarchy and review tabs, HIDDEN on edit tab */}
+              {activeSubTab !== 'edit' && (
+                <>
+                  <div className="w-px h-2 bg-slate-700/80"></div>
+                  <div className="flex items-center gap-0.5" title="Chọn Năm quy hoạch (Year)">
+                    <Calendar size={10} className="text-amber-400" />
+                    <span className="text-[8px] font-bold uppercase text-slate-400">Year:</span>
+                    <select
+                      value={effectiveYear}
+                      onChange={(e) => setGlobalYearFilter(e.target.value)}
+                      className="bg-transparent border-none text-[10px] text-white font-bold uppercase tracking-wide outline-none cursor-pointer hover:text-amber-300 transition-colors"
+                    >
+                      {availableYears.map(y => (
+                        <option key={y} value={y} className="bg-slate-950 text-slate-200 font-semibold">{y}</option>
+                      ))}
+                    </select>
+                  </div>
+                </>
+              )}
+
+              <div className="w-px h-2 bg-slate-700/80 hidden sm:block"></div>
+
+              <span className="text-[8px] font-medium text-slate-400 hidden sm:inline">
+                {mapUnits.length} units
+              </span>
             </div>
-            
-            <button 
-              onClick={() => setIsTabFullscreen(true)}
-              className="p-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-lg text-slate-300 hover:text-white transition-all shadow-sm flex items-center gap-1 text-[10px] font-semibold"
-              title="Toàn màn hình Workspace"
-            >
-              <Maximize2 size={12} />
-              <span className="hidden sm:inline">Toàn Màn Hình</span>
-            </button>
+
+            <CloudSyncManager scope={activeSubTab === 'dynamic-hierarchy' ? 'dynamic' : activeSubTab} compact />
+
+            {isTabFullscreen && (
+              <button
+                onClick={() => setIsTabFullscreen(false)}
+                className="w-6 h-6 flex items-center justify-center bg-slate-800 hover:bg-red-600 text-slate-200 hover:text-white rounded border border-slate-700 transition-all shadow cursor-pointer"
+                title="Close Fullscreen (Esc)"
+              >
+                <X size={13} />
+              </button>
+            )}
           </div>
         </div>
       </div>
 
       {/* Content Area */}
-      <div className="flex-1 w-full h-full rounded-xl border border-slate-800 shadow-xl relative overflow-hidden flex flex-col z-0 bg-[#141416]">
+      <div className="flex-1 w-full h-full rounded-lg border border-slate-800 shadow-lg relative overflow-hidden flex flex-col z-0 bg-[#141416]">
         <AnimatePresence mode="wait">
           <motion.div
             key={activeSubTab}
@@ -334,72 +413,20 @@ export default React.memo(function DataMappingTab() {
           </motion.div>
         </AnimatePresence>
       </div>
-
-      {/* Fullscreen Overlay */}
-      <AnimatePresence>
-        {isTabFullscreen && (
-          <motion.div 
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            className="fixed inset-0 z-[99999] bg-bg-dark p-6 lg:p-12 overflow-hidden flex flex-col"
-          >
-            <div className="flex items-center justify-between mb-8">
-              <div className="flex bg-slate-900/50 p-1 rounded-xl border border-slate-800">
-                <button
-                  onClick={() => setActiveSubTab('edit')}
-                  className={cn(
-                    "flex items-center gap-2 px-8 py-3 rounded-lg text-sm font-bold uppercase transition-all",
-                    activeSubTab === 'edit' ? "bg-brand-600 text-white shadow-lg" : "text-slate-500 hover:text-slate-200"
-                  )}
-                >
-                  <Edit3 size={16} /> Edit
-                </button>
-                <button
-                  onClick={() => setActiveSubTab('dynamic-hierarchy')}
-                  className={cn(
-                    "flex items-center gap-2 px-8 py-3 rounded-lg text-sm font-bold uppercase transition-all",
-                    activeSubTab === 'dynamic-hierarchy' ? "bg-brand-600 text-white shadow-lg" : "text-slate-500 hover:text-slate-200"
-                  )}
-                >
-                  <GitMerge size={16} /> Dynamic Hierarchy
-                </button>
-                <button
-                  onClick={() => setActiveSubTab('review')}
-                  className={cn(
-                    "flex items-center gap-2 px-8 py-3 rounded-lg text-sm font-bold uppercase transition-all",
-                    activeSubTab === 'review' ? "bg-brand-600 text-white shadow-lg" : "text-slate-500 hover:text-slate-200"
-                  )}
-                >
-                  <Eye size={16} /> Review
-                </button>
-              </div>
-
-              <button 
-                onClick={() => setIsTabFullscreen(false)}
-                className="w-12 h-12 flex items-center justify-center bg-slate-800 hover:bg-red-600 text-white rounded-2xl transition-all shadow-xl"
-              >
-                <X size={24} />
-              </button>
-            </div>
-            
-            <div className="flex-1 overflow-hidden relative glass border border-slate-800 rounded-3xl p-8">
-              <AnimatePresence mode="wait">
-                <motion.div
-                  key={`fs-${activeSubTab}`}
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  className="h-full"
-                >
-                  {renderTabContent()}
-                </motion.div>
-              </AnimatePresence>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
+
+  if (isTabFullscreen && typeof document !== 'undefined') {
+    return (
+      <>
+        <div className="flex flex-col h-full w-full overflow-hidden relative min-h-0 bg-slate-950/50 rounded-lg border border-slate-800 items-center justify-center text-slate-500 text-xs">
+          Workspace is open in Fullscreen mode
+        </div>
+        {createPortal(workspaceBody, document.body)}
+      </>
+    );
+  }
+
+  return workspaceBody;
 });
 

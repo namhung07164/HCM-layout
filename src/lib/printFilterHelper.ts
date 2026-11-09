@@ -59,6 +59,7 @@ export const getPrintFilterContext = (params: {
   detailTabFilterCode?: string;
   costTabFilterCode?: string;
   layoutTabFilters?: { projectCode?: string } | null;
+  fixedProjectCode?: string;
   ganttSearchTerm?: string;
   fallbackProjectCode?: string;
 }): PrintFilterContext => {
@@ -70,6 +71,7 @@ export const getPrintFilterContext = (params: {
     detailTabFilterCode,
     costTabFilterCode,
     layoutTabFilters,
+    fixedProjectCode,
     ganttSearchTerm,
     fallbackProjectCode,
   } = params;
@@ -92,7 +94,6 @@ export const getPrintFilterContext = (params: {
   if (normYear && normYear !== "all" && normYear !== "all year" && normYear !== "all years") {
     yearDisplay = String(globalYearFilter);
   } else {
-    // Check if gantt session year is set
     const ganttYear = safeGetItemSession("taka_gantt_filter_year");
     if (ganttYear && ganttYear !== "all") {
       yearDisplay = String(ganttYear);
@@ -101,26 +102,36 @@ export const getPrintFilterContext = (params: {
     }
   }
 
-  // 3. Project Code
+  // 3. Project Code & Active Gantt Search
   let projectCodeRaw = "";
-  if (activeTab === "detail" && detailTabFilterCode && detailTabFilterCode.trim()) {
+  const sessionGanttSearch = (ganttSearchTerm ?? safeGetItemSession("taka_gantt_search") ?? "").trim();
+  const activeFixedCode = (fixedProjectCode || "").trim();
+
+  if (activeTab === "gantt") {
+    const baseCode = activeFixedCode || (fallbackProjectCode || "").trim();
+    if (baseCode && sessionGanttSearch && baseCode.toLowerCase() !== sessionGanttSearch.toLowerCase()) {
+      projectCodeRaw = `${baseCode} (Search: ${sessionGanttSearch})`;
+    } else if (baseCode) {
+      projectCodeRaw = baseCode;
+    } else if (sessionGanttSearch) {
+      projectCodeRaw = `Search: ${sessionGanttSearch}`;
+    }
+  } else if (activeTab === "detail" && detailTabFilterCode && detailTabFilterCode.trim()) {
     projectCodeRaw = detailTabFilterCode.trim();
   } else if (activeTab === "cost" && costTabFilterCode && costTabFilterCode.trim()) {
     projectCodeRaw = costTabFilterCode.trim();
   } else if (layoutTabFilters?.projectCode && layoutTabFilters.projectCode.trim()) {
     projectCodeRaw = layoutTabFilters.projectCode.trim();
+  } else if (activeFixedCode) {
+    projectCodeRaw = activeFixedCode;
   } else if (fallbackProjectCode && fallbackProjectCode.trim()) {
     projectCodeRaw = fallbackProjectCode.trim();
-  } else {
-    // Check if Gantt search term looks like project code
-    const sessionGanttSearch = ganttSearchTerm || safeGetItemSession("taka_gantt_search") || "";
-    if (sessionGanttSearch && sessionGanttSearch.trim()) {
-      projectCodeRaw = sessionGanttSearch.trim();
-    } else if (detailTabFilterCode && detailTabFilterCode.trim()) {
-      projectCodeRaw = detailTabFilterCode.trim();
-    } else if (costTabFilterCode && costTabFilterCode.trim()) {
-      projectCodeRaw = costTabFilterCode.trim();
-    }
+  } else if (sessionGanttSearch) {
+    projectCodeRaw = sessionGanttSearch;
+  } else if (detailTabFilterCode && detailTabFilterCode.trim()) {
+    projectCodeRaw = detailTabFilterCode.trim();
+  } else if (costTabFilterCode && costTabFilterCode.trim()) {
+    projectCodeRaw = costTabFilterCode.trim();
   }
 
   const projectCodeDisplay = projectCodeRaw ? projectCodeRaw : "All Projects";

@@ -1,7 +1,12 @@
-import React, { FC, lazy, useCallback, useRef, useState } from 'react';
-import { Maximize2, ZoomIn } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Maximize2, ZoomIn, FileText, Loader2 } from 'lucide-react';
 import { TooltipImageItem } from './tooltipTypes';
 import { normalizeImageUrl } from '../LayoutUnitLightboxModal';
+import {
+  generatePdfFirstPageThumbnail,
+  getCachedPdfThumbnail,
+} from './pdfThumbnailGenerator';
+import { extractDriveIdFromUrl } from '../../../lib/pdfBinaryCache';
 
 interface TooltipZoomableThumbnailProps {
   img: TooltipImageItem;
@@ -16,6 +21,72 @@ export const TooltipZoomableThumbnail: React.FC<TooltipZoomableThumbnailProps> =
   const [isPinching, setIsPinching] = useState(false);
   const [showZoomHint, setShowZoomHint] = useState(false);
   const [isImgError, setIsImgError] = useState(false);
+  const [fallbackImgSrc, setFallbackImgSrc] = useState<string | null>(null);
+  const [triedProxyFallback, setTriedProxyFallback] = useState(false);
+  const [triedPdfFallback, setTriedPdfFallback] = useState(false);
+  const [candidateIndex, setCandidateIndex] = useState(0);
+
+  const driveId = useMemo(() => extractDriveIdFromUrl(img.url), [img.url]);
+
+  // For Google Drive links, provide multi-tier candidates (Google CDN -> LH3 CDN -> Server Proxy)
+  const thumbnailCandidates = useMemo(() => {
+    if (driveId) {
+      return [
+        `https://drive.google.com/thumbnail?id=${driveId}&sz=w400`,
+        `https://lh3.googleusercontent.com/d/${driveId}=w400`,
+        `/api/drive-thumb?id=${driveId}&sz=w400`,
+      ];
+    }
+    const normalized = normalizeImageUrl(img.url, 'w400');
+    return normalized ? [normalized] : [];
+  }, [img.url, driveId]);
+
+  const isDirectPdfFile = useMemo(() => {
+    const u = (img.url || '').toLowerCase();
+    if (driveId) return false; // Drive uses fast image thumbnail candidates first
+    return /\.pdf($|\?|#)/i.test(u) || u.includes('type=pdf') || u.includes('application/pdf');
+  }, [img.url, driveId]);
+
+  const [pdfThumbSrc, setPdfThumbSrc] = useState<string | null>(() =>
+    getCachedPdfThumbnail(img.url)
+  );
+  const [isPdfThumbLoading, setIsPdfThumbLoading] = useState<boolean>(() =>
+    isDirectPdfFile && !getCachedPdfThumbnail(img.url)
+  );
+
+  useEffect(() => {
+    setIsImgError(false);
+    setFallbackImgSrc(null);
+    setTriedProxyFallback(false);
+    setTriedPdfFallback(false);
+    setCandidateIndex(0);
+
+    const cached = getCachedPdfThumbnail(img.url);
+    if (cached) {
+      setPdfThumbSrc(cached);
+      setIsPdfThumbLoading(false);
+      return;
+    }
+
+    if (!isDirectPdfFile) {
+      setPdfThumbSrc(null);
+      setIsPdfThumbLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsPdfThumbLoading(true);
+
+    generatePdfFirstPageThumbnail(img.url).then((dataUrl) => {
+      if (cancelled) return;
+      setPdfThumbSrc(dataUrl);
+      setIsPdfThumbLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [img.url, isDirectPdfFile]);
 
   const touchStateRef = useRef<{
     initialDist: number;
@@ -26,7 +97,12 @@ export const TooltipZoomableThumbnail: React.FC<TooltipZoomableThumbnailProps> =
   const lastTapRef = useRef<number>(0);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // 1. Pinch-to-zoom & Drag-to-zoom gesture on touch devices (iOS / iPad / mobile)
+  const isDrivePdfOrDoc = useMemo(() => {
+    const u = (img.url || '').toLowerCase();
+    return Boolean(driveId) || u.includes('drive.google.com') || u.includes('docs.google.com');
+  }, [img.url, driveId]);
+
+  // 1. Pinch-to-zoom gesture on touch devices (iOS / iPad / mobile)
   const handleTouchStart = (e: React.TouchEvent) => {
     if (e.touches.length === 2) {
       const p1 = e.touches[0];
@@ -52,12 +128,10 @@ export const TooltipZoomableThumbnail: React.FC<TooltipZoomableThumbnailProps> =
       const currentDist = Math.hypot(p2.clientX - p1.clientX, p2.clientY - p1.clientY);
       const ratio = currentDist / Math.max(touchStateRef.current.initialDist, 1);
 
-      // User spreading fingers to zoom into thumbnail
       if (ratio > 1.05) {
         if (e.cancelable) e.preventDefault();
         setPreviewScale(Math.min(2.2, ratio));
 
-        // When zoom expansion crosses threshold, auto-expand to fullscreen and continue zooming
         if (ratio >= 1.15 && !touchStateRef.current.triggered) {
           touchStateRef.current.triggered = true;
           const targetScale = Math.min(4, Math.max(1.35, ratio * 1.3));
@@ -81,11 +155,9 @@ export const TooltipZoomableThumbnail: React.FC<TooltipZoomableThumbnailProps> =
       return;
     }
 
-    // Double-tap zoom detection for single touch
     if (e.changedTouches.length === 1) {
       const now = Date.now();
       if (now - lastTapRef.current < 320) {
-        // Double-tap detected -> auto open fullscreen at 2x zoom
         lastTapRef.current = 0;
         if (e.cancelable) e.preventDefault();
         onOpenFullscreen({
@@ -99,7 +171,6 @@ export const TooltipZoomableThumbnail: React.FC<TooltipZoomableThumbnailProps> =
     }
   };
 
-  // Regular click to open full display mode directly
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     onOpenFullscreen({
@@ -108,6 +179,9 @@ export const TooltipZoomableThumbnail: React.FC<TooltipZoomableThumbnailProps> =
       initialScale: 1,
     });
   };
+
+  const currentCandidate = thumbnailCandidates[candidateIndex] || null;
+  const effectiveImageSrc = pdfThumbSrc || fallbackImgSrc || (isDirectPdfFile ? null : currentCandidate);
 
   return (
     <div
@@ -122,30 +196,85 @@ export const TooltipZoomableThumbnail: React.FC<TooltipZoomableThumbnailProps> =
       className="relative rounded-lg overflow-hidden bg-slate-100/90 dark:bg-slate-950/80 border border-slate-200/60 dark:border-slate-800/80 w-full max-h-[190px] sm:max-h-[280px] flex items-center justify-center group/thumb p-1 touch-manipulation cursor-pointer"
       title="Click to view full display HD"
     >
-      {!isImgError ? (
+      {isPdfThumbLoading ? (
+        <div className="flex flex-col items-center justify-center gap-2 py-7 px-3 text-center w-full bg-slate-900/5 dark:bg-slate-900/60 rounded-md">
+          <Loader2 className="w-5 h-5 animate-spin text-blue-500" />
+          <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+            Generating thumbnail preview...
+          </span>
+        </div>
+      ) : effectiveImageSrc && !isImgError ? (
         <img
-          src={normalizeImageUrl(img.url, 'w600')}
+          src={effectiveImageSrc}
           alt={img.title}
           loading="lazy"
           decoding="async"
-          onError={() => setIsImgError(true)}
+          onError={() => {
+            // Stage 0 Fallback for Google Drive: Try next candidate (Google CDN -> LH3 CDN -> Server Proxy)
+            if (driveId && candidateIndex < thumbnailCandidates.length - 1) {
+              setCandidateIndex((prev) => prev + 1);
+              return;
+            }
+
+            // Stage 1 Fallback: For non-Drive HTTP URLs, try /api/pdf-proxy in case of CORS/ISP block
+            const normalized = normalizeImageUrl(img.url, 'w400');
+            if (!triedProxyFallback && !driveId && /^https?:\/\//i.test(normalized)) {
+              setTriedProxyFallback(true);
+              setFallbackImgSrc(`/api/pdf-proxy?url=${encodeURIComponent(normalized)}`);
+              return;
+            }
+
+            // Stage 2 Fallback: Render Page 1 via PDF.js (handles Drive PDFs without thumb & R2 PDFs)
+            if (!triedPdfFallback && !pdfThumbSrc && !isPdfThumbLoading) {
+              setTriedPdfFallback(true);
+              setIsPdfThumbLoading(true);
+              generatePdfFirstPageThumbnail(img.url).then((dataUrl) => {
+                setIsPdfThumbLoading(false);
+                if (dataUrl) {
+                  setPdfThumbSrc(dataUrl);
+                  setIsImgError(false);
+                } else {
+                  setIsImgError(true);
+                }
+              });
+              return;
+            }
+            setIsImgError(true);
+          }}
           style={{
             transform: previewScale > 1 ? `scale(${previewScale})` : undefined,
             transition: isPinching ? 'none' : 'transform 0.15s ease-out',
           }}
           draggable={false}
-          className="w-full h-auto max-h-[180px] sm:max-h-[270px] object-contain hover:scale-[1.01] duration-150 rounded-md select-none"
+          className="w-full h-auto max-h-[180px] sm:max-h-[270px] object-contain hover:scale-[1.01] duration-150 rounded-md select-none bg-white"
         />
+      ) : isDirectPdfFile || isDrivePdfOrDoc ? (
+        <div className="flex flex-col items-center justify-center gap-1.5 py-5 px-3 text-center w-full bg-slate-900/5 dark:bg-slate-900/60 rounded-md">
+          <div className="w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-500">
+            <FileText className="w-5 h-5" />
+          </div>
+          <span className="font-bold text-xs text-slate-700 dark:text-slate-200 truncate max-w-[220px]">
+            {img.title || 'PDF Document'}
+          </span>
+          <span className="text-[10px] font-medium text-blue-600 dark:text-blue-400">
+            Click to open Unified PDF Viewer
+          </span>
+        </div>
       ) : (
-        <div
-          className="flex flex-col items-center justify-center gap-1 text-[10px] text-slate-400 p-3 text-center w-full"
-        >
+        <div className="flex flex-col items-center justify-center gap-1 text-[10px] text-slate-400 p-3 text-center w-full">
           <span className="font-semibold text-slate-600 dark:text-slate-300">
-            Web Link / Article Preview
+            Web Link / Document Preview
           </span>
           <span className="truncate max-w-[200px] text-[9px] font-mono text-blue-500">
             {img.url}
           </span>
+        </div>
+      )}
+
+      {/* Subtle PDF badge when showing rendered PDF thumbnail */}
+      {(isDirectPdfFile || Boolean(pdfThumbSrc)) && effectiveImageSrc && !isImgError && (
+        <div className="absolute top-2 left-2 px-1.5 py-0.5 bg-red-600/90 text-white rounded text-[9px] font-bold tracking-wider uppercase shadow-xs pointer-events-none z-10">
+          PDF
         </div>
       )}
 

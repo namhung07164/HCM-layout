@@ -1,4 +1,4 @@
-import React, { Dispatch, SetStateAction, memo } from 'react';
+import React, { Dispatch, SetStateAction, memo, useEffect, useMemo, useRef } from 'react';
 import { Project, Task } from '../../types';
 import { DetailTableRow, SortConfig } from './detailTypes';
 import { DetailTableHeader } from './DetailTableHeader';
@@ -40,6 +40,12 @@ export interface DetailTableViewProps {
   taskActualStatusMap: Map<string, { label: string; color: string }>;
   taskCodeMap: Map<string, string>;
   childTasksCountMap?: Map<string, number>;
+  expandedModularTasks?: Set<string>;
+  onToggleModularParent?: (parentTaskId: string) => void;
+  onToggleProjectModularTasks?: (parentTaskIds: string[], expand: boolean) => void;
+  isAllModularExpanded?: boolean;
+  onToggleExpandAllModular?: () => void;
+  totalChildTasksCount?: number;
   draggingTaskIds: string[];
   dragOverTaskId: string | null;
   dropPosition: 'before' | 'after' | null;
@@ -96,6 +102,12 @@ export const DetailTableView = memo(function DetailTableView({
   taskActualStatusMap,
   taskCodeMap,
   childTasksCountMap,
+  expandedModularTasks,
+  onToggleModularParent,
+  onToggleProjectModularTasks,
+  isAllModularExpanded,
+  onToggleExpandAllModular,
+  totalChildTasksCount,
   draggingTaskIds,
   dragOverTaskId,
   dropPosition,
@@ -116,17 +128,104 @@ export const DetailTableView = memo(function DetailTableView({
   visibleCount,
   setVisibleCount
 }: DetailTableViewProps) {
+  const isDraggingActive = draggingTaskIds.length > 0;
+  const dragPointerYRef = useRef<number | null>(null);
+  // Smooth 60fps upward & downward auto-scroll when dragging tasks near top sticky header or bottom edge
+  useEffect(() => {
+    if (!isDraggingActive) {
+      dragPointerYRef.current = null;
+      return;
+    }
+
+    let rafId: number | null = null;
+
+    const handleWindowDragOver = (e: DragEvent) => {
+      dragPointerYRef.current = e.clientY;
+      const container = tableContainerRef.current;
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      // Allow drop effect even when hovering over sticky thead, project header, or near table boundaries
+      if (
+        e.clientX >= rect.left - 60 &&
+        e.clientX <= rect.right + 60 &&
+        e.clientY >= rect.top - 200 &&
+        e.clientY <= rect.bottom + 200
+      ) {
+        e.preventDefault();
+        if (e.dataTransfer) {
+          e.dataTransfer.dropEffect = 'move';
+        }
+      }
+    };
+
+    const autoScrollStep = () => {
+      const container = tableContainerRef.current;
+      const clientY = dragPointerYRef.current;
+      if (container && clientY !== null) {
+        const rect = container.getBoundingClientRect();
+        // Generous 80px scroll zone at top and bottom of table
+        const topEdge = rect.top + 80;
+        const bottomEdge = rect.bottom - 80;
+
+        if (clientY < topEdge && container.scrollTop > 0) {
+          const dist = Math.max(1, topEdge - clientY);
+          const intensity = Math.min(1, dist / 100);
+          const delta = Math.round(4 + intensity * 24);
+          container.scrollTop = Math.max(0, container.scrollTop - delta);
+        } else if (
+          clientY > bottomEdge &&
+          container.scrollTop < container.scrollHeight - container.clientHeight
+        ) {
+          const dist = Math.max(1, clientY - bottomEdge);
+          const intensity = Math.min(1, dist / 100);
+          const delta = Math.round(4 + intensity * 24);
+          container.scrollTop = Math.min(
+            container.scrollHeight - container.clientHeight,
+            container.scrollTop + delta
+          );
+        }
+      }
+      rafId = requestAnimationFrame(autoScrollStep);
+    };
+
+    window.addEventListener('dragover', handleWindowDragOver, { capture: true });
+    rafId = requestAnimationFrame(autoScrollStep);
+
+    return () => {
+      window.removeEventListener('dragover', handleWindowDragOver, { capture: true });
+      if (rafId !== null) cancelAnimationFrame(rafId);
+    };
+  }, [isDraggingActive, tableContainerRef]);
+
+  // Stable virtual slice to eliminate scroll jumps during active drag
+  const effectiveStartIndex = startIndex;
+  const effectiveEndIndex = endIndex;
+  const effectivePaddingTop = paddingTop;
+  const effectivePaddingBottom = paddingBottom;
+
   return (
     <div className="hidden xl:block flex-grow pb-16">
       <div 
         ref={tableContainerRef}
         onScroll={handleTableScroll}
-        className="overflow-auto border border-slate-200 dark:border-[#444446] rounded-xl shadow-xs bg-white dark:bg-[#1e1e20]"
-        style={{ height: "calc(100vh - 210px)", minHeight: "520px" }}
+        onDragOver={isDraggingActive ? (e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+        } : undefined}
+        onDrop={isDraggingActive ? (e) => {
+          if (dragOverTaskId) {
+            const targetRow = flatTableRows.find(r => r.type === 'task' && r.task.id === dragOverTaskId);
+            if (targetRow && targetRow.type === 'task') {
+              handleDetailTaskDrop(e, targetRow.task, targetRow.project);
+            }
+          }
+        } : undefined}
+        className="overflow-auto [overflow-anchor:none] border border-slate-200 dark:border-[#444446] rounded-xl shadow-xs bg-white dark:bg-[#1e1e20]"
+        style={{ height: "calc(100vh - 210px)", minHeight: "520px", overflowAnchor: "none" }}
       >
         <table 
-          className="text-sm text-left text-slate-600 dark:text-[#a3a3a3] table-fixed min-w-full"
-          style={{ width: `${totalTableWidth}px` }}
+          className="text-sm text-left text-slate-600 dark:text-[#a3a3a3] table-fixed min-w-full [overflow-anchor:none]"
+          style={{ width: `${totalTableWidth}px`, overflowAnchor: "none" }}
         >
           <DetailTableHeader
             visibleColumns={effectiveVisibleColumns}
@@ -149,14 +248,17 @@ export const DetailTableView = memo(function DetailTableView({
               }
             }}
             onToggleExpandAll={() => setExpandedCodes(expandedCodes.length === 0 ? filteredProjects.map(p => String(p.id!)) : [])}
+            onToggleExpandAllModular={onToggleExpandAllModular}
+            isAllModularExpanded={isAllModularExpanded}
+            totalChildTasksCount={totalChildTasksCount}
           />
           <tbody>
-            {paddingTop > 0 && (
-              <tr style={{ height: `${paddingTop}px` }}>
-                <td colSpan={effectiveVisibleColumns.length} style={{ padding: 0, border: 'none' }} />
+            {effectivePaddingTop > 0 && (
+              <tr style={{ height: `${effectivePaddingTop}px`, overflowAnchor: 'none' }} className="[overflow-anchor:none] pointer-events-none select-none">
+                <td colSpan={effectiveVisibleColumns.length} style={{ padding: 0, border: 'none', height: `${effectivePaddingTop}px` }} />
               </tr>
             )}
-            {flatTableRows.slice(startIndex, endIndex).map((item) => {
+            {flatTableRows.slice(effectiveStartIndex, effectiveEndIndex).map((item) => {
               if (item.type === "project") {
                 const groupTasks = item.groupTasks;
                 const isAllTasksSelected = groupTasks.length > 0 && groupTasks.every(t => selectedTaskIds.has(t.id));
@@ -176,12 +278,20 @@ export const DetailTableView = memo(function DetailTableView({
                     onEditProject={onEditProject || (() => {})}
                     onAddTask={onAddTask}
                     onDeleteProject={handleDeleteProject}
+                    expandedModularTasks={expandedModularTasks}
+                    onToggleModularParent={onToggleModularParent}
+                    onToggleProjectModularTasks={onToggleProjectModularTasks}
                   />
                 );
               }
               const t = item.task;
               const actStatus = taskActualStatusMap.get(t.id) || { label: 'Pending', color: 'bg-slate-50 text-slate-600' };
-              const childCount = (childTasksCountMap?.get(t.id) || 0) + (t.taskCodePhu && t.taskCodePhu !== t.id ? (childTasksCountMap?.get(t.taskCodePhu) || 0) : 0);
+              const childCount = childTasksCountMap?.get(String(t.id)) || childTasksCountMap?.get(t.id) || 0;
+              const isModularExpanded = expandedModularTasks
+                ? (expandedModularTasks.has(String(t.id)) ||
+                   expandedModularTasks.has(String(t.id).toLowerCase()) ||
+                   (!!t.taskCodePhu && (expandedModularTasks.has(t.taskCodePhu) || expandedModularTasks.has(t.taskCodePhu.trim().toLowerCase()))))
+                : false;
               return (
                 <DetailTaskRow
                   key={item.key}
@@ -198,6 +308,8 @@ export const DetailTableView = memo(function DetailTableView({
                   delStatusText={actStatus.label}
                   delStatusColorClass={actStatus.color}
                   childTasksCount={childCount}
+                  isModularExpanded={isModularExpanded}
+                  onToggleModularParent={onToggleModularParent}
                   onToggleSelectTask={handleToggleSelectTask}
                   onEditTask={onEditTask}
                   onUpdateTask={handleUpdateTask}
@@ -211,13 +323,13 @@ export const DetailTableView = memo(function DetailTableView({
                 />
               );
             })}
-            {paddingBottom > 0 && (
-              <tr style={{ height: `${paddingBottom}px` }}>
-                <td colSpan={effectiveVisibleColumns.length} style={{ padding: 0, border: 'none' }} />
+            {effectivePaddingBottom > 0 && (
+              <tr style={{ height: `${effectivePaddingBottom}px`, overflowAnchor: 'none' }} className="[overflow-anchor:none] pointer-events-none select-none">
+                <td colSpan={effectiveVisibleColumns.length} style={{ padding: 0, border: 'none', height: `${effectivePaddingBottom}px` }} />
               </tr>
             )}
             {visibleCount < filteredProjects.length && (
-              <tr>
+              <tr className="print:hidden hide-on-actual-print">
                 <td colSpan={effectiveVisibleColumns.length} className="py-4 text-center bg-white/90 dark:bg-[#1e1e20]/90 backdrop-blur-sm border-t border-slate-200 dark:border-[#444446]">
                   <button
                     onClick={() => setVisibleCount(prev => Math.min(prev + 30, filteredProjects.length))}

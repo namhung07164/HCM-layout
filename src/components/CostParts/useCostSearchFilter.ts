@@ -29,10 +29,12 @@ export function useCostSearchFilter({
   setGlobalLocationFilter,
   getGroupCostsForProject,
 }: UseCostSearchFilterParams) {
+  const fixedProjectCode = useAppStore((state) => state.fixedProjectCode);
   const [searchTerm, setSearchTerm] = useState(
     initialSearchTerm || costTabSearchTerm || ''
   );
   const deferredSearchTerm = useDeferredValue(searchTerm);
+  const effectiveFilterTerm = deferredSearchTerm.trim() || (fixedProjectCode ? fixedProjectCode.trim() : '');
 
   useEffect(() => {
     if (initialSearchTerm) {
@@ -43,17 +45,17 @@ export function useCostSearchFilter({
   }, [initialSearchTerm, costTabSearchTerm]);
 
   const [hasActForcFilter, setHasActForcFilter] = useState(() => {
-    if ((initialSearchTerm || '').trim()) return 'all';
+    if ((initialSearchTerm || '').trim() || (fixedProjectCode || '').trim()) return 'all';
     return safeGetItemSession('taka_cost_act_forc_filter') || 'has_value';
   });
   const lastSelectedActForcFilterRef = useRef<string>(
     safeGetItemSession('taka_cost_act_forc_filter') || 'has_value'
   );
   const lastSelectedLocationFilterRef = useRef<string[]>(globalLocationFilter);
-  const wasSearchingRef = useRef<boolean>(!!(initialSearchTerm || '').trim());
+  const wasSearchingRef = useRef<boolean>(!!((initialSearchTerm || '').trim() || (fixedProjectCode || '').trim()));
 
   useEffect(() => {
-    const isSearching = !!deferredSearchTerm.trim();
+    const isSearching = !!effectiveFilterTerm;
     if (!wasSearchingRef.current && isSearching) {
       if (hasActForcFilter !== 'all') {
         lastSelectedActForcFilterRef.current = hasActForcFilter;
@@ -71,11 +73,11 @@ export function useCostSearchFilter({
       setGlobalLocationFilter(lastSelectedLocationFilterRef.current || []);
       wasSearchingRef.current = false;
     }
-  }, [deferredSearchTerm]);
+  }, [effectiveFilterTerm]);
 
-  // Auto-jump to matched project location(s) when searching in CostTab (Debounced)
+  // Auto-jump to matched project location(s) when searching or fixing project code in CostTab (Debounced)
   useEffect(() => {
-    const term = deferredSearchTerm.trim();
+    const term = effectiveFilterTerm;
     if (!term) return;
 
     const timer = setTimeout(() => {
@@ -120,7 +122,7 @@ export function useCostSearchFilter({
                 (c.firstPaid || 0) -
                 (c.secondPaid || 0) -
                 (c.thirdPaid || 0);
-              const costFields = [
+              return matchesAdvancedSearch(tLower, [
                 c.description,
                 c.vendor,
                 c.actual,
@@ -129,10 +131,7 @@ export function useCostSearchFilter({
                 c.thirdPaid,
                 c.supportingFee,
                 cBalance,
-              ];
-              return costFields.some((val) =>
-                String(val || '').toLowerCase().includes(tLower)
-              );
+              ]);
             });
           }
         );
@@ -160,7 +159,7 @@ export function useCostSearchFilter({
 
     return () => clearTimeout(timer);
   }, [
-    deferredSearchTerm,
+    effectiveFilterTerm,
     projects,
     globalYearFilter,
     effectiveStore,

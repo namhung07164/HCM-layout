@@ -1,18 +1,12 @@
-import React, { Dispatch, SetStateAction, useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { Project, Task, TakaDeltaItem } from '../types';
 import { useAppStore } from '../store/useAppStore';
 import { db, APP_ID, writeBatch } from '../lib/firebase';
 import { doc } from 'firebase/firestore';
 import { recordBatchDeltas } from '../lib/deltaSyncService';
-import { 
-  sortTasksByPredecessorsAndDates, 
-  updatePredecessorsStrings, 
-  healAllTasksPredecessors, 
-  reorderAndCalculateTasks,
-  buildTaskNoMap,
-  getPredecessorCodeUpdates
-} from '../lib/ganttUtils';
+import { reorderAndCalculateTasks } from '../lib/ganttUtils';
 import { reorderTasksStateUnified } from '../lib/taskStateService';
+import { executeSortSubTasks, executeMoveTask } from '../components/DetailTabParts/detailTaskMoveService';
 
 interface UseDetailTaskReorderParams {
   tasks: Task[];
@@ -31,338 +25,306 @@ export function useDetailTaskReorder({
   const [dragOverTaskId, setDragOverTaskId] = useState<string | null>(null);
   const [dropPosition, setDropPosition] = useState<'before' | 'after' | null>(null);
 
+  const realTasks = useMemo(
+    () => tasks.filter((t) => t && !(t as any)._isVirtualSummary && !String(t.id || '').startsWith('ts_')),
+    [tasks]
+  );
+
+  // Stable refs for 0ms callbacks and prevent stale closures
+  const realTasksRef = useRef(realTasks);
+  realTasksRef.current = realTasks;
+
+  const projectsRef = useRef(projects);
+  projectsRef.current = projects;
+
+  const selectedTaskIdsRef = useRef(selectedTaskIds);
+  selectedTaskIdsRef.current = selectedTaskIds;
+
+  const draggingTaskIdsRef = useRef<string[]>(draggingTaskIds);
+  draggingTaskIdsRef.current = draggingTaskIds;
+
+  const dragOverTaskIdRef = useRef<string | null>(dragOverTaskId);
+  dragOverTaskIdRef.current = dragOverTaskId;
+
+  const dropPositionRef = useRef<'before' | 'after' | null>(dropPosition);
+  dropPositionRef.current = dropPosition;
+
+  const dragOverRafRef = useRef<number | null>(null);
+
   const draggingTaskNames = useMemo(() => {
     if (draggingTaskIds.length === 0) return '';
-    return tasks.filter(tk => draggingTaskIds.includes(tk.id)).map(tk => tk.name).join(', ');
-  }, [draggingTaskIds, tasks]);
+    const dragSet = new Set(draggingTaskIds);
+    return realTasks.filter(tk => dragSet.has(tk.id)).map(tk => tk.name).join(', ');
+  }, [draggingTaskIds, realTasks]);
 
   const handleSortSubTasks = useCallback(async (p: Project, groupTasks: Task[]) => {
-    try {
-      const oldTaskNoMap = buildTaskNoMap(projects, tasks);
-      const sorted = sortTasksByPredecessorsAndDates(groupTasks, projects, tasks);
-
-      const batch = writeBatch(db);
-      const updatesPerTask = new Map<string, any>();
-      const now = new Date().toISOString();
-
-      sorted.forEach((t, index) => {
-        const newCode = `${p.code}#${index + 1}`;
-        if (t.orderIndex !== index || t.taskCodePhu !== newCode) {
-          updatesPerTask.set(t.id, { 
-            orderIndex: index, 
-            taskCodePhu: newCode, 
-            updatedAt: now 
-          });
-        }
-      });
-
-      let allUpdatedTasks = tasks.map(t => {
-        const up = updatesPerTask.get(t.id);
-        return up ? { ...t, ...up } : t;
-      });
-
-      const newTaskNoMap = buildTaskNoMap(projects, allUpdatedTasks);
-      const oldCodeToNewCode = getPredecessorCodeUpdates(oldTaskNoMap, newTaskNoMap, projects, allUpdatedTasks);
-
-      const predUpdates = updatePredecessorsStrings(oldCodeToNewCode, allUpdatedTasks, projects, oldTaskNoMap);
-      if (predUpdates.length > 0) {
-        const predMap = new Map(predUpdates.map(pu => [pu.id, pu]));
-        predUpdates.forEach(pu => {
-          const existingUpdates = updatesPerTask.get(pu.id) || {};
-          updatesPerTask.set(pu.id, { ...existingUpdates, predecessor: pu.predecessor, updatedAt: pu.updatedAt });
-        });
-        allUpdatedTasks = allUpdatedTasks.map(t => {
-          const pu = predMap.get(t.id);
-          return pu ? { ...t, predecessor: pu.predecessor, updatedAt: pu.updatedAt } : t;
-        });
-      }
-
-      // Heal all remaining legacy or out-of-sync predecessors
-      const healed = healAllTasksPredecessors(allUpdatedTasks, projects);
-      if (healed.changedCount > 0) {
-        allUpdatedTasks = healed.updatedTasks;
-        healed.updatesToSave.forEach(u => {
-          const existingUpdates = updatesPerTask.get(u.id) || {};
-          updatesPerTask.set(u.id, { ...existingUpdates, predecessor: u.predecessor, updatedAt: u.updatedAt });
-        });
-      }
-
-      // Optimistic UI update in Zustand & sync project dates immediately (0ms)
-      reorderTasksStateUnified(allUpdatedTasks, { affectedProjectIds: [p.id] });
-
-      updatesPerTask.forEach((updates, taskId) => {
-        const tRef = doc(db, "artifacts", APP_ID, "public", "data", "taka_tasks", taskId);
-        batch.update(tRef, updates);
-      });
-
-      try {
-        batch.commit().catch(e => console.error("Batch commit failed", e));
-        const deltaItems: TakaDeltaItem[] = Array.from(updatesPerTask.entries()).map(([taskId, patch]) => ({
-          docId: taskId,
-          collectionName: 'taka_tasks',
-          action: 'update',
-          isPatch: true,
-          data: patch,
-          year: p.year ? String(p.year) : undefined,
-        }));
-        recordBatchDeltas(deltaItems, useAppStore.getState().currentUser?.email || 'reorder_tasks').catch(() => {});
-      } catch (error: any) {
-        console.error("Batch commit failed", error);
-        useAppStore.getState().setToast({ title: "Save Failed", message: "Network error or permission denied. Data was not saved.", type: "error" });
-        return;
-      }
-
-      useAppStore.getState().setToast({
-        title: "Sắp xếp thành công",
-        message: "Đã đánh lại số thứ tự và tự động điền lại Predecessor theo Task code mới.",
-        type: "success"
-      });
-    } catch (error) {
-      console.error(error);
-    }
-  }, [tasks, projects]);
+    await executeSortSubTasks(p, groupTasks, realTasksRef.current, projectsRef.current);
+  }, []);
 
   const handleMoveTask = useCallback(async (p: Project, groupTasks: Task[], index: number, direction: 'up' | 'down') => {
-    if ((direction === 'up' && index === 0) || (direction === 'down' && index === groupTasks.length - 1)) return;
-
-    try {
-      const oldTaskNoMap = buildTaskNoMap(projects, tasks);
-      const sorted = [...groupTasks];
-      const targetIndex = direction === 'up' ? index - 1 : index + 1;
-      const [movedTask] = sorted.splice(index, 1);
-      sorted.splice(targetIndex, 0, movedTask);
-
-      const batch = writeBatch(db);
-      const updatesPerTask = new Map<string, any>();
-      const now = new Date().toISOString();
-
-      sorted.forEach((t, newIdx) => {
-        const newCode = `${p.code}#${newIdx + 1}`;
-        if (t.orderIndex !== newIdx || t.taskCodePhu !== newCode) {
-          updatesPerTask.set(t.id, { 
-            orderIndex: newIdx, 
-            taskCodePhu: newCode, 
-            updatedAt: now 
-          });
-        }
-      });
-
-      let allUpdatedTasks = tasks.map(t => {
-        const up = updatesPerTask.get(t.id);
-        return up ? { ...t, ...up } : t;
-      });
-
-      const newTaskNoMap = buildTaskNoMap(projects, allUpdatedTasks);
-      const oldCodeToNewCode = getPredecessorCodeUpdates(oldTaskNoMap, newTaskNoMap, projects, allUpdatedTasks);
-
-      const predUpdates = updatePredecessorsStrings(oldCodeToNewCode, allUpdatedTasks, projects, oldTaskNoMap);
-      if (predUpdates.length > 0) {
-        const predMap = new Map(predUpdates.map(pu => [pu.id, pu]));
-        predUpdates.forEach(pu => {
-          const existingUpdates = updatesPerTask.get(pu.id) || {};
-          updatesPerTask.set(pu.id, { ...existingUpdates, predecessor: pu.predecessor, updatedAt: pu.updatedAt });
-        });
-        allUpdatedTasks = allUpdatedTasks.map(t => {
-          const pu = predMap.get(t.id);
-          return pu ? { ...t, predecessor: pu.predecessor, updatedAt: pu.updatedAt } : t;
-        });
-      }
-
-      // Heal any remaining legacy or out-of-sync predecessors
-      const healed = healAllTasksPredecessors(allUpdatedTasks, projects);
-      if (healed.changedCount > 0) {
-        allUpdatedTasks = healed.updatedTasks;
-        healed.updatesToSave.forEach(u => {
-          const existingUpdates = updatesPerTask.get(u.id) || {};
-          updatesPerTask.set(u.id, { ...existingUpdates, predecessor: u.predecessor, updatedAt: u.updatedAt });
-        });
-      }
-
-      // Optimistic UI update in Zustand & sync project dates immediately (0ms)
-      reorderTasksStateUnified(allUpdatedTasks, { affectedProjectIds: [p.id] });
-
-      updatesPerTask.forEach((updates, taskId) => {
-        const tRef = doc(db, "artifacts", APP_ID, "public", "data", "taka_tasks", taskId);
-        batch.update(tRef, updates);
-      });
-
-      try {
-        batch.commit().catch(e => console.error("Batch commit failed", e));
-        const deltaItems: TakaDeltaItem[] = Array.from(updatesPerTask.entries()).map(([taskId, patch]) => ({
-          docId: taskId,
-          collectionName: 'taka_tasks',
-          action: 'update',
-          isPatch: true,
-          data: patch,
-          year: p.year ? String(p.year) : undefined,
-        }));
-        recordBatchDeltas(deltaItems, useAppStore.getState().currentUser?.email || 'move_task').catch(() => {});
-      } catch (error: any) {
-        console.error("Batch commit failed", error);
-        useAppStore.getState().setToast({ title: "Save Failed", message: "Network error or permission denied. Data was not saved.", type: "error" });
-        return;
-      }
-    } catch (error) {
-      console.error(error);
-    }
-  }, [tasks, projects]);
+    await executeMoveTask(p, groupTasks, index, direction, realTasksRef.current, projectsRef.current);
+  }, []);
 
   const handleDetailTaskDragStart = useCallback((e: React.DragEvent, taskId: string) => {
-    const tasksToMove = selectedTaskIds.has(taskId)
-      ? Array.from(selectedTaskIds)
+    const currentSelected = selectedTaskIdsRef.current;
+    const tasksToMove = currentSelected.has(taskId)
+      ? Array.from(currentSelected)
       : [taskId];
+    draggingTaskIdsRef.current = tasksToMove;
     setDraggingTaskIds(tasksToMove);
-    e.dataTransfer.setData(
-      "application/json",
-      JSON.stringify({
-        type: "task-reorder",
-        tasks: tasksToMove,
-      })
-    );
+
+    const payload = JSON.stringify({
+      type: "task-reorder",
+      tasks: tasksToMove,
+    });
+    e.dataTransfer.setData("application/json", payload);
+    e.dataTransfer.setData("text/plain", payload);
     e.dataTransfer.effectAllowed = "move";
     try {
       const cell = (e.currentTarget as HTMLElement).querySelector("td");
       if (cell) e.dataTransfer.setDragImage(cell, 10, 10);
-    } catch (err) {}
-  }, [selectedTaskIds]);
+    } catch {}
+  }, []);
 
   const handleDetailTaskDragOver = useCallback((e: React.DragEvent, taskId: string) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
-    if (draggingTaskIds.includes(taskId)) return;
+    if (draggingTaskIdsRef.current.includes(taskId)) return;
+
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const relY = e.clientY - rect.top;
-    const pos: 'before' | 'after' = relY < rect.height / 2 ? 'before' : 'after';
+    const midY = rect.height / 2;
 
-    if (dragOverTaskId !== taskId || dropPosition !== pos) {
-      setDragOverTaskId(taskId);
-      setDropPosition(pos);
+    let pos: 'before' | 'after';
+    if (dragOverTaskIdRef.current === taskId && dropPositionRef.current) {
+      if (dropPositionRef.current === 'before' && relY <= midY + 4) {
+        pos = 'before';
+      } else if (dropPositionRef.current === 'after' && relY >= midY - 4) {
+        pos = 'after';
+      } else {
+        pos = relY < midY ? 'before' : 'after';
+      }
+    } else {
+      pos = relY < midY ? 'before' : 'after';
     }
-  }, [draggingTaskIds, dragOverTaskId, dropPosition]);
+
+    if (dragOverTaskIdRef.current !== taskId || dropPositionRef.current !== pos) {
+      dragOverTaskIdRef.current = taskId;
+      dropPositionRef.current = pos;
+      if (dragOverRafRef.current === null) {
+        dragOverRafRef.current = requestAnimationFrame(() => {
+          dragOverRafRef.current = null;
+          setDragOverTaskId(dragOverTaskIdRef.current);
+          setDropPosition(dropPositionRef.current);
+        });
+      }
+    }
+  }, []);
 
   const handleDetailTaskDragLeave = useCallback((e: React.DragEvent, taskId: string) => {
-    const related = e.relatedTarget as Node | null;
-    if (related && (e.currentTarget as HTMLElement).contains(related)) {
-      return;
+    const currentRow = e.currentTarget as HTMLElement;
+    const related = e.relatedTarget as HTMLElement | null;
+    if (related) {
+      if (currentRow.contains(related)) return;
+      if (related.closest && related.closest('tr[data-task-item="true"]')) return;
     }
-    if (dragOverTaskId === taskId) {
+    if (dragOverTaskIdRef.current === taskId) {
+      dragOverTaskIdRef.current = null;
+      dropPositionRef.current = null;
       setDragOverTaskId(null);
       setDropPosition(null);
     }
-  }, [dragOverTaskId]);
+  }, []);
 
-  const handleDetailTaskDragEnd = useCallback((e: React.DragEvent) => {
+  const handleDetailTaskDragEnd = useCallback((_e: React.DragEvent) => {
+    if (dragOverRafRef.current !== null) {
+      cancelAnimationFrame(dragOverRafRef.current);
+      dragOverRafRef.current = null;
+    }
+    draggingTaskIdsRef.current = [];
+    dragOverTaskIdRef.current = null;
+    dropPositionRef.current = null;
     setDraggingTaskIds([]);
     setDragOverTaskId(null);
     setDropPosition(null);
-    const tr = e.currentTarget as HTMLTableRowElement;
-    if (tr) tr.removeAttribute('draggable');
   }, []);
 
   const handleDetailTaskDrop = useCallback(async (e: React.DragEvent, targetTask: Task, targetProject: Project) => {
     e.preventDefault();
-    const position = dropPosition || 'before';
+    if (dragOverRafRef.current !== null) {
+      cancelAnimationFrame(dragOverRafRef.current);
+      dragOverRafRef.current = null;
+    }
+
+    let position = dropPositionRef.current;
+    if (!position) {
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      position = (e.clientY - rect.top) < rect.height / 2 ? 'before' : 'after';
+    }
+    const finalPosition = position || 'before';
+
+    const currentDraggingIds = draggingTaskIdsRef.current;
+    draggingTaskIdsRef.current = [];
+    dragOverTaskIdRef.current = null;
+    dropPositionRef.current = null;
     setDragOverTaskId(null);
     setDropPosition(null);
     setDraggingTaskIds([]);
 
     try {
+      if ((targetTask as any)?._isVirtualSummary || String(targetTask?.id || '').startsWith('ts_')) return;
       let payloadStr = e.dataTransfer.getData("application/json");
       if (!payloadStr) {
         const textPlain = e.dataTransfer.getData("text/plain");
         if (textPlain) {
-          const parsed = JSON.parse(textPlain);
-          if (!parsed.type) parsed.type = "task-reorder";
-          payloadStr = JSON.stringify(parsed);
+          try {
+            const parsed = JSON.parse(textPlain);
+            if (!parsed.type) parsed.type = "task-reorder";
+            payloadStr = JSON.stringify(parsed);
+          } catch {}
         }
       }
 
-      if (!payloadStr) return;
-      const data = JSON.parse(payloadStr);
-      if (data.type !== "task-reorder" || !data.tasks || !Array.isArray(data.tasks)) return;
+      let tasksToMoveIds: string[] = [];
+      if (payloadStr) {
+        const data = JSON.parse(payloadStr);
+        if (data.type === "task-reorder" && Array.isArray(data.tasks)) {
+          tasksToMoveIds = data.tasks.filter((id: string) => !String(id).startsWith('ts_'));
+        }
+      } else if (currentDraggingIds.length > 0) {
+        tasksToMoveIds = currentDraggingIds.filter((id: string) => !String(id).startsWith('ts_'));
+      }
 
-      const tasksToMoveIds: string[] = data.tasks;
       if (tasksToMoveIds.length === 0) return;
       if (tasksToMoveIds.includes(targetTask.id)) return;
 
+      const currentRealTasks = realTasksRef.current;
+      const currentProjects = projectsRef.current;
+
       const result = reorderAndCalculateTasks(
-        tasks,
-        projects,
+        currentRealTasks,
+        currentProjects,
         targetProject,
         tasksToMoveIds,
         targetTask.id,
-        position
+        finalPosition
       );
       if (!result) return;
 
-      // Optimistic local state update in Zustand & sync project dates immediately
-      reorderTasksStateUnified(result.allUpdatedTasks);
-
-      const writeBatches: any[] = [];
-      let currentWriteBatch = writeBatch(db);
-      let writeCount = 0;
-
-      for (const tu of result.taskUpdates) {
-        const tRef = doc(db, "artifacts", APP_ID, "public", "data", "taka_tasks", tu.id);
-        currentWriteBatch.update(tRef, tu.updates);
-        writeCount++;
-        if (writeCount >= 400) {
-          writeBatches.push(currentWriteBatch.commit());
-          currentWriteBatch = writeBatch(db);
-          writeCount = 0;
+      const affectedProjectIdsSet = new Set<string>();
+      if (targetProject.id) affectedProjectIdsSet.add(targetProject.id);
+      const movedSet = new Set(tasksToMoveIds);
+      for (let i = 0; i < currentRealTasks.length; i++) {
+        const t = currentRealTasks[i];
+        if (movedSet.has(t.id) && t.projectId) {
+          affectedProjectIdsSet.add(t.projectId);
         }
       }
 
-      for (const pu of result.predecessorUpdates) {
-        const alreadyInBatch = result.taskUpdates.some((tu) => tu.id === pu.id);
-        if (!alreadyInBatch) {
-          const tRef = doc(db, "artifacts", APP_ID, "public", "data", "taka_tasks", pu.id);
-          currentWriteBatch.update(tRef, {
-            predecessor: pu.predecessor,
-            updatedAt: pu.updatedAt,
-          });
-          writeCount++;
-          if (writeCount >= 400) {
-            writeBatches.push(currentWriteBatch.commit());
-            currentWriteBatch = writeBatch(db);
-            writeCount = 0;
-          }
-        }
-      }
-
-      if (writeCount > 0) writeBatches.push(currentWriteBatch.commit());
-      await Promise.all(writeBatches);
-
-      const deltaItems: TakaDeltaItem[] = [];
-      result.taskUpdates.forEach((tu) => {
-        deltaItems.push({
-          docId: tu.id,
-          collectionName: 'taka_tasks',
-          action: 'update',
-          isPatch: true,
-          data: tu.updates,
-        });
+      // 0ms Optimistic local state update in Zustand
+      reorderTasksStateUnified(result.allUpdatedTasks, {
+        affectedProjectIds: Array.from(affectedProjectIdsSet),
       });
-      result.predecessorUpdates.forEach((pu) => {
-        if (!result.taskUpdates.some((tu) => tu.id === pu.id)) {
-          deltaItems.push({
-            docId: pu.id,
-            collectionName: 'taka_tasks',
-            action: 'update',
-            isPatch: true,
-            data: { predecessor: pu.predecessor, updatedAt: pu.updatedAt },
-          });
-        }
-      });
-      if (deltaItems.length > 0) {
-        recordBatchDeltas(deltaItems, useAppStore.getState().currentUser?.email || 'drag_reorder').catch(() => {});
+
+      const changedIds = new Set<string>([
+        ...result.taskUpdates.map((tu) => tu.id),
+        ...result.predecessorUpdates.map((pu) => pu.id),
+      ]);
+      const prevTasksForUndo = currentRealTasks.filter((t) => changedIds.has(t.id));
+      const nextTasksForRedo = result.allUpdatedTasks.filter((t) => changedIds.has(t.id));
+      if (prevTasksForUndo.length > 0) {
+        import('../lib/undoManager')
+          .then(async ({ undoManager }) => {
+            const { restoreTasksSnapshot } = await import('../lib/undoStateHelpers');
+            undoManager.push({
+              description: `Reorder ${tasksToMoveIds.length} Task(s)`,
+              revert: async () => {
+                await restoreTasksSnapshot({ tasksToRestore: prevTasksForUndo });
+              },
+              redo: async () => {
+                await restoreTasksSnapshot({ tasksToRestore: nextTasksForRedo });
+              },
+            });
+          })
+          .catch(() => {});
       }
 
+      // Clear selection so newly positioned tasks don't drag unintended items next
       setSelectedTaskIds(new Set());
+
+      // Background Firestore commit & delta broadcast
+      setTimeout(() => {
+        try {
+          const writeBatches: any[] = [];
+          let currentWriteBatch = writeBatch(db);
+          let writeCount = 0;
+          const taskUpdateIds = new Set<string>();
+
+          for (const tu of result.taskUpdates) {
+            taskUpdateIds.add(tu.id);
+            const tRef = doc(db, "artifacts", APP_ID, "public", "data", "taka_tasks", tu.id);
+            currentWriteBatch.set(tRef, tu.updates, { merge: true });
+            writeCount++;
+            if (writeCount >= 400) {
+              writeBatches.push(currentWriteBatch.commit());
+              currentWriteBatch = writeBatch(db);
+              writeCount = 0;
+            }
+          }
+
+          for (const pu of result.predecessorUpdates) {
+            if (!taskUpdateIds.has(pu.id)) {
+              const tRef = doc(db, "artifacts", APP_ID, "public", "data", "taka_tasks", pu.id);
+              currentWriteBatch.set(tRef, {
+                predecessor: pu.predecessor,
+                updatedAt: pu.updatedAt,
+              }, { merge: true });
+              writeCount++;
+              if (writeCount >= 400) {
+                writeBatches.push(currentWriteBatch.commit());
+                currentWriteBatch = writeBatch(db);
+                writeCount = 0;
+              }
+            }
+          }
+
+          if (writeCount > 0) writeBatches.push(currentWriteBatch.commit());
+          Promise.all(writeBatches).catch(err => console.error("DetailTab drop batch commit error:", err));
+
+          const deltaItems: TakaDeltaItem[] = [];
+          result.taskUpdates.forEach((tu) => {
+            deltaItems.push({
+              docId: tu.id,
+              collectionName: 'taka_tasks',
+              action: 'update',
+              isPatch: true,
+              data: tu.updates,
+              year: targetProject.year ? String(targetProject.year) : undefined,
+            });
+          });
+          result.predecessorUpdates.forEach((pu) => {
+            if (!taskUpdateIds.has(pu.id)) {
+              deltaItems.push({
+                docId: pu.id,
+                collectionName: 'taka_tasks',
+                action: 'update',
+                isPatch: true,
+                data: { predecessor: pu.predecessor, updatedAt: pu.updatedAt },
+                year: targetProject.year ? String(targetProject.year) : undefined,
+              });
+            }
+          });
+          if (deltaItems.length > 0) {
+            recordBatchDeltas(deltaItems, useAppStore.getState().currentUser?.email || 'drag_reorder').catch(() => {});
+          }
+        } catch (err) {
+          console.error("DetailTab background drop sync error:", err);
+        }
+      }, 0);
     } catch (err) {
       console.error("DetailTab drop error:", err);
     }
-  }, [dropPosition, tasks, projects, setSelectedTaskIds]);
+  }, [setSelectedTaskIds]);
 
   return {
     draggingTaskIds,

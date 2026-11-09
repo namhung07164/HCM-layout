@@ -43,11 +43,21 @@ export function useGeneralData({
   const pinnedProjects = useAppStore(state => state.pinnedProjects);
   const setPinnedProjects = useAppStore(state => state.setPinnedProjects);
   const theme = useAppStore(state => state.theme);
+  const isPrintPreview = useAppStore(state => state.isPrintPreview);
+  const isExportingPDF = useAppStore(state => state.isExportingPDF);
 
   const [searchTerm, setSearchTerm] = useState('');
   const deferredSearchTerm = useDeferredValue(searchTerm);
-  const [statusFilter, setStatusFilter] = useState(() => safeGetItemSession("taka_general_status_filter") || 'On process + Upcoming 3 days');
-  const lastSelectedStatusFilterRef = useRef<string>(safeGetItemSession("taka_general_status_filter") || 'On process + Upcoming 3 days');
+  const [statusFilter, setStatusFilter] = useState(() => {
+    const saved = safeGetItemSession("taka_general_status_filter");
+    return saved && saved !== 'all' ? saved : 'On process + Upcoming 3 days';
+  });
+  const lastSelectedStatusFilterRef = useRef<string>(
+    (() => {
+      const saved = safeGetItemSession("taka_general_status_filter");
+      return saved && saved !== 'all' ? saved : 'On process + Upcoming 3 days';
+    })()
+  );
   const lastSelectedLocationFilterRef = useRef<string[]>(globalLocationFilter);
   const wasSearchingRef = useRef<boolean>(false);
 
@@ -68,11 +78,38 @@ export function useGeneralData({
       wasSearchingRef.current = true;
     } else if (wasSearchingRef.current && !isSearching) {
       const restored = lastSelectedStatusFilterRef.current || safeGetItemSession("taka_general_status_filter") || 'On process + Upcoming 3 days';
-      setStatusFilter(restored);
+      const finalStatus = restored && restored !== 'all' ? restored : 'On process + Upcoming 3 days';
+      setStatusFilter(finalStatus);
       setGlobalLocationFilter(lastSelectedLocationFilterRef.current || []);
       wasSearchingRef.current = false;
     }
   }, [deferredSearchTerm]);
+
+  // Reset to default 'On process + Upcoming 3 days' when switching Year or Store
+  const prevGeneralScopeRef = useRef(`${globalYearFilter}_${effectiveStore}`);
+  useEffect(() => {
+    const currentScope = `${globalYearFilter}_${effectiveStore}`;
+    if (prevGeneralScopeRef.current !== currentScope) {
+      prevGeneralScopeRef.current = currentScope;
+      if (!searchTerm.trim()) {
+        setStatusFilter('On process + Upcoming 3 days');
+        lastSelectedStatusFilterRef.current = 'On process + Upcoming 3 days';
+        safeSetItemSession("taka_general_status_filter", 'On process + Upcoming 3 days');
+      }
+      if (globalLocationFilter.length > 0) {
+        const hasMatchingLoc = projects.some(p => {
+          if (p.isDeleted) return false;
+          const pYear = p.year ? String(p.year) : null;
+          if (globalYearFilter !== 'all' && pYear !== String(globalYearFilter)) return false;
+          if (effectiveStore !== 'all' && String(p.store || '').toUpperCase() !== String(effectiveStore).toUpperCase()) return false;
+          return p.location && globalLocationFilter.includes(p.location);
+        });
+        if (!hasMatchingLoc) {
+          setGlobalLocationFilter([]);
+        }
+      }
+    }
+  }, [globalYearFilter, effectiveStore, searchTerm, projects, globalLocationFilter, setGlobalLocationFilter]);
 
   // Auto-jump to matched project location(s) when searching (Debounced)
   useEffect(() => {
@@ -84,7 +121,7 @@ export function useGeneralData({
         const status = getStatus(p.computedTakStart, p.computedTakCompl, p.computedOpening || p.opening, p.code);
         const searchFields = [p.no, p.store, p.code, p.linkCodes, p.name, p.detail, (p as any).description, p.note, p.party, status, p.year];
         const matchesSearch = matchesAdvancedSearch(term, searchFields);
-        const pYear = p.year ? String(p.year) : (p.computedTakStart ? String(p.computedTakStart).substring(0, 4) : null);
+        const pYear = p.year ? String(p.year) : null;
         const matchesYear = globalYearFilter === 'all' || pYear === globalYearFilter;
         const matchesStore = effectiveStore === 'all' || p.store === effectiveStore;
         return matchesSearch && matchesYear && matchesStore;
@@ -158,23 +195,27 @@ export function useGeneralData({
   }, [locationOptions, globalLocationFilter, setGlobalLocationFilter]);
 
   const filteredProjects = useMemo(() => {
-    // Pre-calculate project dates & status once (O(N)) to eliminate O(N log N) recalculations during sorting
-    const infoMap = new Map<string, ReturnType<typeof getProjectDatesAndStatus>>();
-    projects.forEach(p => {
-      const pKey = p.id || p.code || String(p.no || '');
-      infoMap.set(pKey, getProjectDatesAndStatus(p, tasks));
-    });
-
+    // Pre-calculate project dates & status once (O(1) per project using pre-computed fields) to eliminate O(N*M) scans
     const getMemoizedInfo = (p: Project) => {
-      const pKey = p.id || p.code || String(p.no || '');
-      return infoMap.get(pKey) || getProjectDatesAndStatus(p, tasks);
+      const computedTakStart = p.computedTakStart || p.start || "";
+      const computedTakCompl = p.computedTakCompl || p.handover || (p as any).takCompl || "";
+      const computedOpening = p.computedOpening || (p.openingMode === 'manual' ? p.opening : "") || "";
+      const status = p.computedStatus || getStatus(computedTakStart, computedTakCompl, computedOpening || p.opening, p.code);
+      return {
+        computedTakStart,
+        computedTakCompl,
+        computedOpening,
+        status,
+        planProgressPercent: p.computedPlanProgress ?? 0,
+        actProgressPercent: p.computedActProgress ?? 0
+      };
     };
 
     return projects.filter(p => {
       const { computedTakStart, computedTakCompl, computedOpening, status } = getMemoizedInfo(p);
       const searchFields = [p.no, p.store, p.code, p.linkCodes, p.name, p.detail, (p as any).description, p.note, p.party, status, p.year];
       const matchesSearch = matchesAdvancedSearch(deferredSearchTerm, searchFields);
-      const pYear = p.year ? String(p.year).trim() : (computedTakStart ? String(computedTakStart).substring(0, 4) : (p.start ? String(p.start).substring(0, 4) : null));
+      const pYear = p.year ? String(p.year).trim() : null;
       const matchesYear = globalYearFilter === 'all' || (pYear !== null && pYear === String(globalYearFilter).trim());
       const matchesStore = effectiveStore === 'all' || (Boolean(p.store) && String(p.store).toUpperCase().trim() === effectiveStore.toUpperCase().trim());
       const matchesLocation = globalLocationFilter.length === 0 || (p.location && globalLocationFilter.includes(p.location));
@@ -267,16 +308,12 @@ export function useGeneralData({
       
       return a.code.localeCompare(b.code) || String(a.year || '').localeCompare(String(b.year || ''));
     });
-  }, [projects, tasks, deferredSearchTerm, globalYearFilter, effectiveStore, globalLocationFilter, statusFilter, pinnedProjects, sortConfig]);
-
-  useEffect(() => {
-    const interval = setInterval(() => setFlashToggle(prev => !prev), 600);
-    return () => clearInterval(interval);
-  }, []);
+  }, [projects, deferredSearchTerm, globalYearFilter, effectiveStore, globalLocationFilter, statusFilter, pinnedProjects, sortConfig]);
 
   const paginatedProjects = useMemo(() => {
+    if (isPrintPreview || isExportingPDF) return filteredProjects;
     return filteredProjects.slice(0, visibleCount);
-  }, [filteredProjects, visibleCount]);
+  }, [filteredProjects, visibleCount, isPrintPreview, isExportingPDF]);
 
   return {
     globalYearFilter,

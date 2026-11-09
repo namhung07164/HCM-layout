@@ -58,6 +58,11 @@ export const DynamicUnitSummaryTable: React.FC<DynamicUnitSummaryTableProps> = R
     });
   }, [summaryList, searchTerm, statusFilter, groupFilter]);
 
+  const totalSizeM2 = useMemo(() => {
+    const sum = filteredList.reduce((acc, item) => acc + (Number(item.sizeM2 ?? item.size ?? 0) || 0), 0);
+    return Math.round(sum * 100) / 100;
+  }, [filteredList]);
+
   const getStatusBadge = (item: DynamicUnitSummaryItem) => {
     if (!item.hasAppProject || !item.appProjectStatus) {
       return (
@@ -119,6 +124,11 @@ export const DynamicUnitSummaryTable: React.FC<DynamicUnitSummaryTableProps> = R
           <span className="px-2 py-0.5 text-[10px] font-mono font-bold rounded-full bg-brand-600/20 text-brand-300 border border-brand-500/30">
             {filteredList.length} / {summaryList.length} units
           </span>
+          {totalSizeM2 > 0 && (
+            <span className="px-2 py-0.5 text-[10px] font-mono font-bold rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+              ∑ {totalSizeM2.toLocaleString()} m²
+            </span>
+          )}
         </div>
         <button className="text-slate-400 hover:text-white p-1">
           {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
@@ -175,6 +185,7 @@ export const DynamicUnitSummaryTable: React.FC<DynamicUnitSummaryTableProps> = R
               <thead className="bg-slate-900/90 sticky top-0 z-10 border-b border-slate-800 text-[10px] font-bold text-slate-400 uppercase tracking-wider select-none">
                 <tr>
                   <th className="px-3 py-2">Mã Unit</th>
+                  <th className="px-3 py-2">Size (m²)</th>
                   <th className="px-3 py-2">Dự Án (App)</th>
                   <th className="px-3 py-2">App Status</th>
                   <th className="px-3 py-2">Nhóm Màu (Rule)</th>
@@ -185,13 +196,14 @@ export const DynamicUnitSummaryTable: React.FC<DynamicUnitSummaryTableProps> = R
               <tbody className="divide-y divide-slate-800/60 font-mono">
                 {filteredList.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-4 py-8 text-center text-slate-500 italic text-xs">
+                    <td colSpan={7} className="px-4 py-8 text-center text-slate-500 italic text-xs">
                       Không tìm thấy gian hàng nào khớp bộ lọc.
                     </td>
                   </tr>
                 ) : (
                   filteredList.map((item) => {
                     const isSelected = selectedUnitId === item.unitId;
+                    const unitArea = Number(item.sizeM2 ?? item.size ?? 0) || 0;
                     return (
                       <tr
                         key={item.unitId}
@@ -202,15 +214,40 @@ export const DynamicUnitSummaryTable: React.FC<DynamicUnitSummaryTableProps> = R
                         )}
                       >
                         <td className="px-3 py-2 font-bold text-white flex items-center gap-1.5">
-                          <span 
-                            className="w-2.5 h-2.5 rounded-full shrink-0 shadow-sm" 
-                            style={{ backgroundColor: item.color }} 
-                          />
+                          {(() => {
+                            const isTrans = !item.color || item.color === 'transparent' || item.color === 'none' || item.color === 'rgba(0,0,0,0)';
+                            return (
+                              <span 
+                                className="w-2.5 h-2.5 rounded-full shrink-0 shadow-sm border border-slate-600 overflow-hidden" 
+                                style={{
+                                  backgroundColor: isTrans ? 'transparent' : item.color,
+                                  backgroundImage: isTrans ? 'repeating-conic-gradient(#475569 0% 25%, #1e293b 0% 50%)' : undefined,
+                                  backgroundSize: '4px 4px',
+                                }} 
+                              />
+                            );
+                          })()}
                           <span className="font-mono">{item.unitName}</span>
+                        </td>
+                        <td className="px-3 py-2">
+                          {unitArea > 0 ? (
+                            <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold">
+                              {unitArea.toLocaleString()} m²
+                            </span>
+                          ) : (
+                            <span className="text-slate-600">-</span>
+                          )}
                         </td>
                         <td className="px-3 py-2 text-slate-300">
                           {item.hasAppProject ? (
-                            <span className="font-bold text-blue-400">{item.appProjectCode}</span>
+                            <div className="flex flex-col">
+                              <span className="font-bold text-blue-400">{item.appProjectCode}</span>
+                              {item.projectName && (
+                                <span className="text-[10px] text-slate-400 font-sans truncate max-w-[160px]" title={item.projectName}>
+                                  {item.projectName}
+                                </span>
+                              )}
+                            </div>
                           ) : (
                             <span className="text-slate-600">-</span>
                           )}
@@ -220,28 +257,46 @@ export const DynamicUnitSummaryTable: React.FC<DynamicUnitSummaryTableProps> = R
                         </td>
                         <td className="px-3 py-2">
                           {item.matchedGroupName ? (
-                            <span 
-                              className="px-2 py-0.5 rounded text-[10px] font-bold"
-                              style={{ 
-                                backgroundColor: `${item.color}20`, 
-                                color: item.color,
-                                border: `1px solid ${item.color}50` 
-                              }}
-                            >
-                              {item.matchedGroupName}
-                            </span>
+                            (() => {
+                              const isTrans = !item.color || item.color === 'transparent' || item.color === 'none' || item.color === 'rgba(0,0,0,0)';
+                              return (
+                                <span 
+                                  className="px-2 py-0.5 rounded text-[10px] font-bold"
+                                  style={isTrans ? {
+                                    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                                    color: '#cbd5e1',
+                                    border: '1px solid rgba(255, 255, 255, 0.2)',
+                                  } : { 
+                                    backgroundColor: `${item.color}20`, 
+                                    color: item.color,
+                                    border: `1px solid ${item.color}50` 
+                                  }}
+                                >
+                                  {item.matchedGroupName}
+                                </span>
+                              );
+                            })()
                           ) : (
                             <span className="text-slate-600 text-[10px]">Mặc định</span>
                           )}
                         </td>
                         <td className="px-3 py-2">
-                          <div className="flex items-center gap-1.5">
-                            <span 
-                              className="w-4 h-4 rounded border border-white/20 shadow-inner" 
-                              style={{ backgroundColor: item.color }} 
-                            />
-                            <span className="text-[10px] text-slate-400 uppercase">{item.color}</span>
-                          </div>
+                          {(() => {
+                            const isTrans = !item.color || item.color === 'transparent' || item.color === 'none' || item.color === 'rgba(0,0,0,0)';
+                            return (
+                              <div className="flex items-center gap-1.5">
+                                <span 
+                                  className="w-4 h-4 rounded border border-slate-600 shadow-inner overflow-hidden" 
+                                  style={{
+                                    backgroundColor: isTrans ? 'transparent' : item.color,
+                                    backgroundImage: isTrans ? 'repeating-conic-gradient(#475569 0% 25%, #1e293b 0% 50%)' : undefined,
+                                    backgroundSize: '6px 6px',
+                                  }} 
+                                />
+                                <span className="text-[10px] text-slate-400 uppercase">{isTrans ? 'Transparent' : item.color}</span>
+                              </div>
+                            );
+                          })()}
                         </td>
                         <td className="px-3 py-2 text-[10px] text-slate-400 font-sans truncate max-w-[200px]" title={item.matchedRuleReason}>
                           {item.matchedRuleReason}

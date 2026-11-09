@@ -46,11 +46,15 @@ export async function handleProjectIdentityChange({
     return matchesCode && matchesYear && matchesStore;
   });
 
-  // If memory does not have tasks for this project (e.g. mobile lazy load), check Dexie local DB (0ms, 0 Read)
+  // If memory does not have tasks for this project (e.g. mobile lazy load), check Dexie first, then Firestore only if needed
   if (relatedTasks.length === 0 && project.code && (project.taskCount || (project.taskSummaries && project.taskSummaries.length > 0))) {
     try {
-      const { getLocalTasksForProjects } = await import('../../lib/localDb');
-      const loaded: Task[] = (await getLocalTasksForProjects([project.code])).filter(dt => !dt.isDeleted);
+      const { ensureProjectTasksLoaded } = await import('../../lib/taskStateService');
+      const loaded: Task[] = await ensureProjectTasksLoaded(project.code, {
+        projectId: project.id,
+        store: project.store,
+        year: project.year,
+      });
       if (loaded.length > 0) {
         relatedTasks = loaded.filter(t => {
           const matchesYear = !t.projectYear || !oldPYear || String(t.projectYear) === oldPYear;
@@ -62,7 +66,7 @@ export async function handleProjectIdentityChange({
         useAppStore.getState().setTasks(rawTasks);
       }
     } catch (err) {
-      console.warn("Failed to fetch tasks for project identity change from localDb:", err);
+      console.warn("Failed to fetch tasks for project identity change from local/cache:", err);
     }
   }
 
@@ -110,7 +114,13 @@ export async function handleProjectIdentityChange({
     }
   });
 
-  const storeCosts = useAppStore.getState().costs || [];
+  let storeCosts = useAppStore.getState().costs || [];
+  if (storeCosts.length === 0) {
+    try {
+      const { getLocalCosts } = await import('../../lib/localDb');
+      storeCosts = await getLocalCosts(oldPYear || 'all');
+    } catch {}
+  }
   const relatedCosts = storeCosts.filter(c => {
     const matchesCode = String(c.projectCode || '').trim().toLowerCase() === oldPCode;
     const matchesYear = !c.projectYear || !oldPYear || String(c.projectYear) === oldPYear;
@@ -174,6 +184,20 @@ export async function handleProjectIdentityChange({
   });
   useAppStore.getState().setProjects(updatedProjects);
 
+  const storeState = useAppStore.getState();
+  if (
+    storeState.fixedProjectCode &&
+    String(storeState.fixedProjectCode).trim().toLowerCase() === oldPCode
+  ) {
+    storeState.setFixedProjectCode(String(formData.code).trim().toUpperCase());
+  }
+  if (
+    storeState.detailTabFilterCode &&
+    String(storeState.detailTabFilterCode).trim().toLowerCase() === oldPCode
+  ) {
+    storeState.setDetailTabFilterCode(String(formData.code).trim());
+  }
+
   const identityDeltaItems = [
     { docId, collectionName: 'taka_projects' as const, action: 'update' as const, data: dataToSave, year: String(yearNum) },
     ...relatedTasks.map(t => ({
@@ -202,38 +226,43 @@ export async function handleProjectIdentityChange({
     setToast({ title: "Save Failed", message: "Network error or permission denied. Data was not saved.", type: "error" });
   });
 
+  const modifiedTaskIds = new Set<string>([
+    ...Array.from(taskUpdates.keys()),
+    ...predecessorUpdates.map((pu) => pu.id),
+  ]);
+  const prevTasksForUndo = rawTasks.filter((t) => modifiedTaskIds.has(t.id));
+  const nextTasksForRedo = updatedTasks.filter((t) => modifiedTaskIds.has(t.id));
+  const updatedProjectObj: Project = {
+    ...project,
+    ...dataToSave,
+    id: project.id || docId,
+    updatedAt: new Date().toISOString(),
+  };
+  const nextCostsForRedo = relatedCosts.map((c) => ({
+    ...c,
+    projectCode: String(formData.code).trim(),
+    projectYear: yearNum,
+    projectStore: formData.store,
+    updatedAt: new Date().toISOString(),
+  }));
+
   undoManager.push({
     description: `Update Identity: ${project.code}(${project.year}) -> ${formData.code}(${formData.year})`,
     revert: async () => {
-      const revertBatch = writeBatch(db);
-      revertBatch.set(projectRef, project, { merge: true });
-      relatedTasks.forEach(t => {
-        const tRef = doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_tasks', t.id);
-        revertBatch.set(tRef, {
-          projectCode: project.code,
-          projectYear: project.year,
-          projectStore: project.store,
-          ...(t.taskCodePhu !== undefined ? { taskCodePhu: t.taskCodePhu } : {}),
-          ...(t.predecessor !== undefined ? { predecessor: t.predecessor } : {})
-        }, { merge: true });
+      const { restoreProjectsSnapshot } = await import('../../lib/undoStateHelpers');
+      await restoreProjectsSnapshot({
+        projectsToRestore: [project],
+        tasksToRestore: prevTasksForUndo,
+        costsToRestore: relatedCosts,
       });
-      predecessorUpdates.forEach(pu => {
-        if (!relatedTaskIds.has(pu.id)) {
-          const originalTask = rawTasks.find(st => st.id === pu.id);
-          revertBatch.set(doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_tasks', pu.id), {
-            predecessor: originalTask?.predecessor || ''
-          }, { merge: true });
-        }
+    },
+    redo: async () => {
+      const { restoreProjectsSnapshot } = await import('../../lib/undoStateHelpers');
+      await restoreProjectsSnapshot({
+        projectsToRestore: [updatedProjectObj],
+        tasksToRestore: nextTasksForRedo,
+        costsToRestore: nextCostsForRedo,
       });
-      relatedCosts.forEach(c => {
-        const cRef = doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_costs', c.id);
-        revertBatch.set(cRef, {
-          projectCode: project.code,
-          projectYear: project.year,
-          projectStore: project.store
-        }, { merge: true });
-      });
-      revertBatch.commit().catch(console.error);
-    }
+    },
   });
 }

@@ -1,18 +1,17 @@
-import { Task, Project, DelegationGroup } from '../types';
+import { Task, Project, DelegationGroup, TakaDeltaItem } from '../types';
 import { 
   parsePredecessors, 
   buildTaskNoMap, 
   calculateTaskDatesFromPredecessors, 
   addDays 
 } from './ganttUtils';
-import { parseDateTime, formatToDatetimeLocal, generateId } from './utils';
+import { generateId } from './utils';
 import { calculateProjectComputedDates, syncProjectDatesToFirestore } from './projectDatesService';
-import { findAffectedProjects } from './taskStateService';
-import { doc } from 'firebase/firestore';
-import { db, APP_ID, writeBatch } from './firebase';
 import { useAppStore } from '../store/useAppStore';
 import { recordBatchDeltas } from './deltaSyncService';
 import { rollupParentTaskDatesAndStatus } from './taskRollupService';
+import { applyParentPredecessorsToTaskTree } from './parentTaskPredecessorService';
+import type { MassWriteOp } from './massBatchWriteEngine';
 
 /**
  * Normalizes a duration value (strips trailing 'd' or 'days', ensures valid number string).
@@ -40,43 +39,119 @@ export function calculateDatesFromPredecessorsAndDuration(
   allContextTasks.forEach(t => workingMap.set(t.id, { ...t }));
   tasksToProcess.forEach(t => workingMap.set(t.id, { ...t }));
 
-  // Index taskNoMap for resolving predecessors
+  // Identify parent tasks and index their children in O(N)
+  const parentIds = new Set<string>();
+  const childrenByParentId = new Map<string, string[]>();
+  workingMap.forEach(t => {
+    if (t && !t.isDeleted && t.parentTaskId) {
+      parentIds.add(t.parentTaskId);
+      let list = childrenByParentId.get(t.parentTaskId);
+      if (!list) {
+        list = [];
+        childrenByParentId.set(t.parentTaskId, list);
+      }
+      list.push(t.id);
+    }
+  });
+
+  // Index taskNoMap once and pre-parse predecessor tokens once per task outside the convergence loop
   const currentAllTasks = Array.from(workingMap.values());
   const taskNoMap = buildTaskNoMap(projects, currentAllTasks);
+  const parsedPredsByTaskId = new Map<string, ReturnType<typeof parsePredecessors>>();
 
-  // Relax dependencies iteratively (topological convergence with cycle limit)
-  const maxIterations = Math.max(10, tasksToProcess.length + 5);
+  for (const t of tasksToProcess) {
+    if (parentIds.has(t.id)) continue;
+    const current = workingMap.get(t.id);
+    if (!current) continue;
+
+    const predString = current.predecessor
+      ? String(current.predecessor).trim().replace(/^[,;\s]+|[,;\s]+$/g, '').trim()
+      : '';
+    if (predString !== (current.predecessor || '')) {
+      current.predecessor = predString;
+      workingMap.set(current.id, current);
+    }
+    if (!predString) {
+      if (current.start && (!current.finish || current.finish === current.start)) {
+        const durNum = parseFloat(cleanDurationString(current.duration));
+        if (durNum > 0) {
+          const calculatedFinish = addDays(current.start, durNum);
+          if (calculatedFinish !== current.finish) {
+            current.finish = calculatedFinish;
+            workingMap.set(current.id, current);
+          }
+        }
+      }
+      continue;
+    }
+
+    const parsedPreds = parsePredecessors(
+      predString,
+      taskNoMap,
+      { ...current, predecessorTaskIds: undefined, predecessors: undefined }
+    );
+    if (!parsedPreds.length) continue;
+    parsedPredsByTaskId.set(current.id, parsedPreds);
+
+    const resolvedIds = parsedPreds.map(p => p.task?.id).filter((id): id is string => Boolean(id));
+    if (resolvedIds.length > 0) {
+      current.predecessorTaskIds = resolvedIds;
+      current.predecessors = parsedPreds
+        .filter(p => Boolean(p.task?.id))
+        .map(p => ({
+          taskId: p.task.id,
+          type: (p.type || 'FS') as any,
+          lagDays: p.lagSign === '-' ? -(p.lagValue || 0) : (p.lagValue || 0),
+        }));
+      workingMap.set(current.id, current);
+    }
+  }
+
+  const rollupParentsFast = (): boolean => {
+    if (parentIds.size === 0) return false;
+    let parentChanged = false;
+    parentIds.forEach(pid => {
+      const parentTask = workingMap.get(pid);
+      const childIds = childrenByParentId.get(pid);
+      if (!parentTask || !childIds || childIds.length === 0) return;
+      let minStart = '';
+      let maxFinish = '';
+      for (let i = 0; i < childIds.length; i++) {
+        const c = workingMap.get(childIds[i]);
+        if (!c || c.isDeleted) continue;
+        const cs = c.start || c.finish || '';
+        const cf = c.finish || c.start || '';
+        if (cs && (!minStart || cs < minStart)) minStart = cs;
+        if (cf && (!maxFinish || cf > maxFinish)) maxFinish = cf;
+      }
+      if (minStart && maxFinish && (parentTask.start !== minStart || parentTask.finish !== maxFinish)) {
+        workingMap.set(pid, { ...parentTask, start: minStart, finish: maxFinish });
+        parentChanged = true;
+      }
+    });
+    return parentChanged;
+  };
+
+  // Relax dependencies iteratively (topological convergence capped at 12 passes)
+  const maxIterations = Math.min(12, Math.max(4, tasksToProcess.length + 1));
   let hasChanges = true;
   let iteration = 0;
+  const nowIso = new Date().toISOString();
 
   while (hasChanges && iteration < maxIterations) {
     hasChanges = false;
     iteration++;
 
+    if (rollupParentsFast()) {
+      hasChanges = true;
+    }
+
     for (const t of tasksToProcess) {
+      if (parentIds.has(t.id)) continue;
+      const parsedPreds = parsedPredsByTaskId.get(t.id);
+      if (!parsedPreds) continue;
       const current = workingMap.get(t.id);
       if (!current) continue;
-
-      const predString = current.predecessor ? String(current.predecessor).trim() : '';
-      if (!predString) {
-        // If no predecessor, ensure finish is consistent with start and duration if finish is missing or invalid
-        if (current.start && (!current.finish || current.finish === current.start)) {
-          const durNum = parseFloat(cleanDurationString(current.duration));
-          if (durNum > 0) {
-            const calculatedFinish = addDays(current.start, durNum);
-            if (calculatedFinish !== current.finish) {
-              current.finish = calculatedFinish;
-              workingMap.set(current.id, current);
-              hasChanges = true;
-            }
-          }
-        }
-        continue;
-      }
-
-      // Task has predecessor: parse and compute dates
-      const parsedPreds = parsePredecessors(predString, taskNoMap, current);
-      if (!parsedPreds.length) continue;
 
       const calcResult = calculateTaskDatesFromPredecessors(
         current,
@@ -92,7 +167,7 @@ export function calculateDatesFromPredecessorsAndDuration(
           current.duration = newDuration;
           current.durationManual = newDurationManual;
           current.realtimeUpdate = true;
-          current.updatedAt = new Date().toISOString();
+          current.updatedAt = nowIso;
           workingMap.set(current.id, current);
           hasChanges = true;
         }
@@ -100,29 +175,46 @@ export function calculateDatesFromPredecessorsAndDuration(
     }
   }
 
+  rollupParentsFast();
   return tasksToProcess.map(t => workingMap.get(t.id) || t);
 }
 
 /**
- * Recalculates start/finish/duration/runningStatus for parent tasks.
+ * Recalculates start/finish/duration/runningStatus for parent tasks in O(N).
  */
 export function rollupParentTaskDates(
   allTasks: Task[],
-  _targetParentIds?: string[]
+  _targetParentIds?: string[],
+  projects: Project[] = []
 ): { updatedParents: Task[]; allTasksMap: Map<string, Task> } {
-  const rolledUpList = rollupParentTaskDatesAndStatus(allTasks);
+  const safeProjects = projects.length > 0 ? projects : (useAppStore.getState?.()?.projects || []);
+  const { updatedTasks: tasksWithParentPreds, updatedParents: parentPredUpdates } =
+    applyParentPredecessorsToTaskTree(allTasks, safeProjects);
+
+  const delegationGroups = useAppStore.getState?.()?.delegationGroups || [];
+  const rolledUpList = rollupParentTaskDatesAndStatus(tasksWithParentPreds, delegationGroups);
   const taskMap = new Map<string, Task>();
   const updatedParents: Task[] = [];
+  const parentPredMap = new Map<string, Task>();
+  parentPredUpdates.forEach((p) => parentPredMap.set(p.id, p));
+
+  const originalMap = new Map<string, Task>();
+  allTasks.forEach((orig) => {
+    if (orig?.id) originalMap.set(orig.id, orig);
+  });
 
   rolledUpList.forEach((t) => {
     taskMap.set(t.id, t);
-    const original = allTasks.find((orig) => orig.id === t.id);
+    const original = originalMap.get(t.id);
+    const hasPredUpdate = parentPredMap.has(t.id);
     if (
-      original &&
-      (original.start !== t.start ||
-        original.finish !== t.finish ||
-        original.duration !== t.duration ||
-        original.runningStatus !== t.runningStatus)
+      hasPredUpdate ||
+      (original &&
+        (original.start !== t.start ||
+          original.finish !== t.finish ||
+          original.duration !== t.duration ||
+          original.runningStatus !== t.runningStatus ||
+          original.predecessor !== t.predecessor))
     ) {
       updatedParents.push(t);
     }
@@ -134,115 +226,261 @@ export function rollupParentTaskDates(
   };
 }
 
-
-
 /**
- * Saves tasks to Firestore in safe chunks (max 400 operations per batch).
+ * Prepares missing DelegationGroup records for imported tasks that have `delegation = true`
+ * without overwriting already-existing delegation groups in store/Firestore.
  */
-export async function batchSaveTasksToFirestore(
+export function prepareMissingDelegationsForTasks(
   tasksToSave: Task[],
-  currentUser?: { id?: string; username?: string }
-): Promise<void> {
-  if (!tasksToSave || tasksToSave.length === 0) return;
+  currentUser?: { id?: string; username?: string },
+  nowIso: string = new Date().toISOString()
+): { newDelegations: DelegationGroup[]; taskDelegationMap: Map<string, DelegationGroup> } {
+  const dateStr = nowIso.substring(0, 10);
+  const activeUserId = currentUser?.id && currentUser.id !== 'guest' ? currentUser.id : currentUser?.username || 'system';
+  const existingDel = useAppStore.getState().delegationGroups || [];
+  const existingDelMap = new Map<string, DelegationGroup>(existingDel.map((d) => [d.id, d]));
+  const existingByParentId = new Map<string, DelegationGroup>();
+  existingDel.forEach((d) => { if (d?.parentTaskId) existingByParentId.set(d.parentTaskId, d); });
 
-  const BATCH_LIMIT = 400;
-  for (let i = 0; i < tasksToSave.length; i += BATCH_LIMIT) {
-    const chunk = tasksToSave.slice(i, i + BATCH_LIMIT);
-    const batch = writeBatch(db);
+  const newDelegations: DelegationGroup[] = [];
+  const taskDelegationMap = new Map<string, DelegationGroup>();
 
-    chunk.forEach(t => {
-      const tRef = doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_tasks', t.id);
-      batch.set(tRef, t, { merge: true });
+  tasksToSave.forEach((t) => {
+    if (!t || !t.delegation || !t.id || String(t.id).startsWith('ts_')) return;
+    const deterministicGroupId = `del_${t.id}`;
+    const rawParty = t.party && String(t.party).trim() ? String(t.party).trim() : '';
+    const parsedParty = rawParty.split(/[,;/+]+/).map((s) => s.trim()).filter(Boolean)[0] || rawParty || '';
+    const existingGroup = existingDelMap.get(deterministicGroupId) || existingByParentId.get(t.id) || existingDelMap.get(t.id);
 
-      if (t.delegation) {
-        const now = new Date().toISOString();
-        const dateStr = now.substring(0, 10);
-        const activeUserId = currentUser?.id && currentUser.id !== 'guest' 
-          ? currentUser.id 
-          : (currentUser?.username || 'system');
-        const rawParty = (t.party && t.party.trim()) ? t.party.trim() : '';
-        const parsedParty = rawParty.split(/[,;/+]+/).map(s => s.trim()).filter(Boolean)[0] || rawParty;
-        const deterministicGroupId = `del_${t.id}`;
-
-        // Only create delegation group if party is explicitly assigned, preventing thousands of empty ghost delegations
-        if (parsedParty) {
-          const delGroup: DelegationGroup = {
-            id: deterministicGroupId,
-            parentTaskId: t.id,
-            name: t.name || 'Delegated Task',
-            projectCode: t.projectCode,
-            projectStore: t.projectStore,
-            projectYear: t.projectYear !== undefined && t.projectYear !== null && !isNaN(Number(t.projectYear)) 
-              ? Number(t.projectYear) 
-              : new Date().getFullYear(),
-            subTasks: [{
-              id: generateId(),
-              name: '',
-              comments: '',
-              status: 'Assigned',
-              delegationStatus: 'Assigned',
-              priority: 'Mid',
-              party: parsedParty,
-              startAct: dateStr,
-              finishAct: dateStr,
-              updatedAt: now
-            }],
-            updatedAt: now,
-            createdBy: activeUserId
-          };
-
-          const delRef = doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_delegation_groups', deterministicGroupId);
-          batch.set(delRef, delGroup, { merge: true });
-        }
+    if (existingGroup) {
+      const hasSubTasks = Array.isArray(existingGroup.subTasks) && existingGroup.subTasks.length > 0;
+      const firstSubNeedsParty = hasSubTasks && existingGroup.subTasks.length === 1 && !existingGroup.subTasks[0].party && Boolean(parsedParty);
+      if (existingGroup.parentTaskId !== t.id || !hasSubTasks || firstSubNeedsParty) {
+        const repairedSubTasks = hasSubTasks
+          ? existingGroup.subTasks.map((st, idx) => (idx === 0 && !st.party && parsedParty ? { ...st, party: parsedParty } : st))
+          : [{ id: generateId(), name: '', comments: '', status: 'Assigned' as const, delegationStatus: 'Assigned' as const, priority: 'Mid' as const, party: parsedParty, startAct: dateStr, finishAct: dateStr, updatedAt: nowIso }];
+        const repairedGroup: DelegationGroup = {
+          ...existingGroup,
+          parentTaskId: t.id,
+          name: t.name || existingGroup.name || 'Delegated Task',
+          ...(t.projectId ? { projectId: t.projectId } : {}),
+          projectCode: t.projectCode || existingGroup.projectCode,
+          projectStore: t.projectStore || existingGroup.projectStore,
+          projectYear: t.projectYear !== undefined && t.projectYear !== null && !isNaN(Number(t.projectYear)) ? Number(t.projectYear) : existingGroup.projectYear || new Date().getFullYear(),
+          subTasks: repairedSubTasks,
+          updatedAt: nowIso,
+        };
+        newDelegations.push(repairedGroup);
+        taskDelegationMap.set(t.id, repairedGroup);
+        existingDelMap.set(repairedGroup.id, repairedGroup);
+        existingByParentId.set(t.id, repairedGroup);
+      } else {
+        taskDelegationMap.set(t.id, existingGroup);
       }
-    });
+      return;
+    }
 
-    await batch.commit();
+    const delGroup: DelegationGroup = {
+      id: deterministicGroupId,
+      parentTaskId: t.id,
+      name: t.name || 'Delegated Task',
+      ...(t.projectId ? { projectId: t.projectId } : {}),
+      projectCode: t.projectCode,
+      projectStore: t.projectStore,
+      projectYear: t.projectYear !== undefined && t.projectYear !== null && !isNaN(Number(t.projectYear)) ? Number(t.projectYear) : new Date().getFullYear(),
+      subTasks: [{ id: generateId(), name: '', comments: '', status: 'Assigned', delegationStatus: 'Assigned', priority: 'Mid', party: parsedParty, startAct: dateStr, finishAct: dateStr, updatedAt: nowIso }],
+      updatedAt: nowIso,
+      createdBy: activeUserId,
+    };
+    newDelegations.push(delGroup);
+    taskDelegationMap.set(t.id, delGroup);
+    existingDelMap.set(deterministicGroupId, delGroup);
+    existingByParentId.set(t.id, delGroup);
+  });
 
-    // Ghi gom các delta theo lô vào 1 document duy nhất (Giai đoạn 2)
-    const deltaItems = chunk.map((t) => ({
-      docId: t.id,
-      collectionName: 'taka_tasks' as const,
-      action: 'update' as const,
-      data: t,
-      year: t.projectYear ? String(t.projectYear) : undefined,
-    }));
-    recordBatchDeltas(deltaItems, currentUser?.username || currentUser?.id).catch(() => {});
+  if (newDelegations.length > 0) {
+    useAppStore.getState().setDelegationGroups(Array.from(existingDelMap.values()));
   }
+  return { newDelegations, taskDelegationMap };
 }
 
 /**
- * Recalculates and synchronizes project summarize (`taskSummaries`, `computedTakStart`,
- * `computedTakCompl`, `taskCount`, `computedPlanProgress`, `computedActProgress`)
- * to Zustand store (0ms) and Firestore for all affected projects.
+ * Saves tasks (and optional project summary ops) to LocalDB (Dexie) in background and commits
+ * to Firestore + Delta bus in a single unified parallel operation.
  */
+export async function batchSaveTasksToFirestore(
+  tasksToSave: Task[],
+  currentUser?: { id?: string; username?: string },
+  options?: {
+    precomputedDelegations?: {
+      newDelegations: DelegationGroup[];
+      taskDelegationMap: Map<string, DelegationGroup>;
+    };
+    projectWriteOps?: MassWriteOp[];
+    projectDeltaItems?: TakaDeltaItem[];
+    skipTaskDeltaBroadcast?: boolean;
+  }
+): Promise<void> {
+  const hasTasks = Boolean(tasksToSave && tasksToSave.length > 0);
+  const hasProjOps = Boolean(options?.projectWriteOps && options.projectWriteOps.length > 0);
+  if (!hasTasks && !hasProjOps) return;
+
+  const now = new Date().toISOString();
+  const { newDelegations } =
+    options?.precomputedDelegations ||
+    (hasTasks
+      ? prepareMissingDelegationsForTasks(tasksToSave, currentUser, now)
+      : { newDelegations: [], taskDelegationMap: new Map<string, DelegationGroup>() });
+
+  // Map ONLY newly created or repaired delegations by parentTaskId so unchanged existing delegations are never re-written
+  const newDelegationByTaskId = new Map<string, DelegationGroup>();
+  for (const d of newDelegations) {
+    if (d?.parentTaskId) newDelegationByTaskId.set(d.parentTaskId, d);
+  }
+
+  // 1. Offload persistence to local Dexie database in background (non-blocking)
+  import('./localDb')
+    .then(({ bulkPersistTasks, bulkPersistDelegations }) => {
+      if (hasTasks) bulkPersistTasks(tasksToSave).catch(() => {});
+      if (newDelegations.length > 0) {
+        bulkPersistDelegations(newDelegations).catch(() => {});
+      }
+    })
+    .catch(() => {});
+
+  // 2. Build MassWriteOp and Delta lists (separating fast-path project summaries from task/delegation chunks)
+  const [{ executeMassBatchOperations }, { removeUndefinedDeep }, { waitForNetworkRecovery }] = await Promise.all([
+    import('./massBatchWriteEngine'),
+    import('./firestoreSanitizer'),
+    import('./syncResilience'),
+  ]);
+  const projWriteOps: MassWriteOp[] = [];
+  const cleanProjDeltaItems: TakaDeltaItem[] = [];
+  const taskWriteOps: MassWriteOp[] = [];
+  const taskDeltaItems: TakaDeltaItem[] = [];
+  const delegationDeltaItems: TakaDeltaItem[] = [];
+  const syncedSummaryProjectIds = new Set<string>();
+
+  if (options?.projectDeltaItems && options.projectDeltaItems.length > 0) {
+    for (const pItem of options.projectDeltaItems) {
+      const cleanedProjItem: TakaDeltaItem = {
+        ...pItem,
+        data: pItem.data ? removeUndefinedDeep(pItem.data) : pItem.data,
+      };
+      cleanProjDeltaItems.push(cleanedProjItem);
+      if (pItem.docId) syncedSummaryProjectIds.add(String(pItem.docId).trim());
+      if (pItem.projectId) syncedSummaryProjectIds.add(String(pItem.projectId).trim());
+    }
+  }
+
+  if (options?.projectWriteOps && options.projectWriteOps.length > 0) {
+    options.projectWriteOps.forEach((op) => {
+      projWriteOps.push({
+        ...op,
+        data: op.data ? removeUndefinedDeep(op.data) : op.data,
+      });
+    });
+  }
+
+  for (const t of tasksToSave || []) {
+    if (!t || !t.id || String(t.id).startsWith('ts_')) continue;
+    const freshTask: Task = removeUndefinedDeep({ ...t, updatedAt: t.updatedAt || now });
+    taskWriteOps.push({
+      collectionName: 'taka_tasks',
+      docId: freshTask.id,
+      action: 'set',
+      data: freshTask,
+      merge: true,
+    });
+
+    if (!options?.skipTaskDeltaBroadcast) {
+      const tProjId = freshTask.projectId ? String(freshTask.projectId).trim() : '';
+      const fitsInSingleDeltaBatch = (tasksToSave?.length || 0) + cleanProjDeltaItems.length <= 45;
+      const hasAuthProjSummary = Boolean(fitsInSingleDeltaBatch && tProjId && syncedSummaryProjectIds.has(tProjId));
+      taskDeltaItems.push({
+        docId: freshTask.id,
+        collectionName: 'taka_tasks' as const,
+        action: 'create' as const,
+        isPatch: false,
+        data: freshTask,
+        year: freshTask.projectYear ? String(freshTask.projectYear) : undefined,
+        projectId: tProjId || undefined,
+        projectCode: freshTask.projectCode ? String(freshTask.projectCode) : undefined,
+        projectStore: freshTask.projectStore ? String(freshTask.projectStore) : undefined,
+        ...(hasAuthProjSummary ? { skipSummaryRollup: true } : {}),
+      } as TakaDeltaItem);
+    }
+
+    const delGroup = newDelegationByTaskId.get(freshTask.id);
+    if (delGroup) {
+      const cleanDelGroup = removeUndefinedDeep(delGroup);
+      taskWriteOps.push({
+        collectionName: 'taka_delegation_groups',
+        docId: cleanDelGroup.id,
+        action: 'set',
+        data: cleanDelGroup,
+        merge: true,
+      });
+
+      if (!options?.skipTaskDeltaBroadcast) {
+        delegationDeltaItems.push({
+          docId: cleanDelGroup.id,
+          collectionName: 'taka_delegations' as const,
+          action: 'create' as const,
+          isPatch: false,
+          data: cleanDelGroup,
+          year: cleanDelGroup.projectYear ? String(cleanDelGroup.projectYear) : undefined,
+          projectId: cleanDelGroup.projectId ? String(cleanDelGroup.projectId) : undefined,
+          projectCode: cleanDelGroup.projectCode ? String(cleanDelGroup.projectCode) : undefined,
+          projectStore: cleanDelGroup.projectStore ? String(cleanDelGroup.projectStore) : undefined,
+        });
+      }
+    }
+  }
+
+  // 3. Ensure iPadOS / iOS WebKit socket is awake, then commit all Firestore writes and Delta packets concurrently
+  await waitForNetworkRecovery();
+  const effectiveAuthor = currentUser?.username || currentUser?.id;
+
+  const allWriteOps = [...taskWriteOps, ...projWriteOps];
+  const allDeltas = [...taskDeltaItems, ...delegationDeltaItems, ...cleanProjDeltaItems];
+
+  await Promise.all([
+    allWriteOps.length > 0
+      ? executeMassBatchOperations(allWriteOps, {
+          suppressAutoDelta: true,
+          skipLocalMirror: true,
+        })
+      : Promise.resolve(),
+    allDeltas.length > 0
+      ? recordBatchDeltas(allDeltas, effectiveAuthor)
+      : Promise.resolve(),
+  ]);
+}
+
+/** Recalculates and syncs project summaries to Zustand (0ms) and Firestore for affected projects. */
 export async function syncAffectedProjectSummaries(
   affectedProjects: Project[],
   allTasks: Task[],
   delegationGroups: DelegationGroup[] = []
 ): Promise<void> {
   if (!affectedProjects.length) return;
-
-  for (const project of affectedProjects) {
-    if (!project.id) continue;
-    const projectTasks = allTasks.filter(t => {
-      if (!t.projectCode) return false;
-      const tCode = String(t.projectCode).trim().toLowerCase();
-      const pCode = String(project.code || '').trim().toLowerCase();
-      if (tCode !== pCode) return false;
-
-      const tStore = t.projectStore ? String(t.projectStore).trim().toLowerCase() : '';
-      const pStore = project.store ? String(project.store).trim().toLowerCase() : '';
-      if (pStore && tStore && pStore !== tStore) return false;
-
-      const tYear = t.projectYear ? String(t.projectYear).trim() : '';
-      const pYear = project.year ? String(project.year).trim() : '';
-      if (pYear && tYear && pYear !== tYear) return false;
-
-      return true;
-    });
-
-    const computed = calculateProjectComputedDates(project, projectTasks, delegationGroups);
-    await syncProjectDatesToFirestore(project.id, computed);
-  }
+  await Promise.all(
+    affectedProjects.map(async (project) => {
+      if (!project.id) return;
+      const projectTasks = allTasks.filter((t) => {
+        if (t.projectId && project.id) return String(t.projectId) === String(project.id);
+        if (!t.projectCode) return false;
+        if (String(t.projectCode).trim().toLowerCase() !== String(project.code || '').trim().toLowerCase()) return false;
+        const tStore = t.projectStore ? String(t.projectStore).trim().toLowerCase() : '';
+        const pStore = project.store ? String(project.store).trim().toLowerCase() : '';
+        if (pStore && tStore && pStore !== tStore) return false;
+        const tYear = t.projectYear ? String(t.projectYear).trim() : '';
+        const pYear = project.year ? String(project.year).trim() : '';
+        return !(pYear && tYear && pYear !== tYear);
+      });
+      const computed = calculateProjectComputedDates(project, projectTasks, delegationGroups);
+      await syncProjectDatesToFirestore(project.id, computed);
+    })
+  );
 }

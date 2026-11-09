@@ -43,30 +43,21 @@ export function useGanttTimeline({
 
   const { topScrollRef, mainScrollRef, handleTopScroll, handleMainScroll } = useSyncScroll();
 
+  const stableStartDateRef = useRef<Date | null>(null);
+  const stableEndDateRef = useRef<Date | null>(null);
+
   // Timeline Units, StartDate, EndDate, TotalDays
   const { timeUnits, startDate, endDate, totalDays } = useMemo(() => {
-    if (printDateRangeOverride) {
-      const s = new Date(printDateRangeOverride.start);
-      s.setHours(0, 0, 0, 0);
-      const e = new Date(printDateRangeOverride.end);
-      e.setHours(0, 0, 0, 0);
-      const diffDays = Math.ceil((e.getTime() - s.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-      
-      const units: TimeUnit[] = [];
-      let curr = new Date(s);
-      while (curr <= e) {
-        units.push({
-          date: new Date(curr),
-          label: `${curr.getDate()}/${curr.getMonth() + 1}`,
-          days: 1
-        });
-        curr.setDate(curr.getDate() + 1);
-      }
-      return { timeUnits: units, startDate: s, endDate: e, totalDays: Math.max(diffDays, 1) };
-    }
-
-    let start = filterStartDate ? parseDateTime(filterStartDate) : null;
-    let end = filterEndDate ? parseDateTime(filterEndDate) : null;
+    let start = printDateRangeOverride?.start
+      ? new Date(printDateRangeOverride.start)
+      : filterStartDate
+      ? parseDateTime(filterStartDate)
+      : null;
+    let end = printDateRangeOverride?.end
+      ? new Date(printDateRangeOverride.end)
+      : filterEndDate
+      ? parseDateTime(filterEndDate)
+      : null;
 
     if (!start || !end) {
       let minFound: Date | null = null;
@@ -129,6 +120,18 @@ export function useGanttTimeline({
 
     start.setHours(0, 0, 0, 0);
     end.setHours(0, 0, 0, 0);
+
+    if (stableStartDateRef.current && stableStartDateRef.current.getTime() === start.getTime()) {
+      start = stableStartDateRef.current;
+    } else {
+      stableStartDateRef.current = start;
+    }
+
+    if (stableEndDateRef.current && stableEndDateRef.current.getTime() === end.getTime()) {
+      end = stableEndDateRef.current;
+    } else {
+      stableEndDateRef.current = end;
+    }
 
     const units: TimeUnit[] = [];
     let curr = new Date(start);
@@ -208,14 +211,19 @@ export function useGanttTimeline({
     (smooth = true) => {
       const offsetPx = calculateDateOffsetPx(customToday);
       if (mainScrollRef.current) {
-        const targetScroll = Math.max(0, offsetPx - 400);
+        const viewportW = mainScrollRef.current.clientWidth || 800;
+        const centerOffset = viewportW < 768 ? Math.floor(viewportW * 0.25) : 400;
+        const targetScroll = Math.max(0, offsetPx - centerOffset);
         mainScrollRef.current.scrollTo({
           left: targetScroll,
           behavior: smooth ? 'smooth' : 'auto'
         });
+        if (topScrollRef.current) {
+          topScrollRef.current.scrollLeft = targetScroll;
+        }
       }
     },
-    [calculateDateOffsetPx, customToday, mainScrollRef]
+    [calculateDateOffsetPx, customToday, mainScrollRef, topScrollRef]
   );
 
   const handleTodayClick = useCallback(() => {

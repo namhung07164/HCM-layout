@@ -1,25 +1,35 @@
-import { Task, Project } from "../../types";
-import { isTaskBelongsToProject } from "../../lib/utils";
+import { Task, Project, DelegationGroup } from '../../types';
+import { isTaskBelongsToProject, matchProjectCode } from '../../lib/utils';
+import { isTaskDeletedInTracker } from '../../lib/taskDeletedTracker';
+import { getAppBootAgeMs, BOOT_SYNC_GUARD_MS, calculateProjectComputedDates, syncProjectDatesToFirestore } from '../../lib/projectDatesService';
+import { bulkPersistProjects } from '../../lib/localDb';
+
+export { matchProjectCode };
 
 /**
- * Checks if incoming doc from Firestore/cache is staler than existing local doc in memory.
+ * Local-only deduplication guard (Rule 16.3): never issue Firestore batch.delete during read snapshot hydration.
  */
-export function isStaleCacheDoc(existingDoc: Task | undefined, newDoc: Task): boolean {
-  if (!existingDoc) return false;
-  if (!existingDoc.updatedAt || !newDoc.updatedAt) return false;
-  try {
-    const existingTime = new Date(existingDoc.updatedAt).getTime();
-    const newTime = new Date(newDoc.updatedAt).getTime();
-    if (isNaN(existingTime) || isNaN(newTime)) return false;
-    return existingTime > newTime;
-  } catch {
-    return false;
-  }
+export function purgeRemovedDuplicateTasksFromFirestore(_removedIds: string[], _fromCache: boolean): void {
+  // Intentionally a no-op for Firestore to prevent read-triggered delete/delta storms.
 }
 
-/**
- * Extracts set of project keys/codes to hydrate from active project IDs.
- */
+export const tsOf = (v: any): number => {
+  if (!v) return 0;
+  if (typeof v === 'string') { const n = Date.parse(v); return Number.isFinite(n) ? n : 0; }
+  if (typeof v?.toMillis === 'function') { const n = v.toMillis(); return Number.isFinite(n) ? n : 0; }
+  if (typeof v?.seconds === 'number') return v.seconds * 1000 + Math.floor((v.nanoseconds || 0) / 1e6);
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+};
+
+export function isStaleCacheDoc(existingDoc: Task | undefined, newDoc: Task): boolean {
+  if (!existingDoc) return false;
+  const existingTime = tsOf(existingDoc.updatedAt);
+  const newTime = tsOf(newDoc?.updatedAt);
+  if (existingTime <= 0 || newTime <= 0) return false;
+  return existingTime > newTime;
+}
+
 export function extractKeysToHydrate(
   activeProjectIds: string[],
   projects: Project[],
@@ -27,40 +37,33 @@ export function extractKeysToHydrate(
 ): Set<string> {
   const keys = new Set<string>();
   if (!Array.isArray(activeProjectIds) || activeProjectIds.length === 0) return keys;
-
-  const idSet = new Set(activeProjectIds.map(id => String(id)));
-
+  const idSet = new Set(activeProjectIds.map((id) => String(id)));
   (projects || []).forEach((p) => {
     if (!p) return;
     const pId = String(p.id || '');
     const pCode = String(p.code || '').trim();
     const matchesById = pId && idSet.has(pId);
-    const matchesByCode = pCode && idSet.has(pCode) && (
-      !globalYearFilter ||
-      globalYearFilter === 'all' ||
-      !p.year ||
-      String(p.year).trim() === String(globalYearFilter).trim()
-    );
+    const matchesByCode =
+      pCode &&
+      idSet.has(pCode) &&
+      (!globalYearFilter ||
+        globalYearFilter === 'all' ||
+        !p.year ||
+        String(p.year).trim() === String(globalYearFilter).trim());
     if (matchesById || matchesByCode) {
       if (pCode) keys.add(pCode);
       if (p.linkCodes) {
-        p.linkCodes.split(/[,;/]+/).forEach(c => {
+        p.linkCodes.split(/[,;/]+/).forEach((c) => {
           const trimmed = c.trim();
           if (trimmed) keys.add(trimmed);
         });
       }
     }
   });
-
-  // Also include raw IDs if no project matched
-  activeProjectIds.forEach(id => keys.add(String(id)));
-
+  activeProjectIds.forEach((id) => keys.add(String(id)));
   return keys;
 }
 
-/**
- * Groups active projects by year string.
- */
 export function groupActiveProjectsByYear(
   activeProjectIds: string[],
   projects: Project[],
@@ -68,92 +71,54 @@ export function groupActiveProjectsByYear(
 ): Map<string, Project[]> {
   const map = new Map<string, Project[]>();
   if (!Array.isArray(projects)) return map;
-
-  const activeIdSet = new Set(activeProjectIds.map(id => String(id)));
-
+  const activeIdSet = new Set(activeProjectIds.map((id) => String(id)));
   projects.forEach((p) => {
     if (!p) return;
     const pId = String(p.id || '');
     const pCode = String(p.code || '').trim();
     const matchesById = pId && activeIdSet.has(pId);
-    const matchesByCode = pCode && activeIdSet.has(pCode) && (
-      !globalYearFilter ||
-      globalYearFilter === 'all' ||
-      !p.year ||
-      String(p.year).trim() === String(globalYearFilter).trim()
-    );
-
+    const matchesByCode =
+      pCode &&
+      activeIdSet.has(pCode) &&
+      (!globalYearFilter ||
+        globalYearFilter === 'all' ||
+        !p.year ||
+        String(p.year).trim() === String(globalYearFilter).trim());
     if (matchesById || matchesByCode) {
-      const year = p.year ? String(p.year).trim() : (globalYearFilter || '2026');
+      const fallbackYear =
+        globalYearFilter && String(globalYearFilter).toLowerCase() !== 'all'
+          ? String(globalYearFilter).trim()
+          : String(new Date().getFullYear());
+      const year =
+        p.year && String(p.year).toLowerCase() !== 'all'
+          ? String(p.year).trim()
+          : fallbackYear;
       const list = map.get(year) || [];
       list.push(p);
       map.set(year, list);
     }
   });
-
   return map;
 }
 
-/**
- * Checks if a task belongs to a specific project by ID or (code + store + year).
- */
 export function doesTaskBelongToProject(t: Task, p: Project): boolean {
   return isTaskBelongsToProject(t, p);
 }
 
-/**
- * Filters snapshot.docChanges() from a projectCode query so only tasks belonging to project `p` are applied.
- */
 export function filterCompatibleProjectChanges(docChanges: any[], p: Project): any[] {
   return docChanges.filter((ch) => {
     const dt: any = ch.doc.data();
-    if (ch.type === "removed") {
-      if (dt && dt.projectId && p.id && String(dt.projectId) !== String(p.id)) return false;
-      if (
-        dt &&
-        dt.projectStore &&
-        p.store &&
-        String(dt.projectStore).trim().toLowerCase() !== String(p.store).trim().toLowerCase()
-      ) {
-        return false;
-      }
-      if (
-        dt &&
-        dt.projectYear !== undefined &&
-        dt.projectYear !== null &&
-        dt.projectYear !== "" &&
-        p.year &&
-        String(dt.projectYear).trim() !== String(p.year).trim()
-      ) {
-        return false;
-      }
-      return true;
-    }
-    if (dt.projectId && String(dt.projectId) !== String(p.id)) return false;
-    if (
-      dt.projectStore &&
-      p.store &&
-      String(dt.projectStore).trim().toLowerCase() !== String(p.store).trim().toLowerCase()
-    ) {
-      return false;
-    }
-    const dy = dt.projectYear;
-    if (
-      dy !== undefined &&
-      dy !== null &&
-      dy !== "" &&
-      p.year &&
-      String(dy).trim() !== String(p.year).trim()
-    ) {
-      return false;
-    }
+    if (!dt) return false;
+    const pIdStr = p.id ? String(p.id).trim() : '';
+    const dtProjId = dt.projectId ? String(dt.projectId).trim() : '';
+    if (dtProjId && pIdStr) return dtProjId === pIdStr;
+    if (dt && dt.projectStore && p.store && String(dt.projectStore).trim().toLowerCase() !== String(p.store).trim().toLowerCase()) return false;
+    const dy = dt?.projectYear;
+    if (dy !== undefined && dy !== null && dy !== '' && p.year !== undefined && p.year !== null && String(dy).trim() !== String(p.year).trim()) return false;
     return true;
   });
 }
 
-/**
- * Builds synthetic "removed" docChanges for any local task in `year` that no longer exists in a server snapshot.
- */
 export function buildZombieTaskRemovalsForYear(
   snapshotDocs: any[],
   currentTasks: Task[],
@@ -165,56 +130,305 @@ export function buildZombieTaskRemovalsForYear(
   snapshotDocs.forEach((d) => serverIds.add(d.id));
   const nowMs = Date.now();
   const allowedLower = allowedStores.map((s) => s.toLowerCase());
-  const isStoreRestricted = userRole !== "admin" && allowedLower.length > 0 && !allowedLower.includes("all");
+  const isStoreRestricted = userRole !== 'admin' && allowedLower.length > 0 && !allowedLower.includes('all');
   const zombieRemovals: any[] = [];
-
   currentTasks.forEach((t) => {
-    if (
-      t?.id &&
-      !t.id.startsWith("ts_") &&
-      String(t.projectYear ?? "").trim() === String(year).trim() &&
-      !serverIds.has(t.id)
-    ) {
-      if (isStoreRestricted && t.projectStore && !allowedLower.includes(String(t.projectStore).trim().toLowerCase())) {
-        return;
-      }
-      const updatedMs = t.updatedAt ? Date.parse(String(t.updatedAt)) : 0;
+    if (t?.id && !(t as any)._isVirtualSummary && String(t.projectYear ?? '').trim() === String(year).trim() && !serverIds.has(t.id)) {
+      if (isStoreRestricted && t.projectStore && !allowedLower.includes(String(t.projectStore).trim().toLowerCase())) return;
+      const updatedMs = tsOf(t.updatedAt);
       if (!updatedMs || nowMs - updatedMs > 30000) {
-        zombieRemovals.push({
-          type: "removed",
-          doc: { id: t.id, data: () => ({ ...t, isDeleted: true }) },
-        });
+        zombieRemovals.push({ type: 'removed', doc: { id: t.id, data: () => ({ ...t, isDeleted: true }) } });
       }
     }
   });
-
   return zombieRemovals;
 }
 
-/**
- * Builds synthetic "removed" docChanges for any local task of project `p` that no longer exists in a server snapshot.
- */
 export function buildZombieTaskRemovalsForProject(
   snapshotDocs: any[],
   currentTasks: Task[],
   p: Project
 ): any[] {
   const serverIds = new Set<string>();
-  snapshotDocs.forEach((d) => serverIds.add(d.id));
+  (snapshotDocs || []).forEach((d) => { if (d?.id) serverIds.add(d.id); });
   const nowMs = Date.now();
+  const projUpdatedMs = tsOf(p.updatedAt);
   const zombieRemovals: any[] = [];
-
   currentTasks.forEach((t) => {
-    if (t?.id && !t.id.startsWith("ts_") && doesTaskBelongToProject(t, p) && !serverIds.has(t.id)) {
-      const updatedMs = t.updatedAt ? Date.parse(String(t.updatedAt)) : 0;
-      if (!updatedMs || nowMs - updatedMs > 30000) {
-        zombieRemovals.push({
-          type: "removed",
-          doc: { id: t.id, data: () => ({ ...t, isDeleted: true }) },
-        });
+    if (t?.id && !(t as any)._isVirtualSummary && doesTaskBelongToProject(t, p) && !serverIds.has(t.id)) {
+      const updatedMs = tsOf(t.updatedAt);
+      if (!updatedMs || nowMs - updatedMs > 30000 || (projUpdatedMs > 0 && projUpdatedMs >= updatedMs)) {
+        zombieRemovals.push({ type: 'removed', doc: { id: t.id, data: () => ({ ...t, isDeleted: true }) } });
       }
     }
   });
-
   return zombieRemovals;
+}
+
+export function healProjectsAfterTasksBatch(params: {
+  currentProjects: Project[];
+  finalTasks: Task[];
+  delegationGroups: DelegationGroup[];
+  changedTasks: Map<string, Task>;
+  removedTasks: Map<string, Task>;
+  fromCache: boolean;
+  knownHydratedProjectCodes: Set<string>;
+  tasksPool: Map<string, () => void>;
+}): Project[] | null {
+  const {
+    currentProjects,
+    finalTasks,
+    delegationGroups,
+    changedTasks,
+    removedTasks,
+    fromCache,
+    knownHydratedProjectCodes,
+    tasksPool,
+  } = params;
+
+  if (!currentProjects || currentProjects.length === 0) return null;
+
+  const touchedIds = new Set<string>();
+  const touchedCodes = new Set<string>();
+  const removedIdsLower = new Set<string>();
+
+  const noteTaskTouch = (t: Partial<Task> | undefined) => {
+    if (!t) return;
+    if (t.projectId) {
+      touchedIds.add(String(t.projectId));
+    } else if (t.projectCode) {
+      const cKey = String(t.projectCode).trim().toLowerCase();
+      const sKey = t.projectStore ? String(t.projectStore).trim().toLowerCase() : '*';
+      const yKey = t.projectYear !== undefined && t.projectYear !== null ? String(t.projectYear).trim() : '*';
+      touchedCodes.add(`${cKey}|${sKey}|${yKey}`);
+    }
+  };
+
+  changedTasks.forEach((t) => noteTaskTouch(t));
+  removedTasks.forEach((t, id) => {
+    removedIdsLower.add(String(id).trim().toLowerCase());
+    noteTaskTouch(t);
+  });
+
+  if (
+    touchedIds.size === 0 &&
+    touchedCodes.size === 0 &&
+    removedIdsLower.size === 0 &&
+    knownHydratedProjectCodes.size === 0 &&
+    (fromCache || tasksPool.size === 0)
+  ) {
+    return null;
+  }
+
+  let projectsNeedUpdate = false;
+  const canRunServerSelfHeal =
+    (!fromCache || knownHydratedProjectCodes.size > 0) &&
+    (getAppBootAgeMs() >= BOOT_SYNC_GUARD_MS ||
+      knownHydratedProjectCodes.size > 0 ||
+      tasksPool.size > 0);
+
+  const tasksByProjectId = new Map<string, Task[]>();
+  const tasksByCodePart = new Map<string, Task[]>();
+  if (canRunServerSelfHeal && Array.isArray(finalTasks)) {
+    for (let i = 0; i < finalTasks.length; i++) {
+      const t = finalTasks[i];
+      if (!t || t.isDeleted) continue;
+      if (t.projectId) {
+        const pid = String(t.projectId).trim();
+        let list = tasksByProjectId.get(pid);
+        if (!list) {
+          list = [];
+          tasksByProjectId.set(pid, list);
+        }
+        list.push(t);
+      }
+      if (t.projectCode) {
+        const rawCode = String(t.projectCode).trim().toLowerCase();
+        const parts = rawCode.split(/[,;/]+/).map((s) => s.trim()).filter(Boolean);
+        const codes = parts.length > 0 ? parts : [rawCode];
+        for (let j = 0; j < codes.length; j++) {
+          const c = codes[j];
+          let list = tasksByCodePart.get(c);
+          if (!list) {
+            list = [];
+            tasksByCodePart.set(c, list);
+          }
+          list.push(t);
+        }
+      }
+    }
+  }
+
+  const healedProjects = currentProjects.map((p) => {
+    let workingProj = p;
+    let summaryRemoved = false;
+
+    if (
+      removedIdsLower.size > 0 &&
+      Array.isArray(workingProj.taskSummaries) &&
+      workingProj.taskSummaries.length > 0
+    ) {
+      const filteredSummaries = workingProj.taskSummaries.filter((s: any) => {
+        const sId = s?.id ? String(s.id).trim().toLowerCase() : '';
+        return !sId || !removedIdsLower.has(sId);
+      });
+      if (filteredSummaries.length !== workingProj.taskSummaries.length) {
+        summaryRemoved = true;
+        projectsNeedUpdate = true;
+        workingProj = {
+          ...workingProj,
+          taskSummaries: filteredSummaries,
+          taskCount: filteredSummaries.length,
+        };
+      }
+    }
+
+    if (!canRunServerSelfHeal) return workingProj;
+
+    const isAuthoritativelyHydrated = knownHydratedProjectCodes.has(String(workingProj.id));
+    const isFullyHydratedProject = isAuthoritativelyHydrated;
+
+    const rawCodeCombined = workingProj.linkCodes
+      ? `${workingProj.code || ''}, ${workingProj.linkCodes}`
+      : String(workingProj.code || '');
+    const pCodeParts = rawCodeCombined.toLowerCase().split(/[,;/]+/).map((s: string) => s.trim()).filter(Boolean);
+    const pStoreKey = workingProj.store ? String(workingProj.store).trim().toLowerCase() : '*';
+    const pYearKey = workingProj.year !== undefined && workingProj.year !== null ? String(workingProj.year).trim() : '*';
+    const isInitialHydrationPass = changedTasks.size === 0 && removedTasks.size === 0;
+    const isProjectTouched =
+      summaryRemoved ||
+      (isInitialHydrationPass && isFullyHydratedProject) ||
+      touchedIds.has(String(workingProj.id)) ||
+      pCodeParts.some(
+        (c) =>
+          touchedCodes.has(`${c}|${pStoreKey}|${pYearKey}`) ||
+          touchedCodes.has(`${c}|*|${pYearKey}`) ||
+          touchedCodes.has(`${c}|${pStoreKey}|*`) ||
+          touchedCodes.has(`${c}|*|*`)
+      );
+
+    if (!isProjectTouched) return workingProj;
+    if (getAppBootAgeMs() < BOOT_SYNC_GUARD_MS && !isFullyHydratedProject) return workingProj;
+
+    const pTasks: Task[] = [];
+    const seenIds = new Set<string>();
+    const pIdStr = workingProj.id ? String(workingProj.id).trim() : '';
+    const existingSummaries = Array.isArray(workingProj.taskSummaries) ? workingProj.taskSummaries : [];
+    const existingSummaryIdsLower = new Set(
+      existingSummaries.map((s: any) => String(s?.id || '').trim().toLowerCase()).filter(Boolean)
+    );
+    const isZeroTaskProj = Array.isArray(workingProj.taskSummaries) && existingSummaries.length === 0 && (workingProj.taskCount ?? 0) === 0;
+    const allExistingHaveRealIds =
+      isZeroTaskProj ||
+      (existingSummaries.length > 0 &&
+        existingSummaries.every((s: any) => Boolean(s?.id && !String(s.id).startsWith('ts_'))));
+    const projUpdatedMs = tsOf(workingProj.updatedAt);
+    const canIncludeTask = (t: Task): boolean => {
+      if (!fromCache || !allExistingHaveRealIds) return true;
+      const tidLower = String(t.id || '').trim().toLowerCase();
+      if (existingSummaryIdsLower.has(tidLower)) return true;
+      const tMs = tsOf(t.updatedAt);
+      return Boolean(tMs > 0 && (!projUpdatedMs || tMs > projUpdatedMs));
+    };
+
+    if (pIdStr) {
+      const byIdList = tasksByProjectId.get(pIdStr);
+      if (byIdList) {
+        for (let i = 0; i < byIdList.length; i++) {
+          const t = byIdList[i];
+          if (isTaskBelongsToProject(t, workingProj) && canIncludeTask(t)) {
+            if (t.id) seenIds.add(String(t.id));
+            pTasks.push(t);
+          }
+        }
+      }
+    }
+    for (let i = 0; i < pCodeParts.length; i++) {
+      const byCodeList = tasksByCodePart.get(pCodeParts[i]);
+      if (!byCodeList) continue;
+      for (let j = 0; j < byCodeList.length; j++) {
+        const t = byCodeList[j];
+        const tid = t.id ? String(t.id) : '';
+        if (tid && seenIds.has(tid)) continue;
+        if (isTaskBelongsToProject(t, workingProj) && canIncludeTask(t)) {
+          if (tid) seenIds.add(tid);
+          pTasks.push(t);
+        }
+      }
+    }
+
+    const pTaskIdsLower = new Set(
+      pTasks.map((t) => String(t.id || '').trim().toLowerCase()).filter(Boolean)
+    );
+    const hasUnloadedServerSummaries =
+      Array.isArray(workingProj.taskSummaries) &&
+      workingProj.taskSummaries.some((s: any) => {
+        const sId = String(s?.id || '').trim().toLowerCase();
+        if (!sId || sId.startsWith('ts_')) return false;
+        if (removedIdsLower.has(sId)) return false;
+        if (isTaskDeletedInTracker(sId, pIdStr || undefined)) return false;
+        return !pTaskIdsLower.has(sId);
+      });
+
+    const existingMaxCount = Math.max(
+      workingProj.taskCount || 0,
+      Array.isArray(workingProj.taskSummaries) ? workingProj.taskSummaries.length : 0
+    );
+    if (
+      !summaryRemoved &&
+      (hasUnloadedServerSummaries || !isAuthoritativelyHydrated) &&
+      (pTasks.length === 0 || pTasks.length < existingMaxCount)
+    ) {
+      return workingProj;
+    }
+    if (!summaryRemoved && isAuthoritativelyHydrated && pTasks.length === 0 && existingMaxCount > 0) {
+      return workingProj;
+    }
+
+    const baseProjForCalc =
+      (isAuthoritativelyHydrated && !hasUnloadedServerSummaries && pTasks.length > 0) ||
+      (summaryRemoved && pTasks.length === 0 && !hasUnloadedServerSummaries)
+        ? { ...workingProj, taskSummaries: [], taskCount: pTasks.length }
+        : workingProj;
+
+    const computed = calculateProjectComputedDates(baseProjForCalc, pTasks, delegationGroups);
+    const toSig = (list: any[]) =>
+      (list || [])
+        .map(
+          (s: any, idx: number) =>
+            `${s.id || ''}:${s.name || ''}:${s.start || ''}:${s.finish || ''}:${s.duration ?? ''}:${s.parentTaskId || ''}:${s.isModularParent ? '1' : '0'}:${s.taskCodePhu || ''}:${s.runningStatus || ''}:${s.approval || ''}:${s.party || ''}:${s.delegation ? '1' : ''}:${s.predecessor || ''}:${s.orderIndex ?? idx}`
+        )
+        .join('|');
+    const existingSig = toSig(workingProj.taskSummaries || []);
+    const computedSig = toSig(computed.taskSummaries || []);
+    const hasStructuralChange =
+      workingProj.taskCount !== computed.taskCount ||
+      !workingProj.taskSummaries ||
+      workingProj.taskSummaries.length !== (computed.taskSummaries?.length || 0) ||
+      existingSig !== computedSig ||
+      (workingProj.computedTakStart || '') !== (computed.computedTakStart || '') ||
+      (workingProj.computedTakCompl || '') !== (computed.computedTakCompl || '');
+
+    const hasProgressDiscrepancy =
+      (workingProj.computedPlanProgress ?? 0) !== (computed.computedPlanProgress ?? 0) ||
+      (workingProj.computedActProgress ?? 0) !== (computed.computedActProgress ?? 0);
+
+    if (!hasStructuralChange && !hasProgressDiscrepancy) return workingProj;
+
+    projectsNeedUpdate = true;
+    const healedProj = { ...workingProj, ...computed };
+    const wouldShrinkUnloadedServerSummary =
+      !summaryRemoved &&
+      hasUnloadedServerSummaries &&
+      (computed.taskSummaries?.length || 0) < (workingProj.taskSummaries?.length || 0);
+    if ((!fromCache || isAuthoritativelyHydrated) && hasStructuralChange && !wouldShrinkUnloadedServerSummary) {
+      bulkPersistProjects([healedProj]).catch(() => {});
+      if (workingProj.id && !fromCache) {
+        syncProjectDatesToFirestore(String(workingProj.id), computed).catch(() => {});
+      }
+    }
+    return healedProj;
+  });
+
+  return projectsNeedUpdate ? healedProjects : null;
 }

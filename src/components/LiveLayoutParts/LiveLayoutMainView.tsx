@@ -1,7 +1,7 @@
 import React, { FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Konva from 'konva';
 import { Stage, Layer, FastLayer, Image as KonvaImage, Rect, Circle, Line, Text, Group, Path } from 'react-konva';
-import useImage from 'use-image';
+import { useOffscreenImage } from '../../hooks/useOffscreenImage';
 import { 
   ZoomIn, 
   ZoomOut, 
@@ -18,7 +18,6 @@ import { LiveLayoutMainViewProps } from './liveLayoutTypes';
 import { useAppStore } from '../../store/useAppStore';
 import { useEnrichedData } from '../../hooks/useEnrichedData';
 import { LayoutUnitTooltip } from '../LayoutTabParts/LayoutUnitTooltip';
-import { resolveR2UrlToHttp } from '../PictureMapping/lib/r2Upload';
 import { 
   getStatus, 
   computeProjectActStatus, 
@@ -88,18 +87,7 @@ export const LiveLayoutMainView: React.FC<LiveLayoutMainViewProps> = ({
     return config.version || null;
   }, [config, storeFilter, locationFilter]);
 
-  const [bgUrl, setBgUrl] = useState<string>('');
-  useEffect(() => {
-    if (!activeVersion?.backgroundUrl) {
-      setBgUrl('');
-      return;
-    }
-    resolveR2UrlToHttp(activeVersion.backgroundUrl).then(url => {
-      setBgUrl(url || '');
-    });
-  }, [activeVersion]);
-
-  const [bgImage] = useImage(bgUrl, 'anonymous');
+  const [bgImage] = useOffscreenImage(activeVersion?.backgroundUrl || '', 'anonymous');
 
   // Candidate units
   const units = useMemo(() => {
@@ -107,20 +95,50 @@ export const LiveLayoutMainView: React.FC<LiveLayoutMainViewProps> = ({
     return activeVersion.units || activeVersion.mapUnits || config?.units || [];
   }, [activeVersion, config]);
 
-  // Resize observer
+  // O(1) Pre-indexed Map of unitCode -> Project (Rule 7: O(1) Data Pre-Indexing)
+  const unitProjectMap = useMemo(() => {
+    const map = new Map<string, Project>();
+    if (!units.length || !allProjects.length) return map;
+    const projectEntries = allProjects.map(p => ({
+      project: p,
+      codes: extractAllProjectCodes(p),
+    }));
+    units.forEach((unit: any) => {
+      const unitCode = String(unit.code || unit.name || unit.id || '').trim();
+      if (!unitCode) return;
+      const key = unitCode.toLowerCase();
+      if (map.has(key)) return;
+      for (let i = 0; i < projectEntries.length; i++) {
+        if (projectMatchesUnitCode(projectEntries[i].codes, unitCode)) {
+          map.set(key, projectEntries[i].project);
+          break;
+        }
+      }
+    });
+    return map;
+  }, [units, allProjects]);
+
+  // Resize observer with requestAnimationFrame throttling (Rule 7)
   useEffect(() => {
     if (!containerRef.current) return;
+    let rafId: number | null = null;
     const updateSize = () => {
-      if (containerRef.current) {
-        setDimensions({
-          width: containerRef.current.offsetWidth || 800,
-          height: containerRef.current.offsetHeight || 600,
-        });
-      }
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        if (containerRef.current) {
+          setDimensions({
+            width: containerRef.current.offsetWidth || 800,
+            height: containerRef.current.offsetHeight || 600,
+          });
+        }
+      });
     };
     updateSize();
     window.addEventListener('resize', updateSize);
-    return () => window.removeEventListener('resize', updateSize);
+    return () => {
+      window.removeEventListener('resize', updateSize);
+      if (rafId !== null) cancelAnimationFrame(rafId);
+    };
   }, []);
 
   // Zoom handlers
@@ -141,7 +159,7 @@ export const LiveLayoutMainView: React.FC<LiveLayoutMainViewProps> = ({
         <button
           type="button"
           onClick={() => handleZoom(1.2)}
-          title="Phóng to (+)"
+          title="Zoom In (+)"
           className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-300 hover:text-white transition-colors active:scale-95 touch-manipulation"
         >
           <ZoomIn className="w-4 h-4" />
@@ -149,7 +167,7 @@ export const LiveLayoutMainView: React.FC<LiveLayoutMainViewProps> = ({
         <button
           type="button"
           onClick={() => handleZoom(0.8)}
-          title="Thu nhỏ (-)"
+          title="Zoom Out (-)"
           className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-300 hover:text-white transition-colors active:scale-95 touch-manipulation"
         >
           <ZoomOut className="w-4 h-4" />
@@ -157,7 +175,7 @@ export const LiveLayoutMainView: React.FC<LiveLayoutMainViewProps> = ({
         <button
           type="button"
           onClick={handleResetZoom}
-          title="Tỷ lệ 100%"
+          title="Reset Zoom (100%)"
           className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-300 hover:text-white transition-colors active:scale-95 touch-manipulation"
         >
           <RotateCcw className="w-4 h-4" />
@@ -166,7 +184,7 @@ export const LiveLayoutMainView: React.FC<LiveLayoutMainViewProps> = ({
           <button
             type="button"
             onClick={onRefreshConfig}
-            title="Làm mới bản đồ"
+            title="Refresh Layout Map"
             className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-300 hover:text-white transition-colors active:scale-95 touch-manipulation"
           >
             <RefreshCw className="w-4 h-4" />
@@ -213,7 +231,7 @@ export const LiveLayoutMainView: React.FC<LiveLayoutMainViewProps> = ({
           <Layer>
             {units.map((unit: any) => {
               const unitCode = unit.code || unit.name || unit.id || '';
-              const matchedProject = allProjects.find(p => projectMatchesUnitCode(extractAllProjectCodes(p), unitCode));
+              const matchedProject = unitProjectMap.get(String(unitCode).trim().toLowerCase());
               const isHovered = hoveredUnitCode === unitCode;
               const isSelected = selectedUnit?.code === unitCode;
               const isSearchTarget = targetUnitSearch && unitCode.toLowerCase().includes(targetUnitSearch.toLowerCase());
@@ -258,6 +276,7 @@ export const LiveLayoutMainView: React.FC<LiveLayoutMainViewProps> = ({
                       opacity={isSelected || isSearchTarget ? 0.95 : 0.8}
                       stroke={isSelected || isSearchTarget ? '#eab308' : contrast.shapeStroke}
                       strokeWidth={isSelected || isSearchTarget ? 3 : 1}
+                      perfectDrawEnabled={false}
                     />
                   ) : (
                     <Rect
@@ -270,6 +289,7 @@ export const LiveLayoutMainView: React.FC<LiveLayoutMainViewProps> = ({
                       stroke={isSelected || isSearchTarget ? '#eab308' : contrast.shapeStroke}
                       strokeWidth={isSelected || isSearchTarget ? 3 : 1}
                       cornerRadius={4}
+                      perfectDrawEnabled={false}
                     />
                   )}
 
@@ -282,6 +302,7 @@ export const LiveLayoutMainView: React.FC<LiveLayoutMainViewProps> = ({
                     fontStyle="bold"
                     fill={contrast.text}
                     listening={false}
+                    perfectDrawEnabled={false}
                   />
                 </Group>
               );

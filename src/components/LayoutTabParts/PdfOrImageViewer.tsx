@@ -16,6 +16,7 @@ import {
   TouchPinchZoomStage,
   TouchPinchZoomStageHandle,
 } from './TouchPinchZoomStage';
+import { LightboxIframeViewer } from './LightboxIframeViewer';
 
 export interface PdfOrImageViewerProps {
   url: string;
@@ -55,12 +56,15 @@ export function resolvePdfIframeUrl(
       /drive\.google\.com\/(?:file\/d\/|open\?id=|uc\?id=)([a-zA-Z0-9_-]+)/i
     ) || url.match(/[?&]id=([a-zA-Z0-9_-]+)/i);
   if (driveMatch && driveMatch[1]) {
-    return `https://drive.google.com/file/d/${driveMatch[1]}/preview`;
+    return `https://drive.google.com/file/d/${driveMatch[1]}/preview?rm=minimal`;
   }
   if (url.includes('docs.google.com')) {
     return url;
   }
   if (useGdocsFallback) {
+    return `https://docs.google.com/viewer?url=${encodeURIComponent(url)}&embedded=true`;
+  }
+  if (/^https?:\/\//i.test(url) && (/\.pdf($|\?)/i.test(url) || url.includes('taka-pm.org'))) {
     return `https://docs.google.com/viewer?url=${encodeURIComponent(url)}&embedded=true`;
   }
   return url;
@@ -83,6 +87,7 @@ export const PdfOrImageViewer: React.FC<PdfOrImageViewerProps> = ({
   const [touchZoomMode, setTouchZoomMode] = useState<'pinch' | 'scroll'>('pinch');
 
   const zoomStageRef = useRef<TouchPinchZoomStageHandle>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const cleanUrl = getCleanUrl(url) || url;
   const isPdf = isPdfOrDocUrl(cleanUrl);
@@ -103,7 +108,7 @@ export const PdfOrImageViewer: React.FC<PdfOrImageViewerProps> = ({
 
   // PDF or Google Drive / Docs document mode
   if (isPdf) {
-    if (!useIframeFallback && !isDriveDoc) {
+    if (!useIframeFallback) {
       return (
         <PdfNativeCanvasViewer
           url={cleanUrl}
@@ -125,7 +130,10 @@ export const PdfOrImageViewer: React.FC<PdfOrImageViewerProps> = ({
         <div className="absolute top-3 right-3 z-[50] flex items-center gap-1.5 bg-slate-900/95 p-1 border border-slate-700 shadow-md rounded-xl flex-wrap">
           <button
             type="button"
-            onClick={() => zoomStageRef.current?.zoomOut(0.45)}
+            onClick={() => {
+              if (touchZoomMode === 'scroll') setTouchZoomMode('pinch');
+              zoomStageRef.current?.zoomOut(0.45);
+            }}
             className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-200 transition-colors active:scale-95 touch-manipulation"
             title="Zoom Out (-)"
           >
@@ -138,9 +146,12 @@ export const PdfOrImageViewer: React.FC<PdfOrImageViewerProps> = ({
 
           <button
             type="button"
-            onClick={() => zoomStageRef.current?.zoomIn(0.45)}
+            onClick={() => {
+              if (touchZoomMode === 'scroll') setTouchZoomMode('pinch');
+              zoomStageRef.current?.zoomIn(0.45);
+            }}
             className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-200 transition-colors active:scale-95 touch-manipulation"
-            title="Zoom In (+)"
+            title="Zoom In on Current Page (+)"
           >
             <ZoomIn className="w-4 h-4" />
           </button>
@@ -254,32 +265,15 @@ export const PdfOrImageViewer: React.FC<PdfOrImageViewerProps> = ({
             </div>
           </div>
         ) : (
-          <TouchPinchZoomStage
-            ref={zoomStageRef}
-            initialScale={1}
-            minScale={0.5}
-            maxScale={8}
+          <LightboxIframeViewer
+            embedUrl={iframeSrc}
+            title={alt || 'PDF or Document Viewer'}
+            touchZoomMode={touchZoomMode}
+            zoomScale={zoomScale}
             onScaleChange={setZoomScale}
-            captureOverlay={touchZoomMode === 'pinch'}
-            allowNativeTouch={touchZoomMode === 'scroll'}
-            className="w-full h-full"
-          >
-            <iframe
-              key={`${cacheBuster}_${iframeSrc}`}
-              src={iframeSrc}
-              width="100%"
-              height="100%"
-              style={{
-                width: '100%',
-                height: '100%',
-                minHeight: isFullscreen ? '100vh' : '600px',
-                border: 'none',
-              }}
-              allow="autoplay; fullscreen"
-              title="PDF or Document Viewer"
-              onError={() => setHasPdfError(true)}
-            />
-          </TouchPinchZoomStage>
+            zoomStageRef={zoomStageRef}
+            iframeRef={iframeRef}
+          />
         )}
       </div>
     );

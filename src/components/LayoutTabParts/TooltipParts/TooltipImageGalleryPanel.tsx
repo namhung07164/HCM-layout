@@ -10,13 +10,16 @@ import {
   Copy, 
   Trash2,
   Upload,
-  Loader2
+  Loader2,
+  Crop,
+  Camera
 } from 'lucide-react';
 import { cn } from '../../../lib/utils';
 import { TooltipImageItem } from './tooltipTypes';
 import { normalizeImageUrl } from '../LayoutUnitLightboxModal';
 import { uploadPictureToTakaFolder } from '../../../lib/r2StorageUtils';
 import { TooltipZoomableThumbnail } from './TooltipZoomableThumbnail';
+import { ScreenshotCropModal } from './ScreenshotCropModal';
 
 interface TooltipImageGalleryPanelProps {
   showImagePanel: boolean;
@@ -33,6 +36,8 @@ interface TooltipImageGalleryPanelProps {
   setEnlargedImage: (img: { url: string; title?: string; initialScale?: number } | null) => void;
   unitCode?: string;
   activeStore?: string;
+  isQuickMode?: boolean;
+  canWrite?: boolean;
 }
 
 export const TooltipImageGalleryPanel: React.FC<TooltipImageGalleryPanelProps> = ({
@@ -50,11 +55,14 @@ export const TooltipImageGalleryPanel: React.FC<TooltipImageGalleryPanelProps> =
   setEnlargedImage,
   unitCode,
   activeStore = 'HCM',
+  isQuickMode = false,
+  canWrite = false,
 }) => {
   const [addMode, setAddMode] = useState<'link' | 'picture'>('link');
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadSuccessUrl, setUploadSuccessUrl] = useState<string | null>(null);
+  const [showScreenshotModal, setShowScreenshotModal] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (!showImagePanel && !showAddLinkInput) return null;
@@ -81,7 +89,7 @@ export const TooltipImageGalleryPanel: React.FC<TooltipImageGalleryPanelProps> =
         setUploadError(res.error || 'Upload failed');
       }
     } catch (err: any) {
-      setUploadError(err?.message || 'Lỗi kết nối upload');
+      setUploadError(err?.message || 'Upload connection error');
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -89,54 +97,63 @@ export const TooltipImageGalleryPanel: React.FC<TooltipImageGalleryPanelProps> =
   };
 
   return (
-    <div className="w-full bg-slate-50/95 dark:bg-[#161618] rounded-xl p-2.5 border border-slate-200 dark:border-[#333336] shadow-inner flex flex-col gap-2 animate-in fade-in zoom-in-95 duration-150 my-1">
-      {/* Panel Header */}
-      <div className="flex items-center justify-between gap-1.5 pb-1.5 border-b border-slate-200/80 dark:border-slate-800">
-        <div className="flex items-center gap-1.5 font-bold text-xs text-slate-700 dark:text-slate-200 min-w-0">
-          <ImageIcon className="w-3.5 h-3.5 text-blue-600 dark:text-[#8ab4f8] shrink-0" />
-          <span className="truncate">Hình ảnh liên kết ({activeStore})</span>
-          <span className={cn(
-            "text-[10px] px-1.5 py-0.2 rounded-full font-mono shrink-0 font-bold",
-            activeStore.toUpperCase() === 'HN'
-              ? "bg-red-100 dark:bg-red-950/80 text-red-700 dark:text-red-400"
-              : "bg-blue-100 dark:bg-blue-950/80 text-blue-700 dark:text-[#8ab4f8]"
-          )}>
-            {allUnitImages.length}
-          </span>
-        </div>
-        <div className="flex items-center gap-1 shrink-0">
-          {/* Top "+ Thêm" Button */}
-          <button
-            type="button"
-            onClick={() => setShowAddLinkInput(prev => !prev)}
-            className={cn(
-              "px-2 py-0.5 rounded text-[11px] font-bold flex items-center gap-1 transition-all active:scale-95 touch-manipulation cursor-pointer shadow-xs",
-              showAddLinkInput 
-                ? "bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200" 
-                : "bg-blue-600 hover:bg-blue-700 text-white"
+    <div className={cn(
+      "w-full flex flex-col gap-2 duration-150",
+      isQuickMode 
+        ? "pt-1" 
+        : "bg-slate-50/95 dark:bg-[#161618] rounded-xl p-2.5 border border-slate-200 dark:border-[#333336] shadow-inner animate-in fade-in zoom-in-95 my-1"
+    )}>
+      {/* Panel Header: Hidden in Quick-Image Mode to eliminate duplicate title and buttons */}
+      {!isQuickMode && (
+        <div className="flex items-center justify-between gap-1.5 pb-1.5 border-b border-slate-200/80 dark:border-slate-800">
+          <div className="flex items-center gap-1.5 font-bold text-xs text-slate-700 dark:text-slate-200 min-w-0">
+            <ImageIcon className="w-3.5 h-3.5 text-blue-600 dark:text-[#8ab4f8] shrink-0" />
+            <span className="truncate">Linked Images ({activeStore})</span>
+            <span className={cn(
+              "text-[10px] px-1.5 py-0.2 rounded-full font-mono shrink-0 font-bold",
+              activeStore.toUpperCase() === 'HN'
+                ? "bg-red-100 dark:bg-red-950/80 text-red-700 dark:text-red-400"
+                : "bg-blue-100 dark:bg-blue-950/80 text-blue-700 dark:text-[#8ab4f8]"
+            )}>
+              {allUnitImages.length}
+            </span>
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            {/* Top "+ Add" Button (Only when canWrite) */}
+            {canWrite && (
+              <button
+                type="button"
+                onClick={() => setShowAddLinkInput(prev => !prev)}
+                className={cn(
+                  "px-2 py-0.5 rounded text-[11px] font-bold flex items-center gap-1 transition-all active:scale-95 touch-manipulation cursor-pointer shadow-xs",
+                  showAddLinkInput 
+                    ? "bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200" 
+                    : "bg-blue-600 hover:bg-blue-700 text-white"
+                )}
+                title={showAddLinkInput ? "Close link input" : "Add image / document link"}
+              >
+                <Plus className="w-3 h-3" />
+                <span>Add</span>
+              </button>
             )}
-            title={showAddLinkInput ? "Đóng ô nhập link" : "Thêm link ảnh / bài viết"}
-          >
-            <Plus className="w-3 h-3" />
-            <span>Thêm</span>
-          </button>
-          {/* Close Image Panel Button */}
-          <button
-            type="button"
-            onClick={() => {
-              setShowImagePanel(false);
-              setShowAddLinkInput(false);
-            }}
-            className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded hover:bg-slate-200/60 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-            title="Đóng bảng ảnh"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
+            {/* Close Image Panel Button */}
+            <button
+              type="button"
+              onClick={() => {
+                setShowImagePanel(false);
+                setShowAddLinkInput(false);
+              }}
+              className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded hover:bg-slate-200/60 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+              title="Close image panel"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* Add / Post Link Input or Upload Picture Section (Only visible when clicking "+ Thêm") */}
-      {showAddLinkInput && (
+      {/* Add / Post Link Input or Upload Picture Section (Hidden in Quick Mode or Read-Only Mode) */}
+      {!isQuickMode && canWrite && showAddLinkInput && (
         <div className="flex flex-col gap-2 w-full animate-in fade-in slide-in-from-top-1 duration-150 py-1 bg-white dark:bg-[#1a1a1c] border border-blue-300 dark:border-blue-900 rounded-xl p-2 shadow-xs">
           {/* Mode Switcher Tabs */}
           <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-1.5 gap-1">
@@ -155,7 +172,7 @@ export const TooltipImageGalleryPanel: React.FC<TooltipImageGalleryPanelProps> =
                 )}
               >
                 <LinkIcon className="w-3 h-3" />
-                <span>Dán Link URL</span>
+                <span>Paste URL</span>
               </button>
 
               <button
@@ -184,13 +201,13 @@ export const TooltipImageGalleryPanel: React.FC<TooltipImageGalleryPanelProps> =
                 setUploadError(null);
               }}
               className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-              title="Đóng"
+              title="Close"
             >
               <X className="w-3.5 h-3.5" />
             </button>
           </div>
 
-          {/* Mode 1: Dán Link URL */}
+          {/* Mode 1: Paste Link URL */}
           {addMode === 'link' && (
             <form onSubmit={handleAddCustomImage} className="flex gap-1.5 items-center w-full pt-0.5">
               <div className="relative flex-1 min-w-0">
@@ -201,7 +218,7 @@ export const TooltipImageGalleryPanel: React.FC<TooltipImageGalleryPanelProps> =
                   onChange={(e) => setNewLinkInput(e.target.value)}
                   onFocus={(e) => e.stopPropagation()}
                   onClick={(e) => e.stopPropagation()}
-                  placeholder="Dán link ảnh hoặc link bài viết (https://...)..."
+                  placeholder="Paste image or document URL (https://...)..."
                   className="w-full pl-7 pr-2 py-1.5 text-[11px] bg-slate-50 dark:bg-[#1e1e20] border border-blue-400 dark:border-blue-500 rounded-lg text-slate-800 dark:text-slate-100 placeholder-slate-400 outline-none focus:ring-2 focus:ring-blue-500/20 transition-all font-mono"
                 />
               </div>
@@ -209,7 +226,7 @@ export const TooltipImageGalleryPanel: React.FC<TooltipImageGalleryPanelProps> =
                 type="submit"
                 disabled={!newLinkInput.trim()}
                 className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:hover:bg-emerald-600 text-white rounded-lg text-[11px] font-bold flex items-center gap-1 transition-all active:scale-95 touch-manipulation shrink-0 cursor-pointer shadow-xs"
-                title="Xác nhận thêm link"
+                title="Confirm adding link"
               >
                 <Check className="w-3.5 h-3.5" />
                 <span>OK</span>
@@ -240,11 +257,22 @@ export const TooltipImageGalleryPanel: React.FC<TooltipImageGalleryPanelProps> =
                   ) : (
                     <Upload className="w-3.5 h-3.5" />
                   )}
-                  <span>{isUploading ? "Đang upload lên R2..." : "Chọn Ảnh Từ Máy / Chụp Ảnh"}</span>
+                  <span>{isUploading ? "Uploading to R2..." : "Choose File / Take Photo"}</span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={isUploading}
+                  onClick={() => setShowScreenshotModal(true)}
+                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition-all active:scale-95 touch-manipulation cursor-pointer shadow-xs shrink-0"
+                  title="Capture Screenshot (Desktop/iOS) and Crop to upload to R2"
+                >
+                  <Crop className="w-3.5 h-3.5" />
+                  <span>Screenshot & Crop</span>
                 </button>
 
                 <div className="text-[10px] text-slate-500 dark:text-slate-400 flex items-center gap-1 font-mono shrink-0 truncate max-w-[210px]">
-                  <span>Thư mục R2:</span>
+                  <span>R2 Folder:</span>
                   <span className="font-bold text-purple-600 dark:text-purple-400">Taka-Pm-folder/</span>
                 </div>
               </div>
@@ -257,7 +285,7 @@ export const TooltipImageGalleryPanel: React.FC<TooltipImageGalleryPanelProps> =
 
               {uploadSuccessUrl && (
                 <div className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 p-1.5 rounded-md border border-emerald-200 dark:border-emerald-900/80 flex items-center gap-1 truncate font-mono">
-                  <span>✅ Đã lưu link R2:</span>
+                  <span>✅ Saved R2 URL:</span>
                   <span className="truncate">{uploadSuccessUrl}</span>
                 </div>
               )}
@@ -270,7 +298,7 @@ export const TooltipImageGalleryPanel: React.FC<TooltipImageGalleryPanelProps> =
       {allUnitImages.length === 0 ? (
         <div className="text-center py-3.5 px-2 bg-white/60 dark:bg-[#1e1e20]/60 rounded-lg border border-dashed border-slate-200 dark:border-slate-800 text-slate-400 text-xs flex flex-col items-center gap-1.5">
           <ImageIcon className="w-6 h-6 text-slate-300 dark:text-slate-600" />
-          <span>Chưa có hình ảnh. Bấm nút <b>+ Thêm</b> ở trên để dán link ảnh/bài viết.</span>
+          <span>No linked images yet. Click <b>+ Add</b> above to attach an image or URL.</span>
         </div>
       ) : (
         <div className="flex flex-col gap-2.5 max-h-[70vh] sm:max-h-[460px] overflow-y-auto custom-scrollbar pr-0.5">
@@ -285,7 +313,7 @@ export const TooltipImageGalleryPanel: React.FC<TooltipImageGalleryPanelProps> =
                 onOpenFullscreen={(target) => setEnlargedImage(target)}
               />
 
-              {/* Link Address and Action Buttons (Only shown when clicking "+ Thêm") */}
+              {/* Link Address and Action Buttons (Only shown when clicking "+ Add") */}
               {showAddLinkInput && (
                 <div className="flex items-center justify-between gap-1.5 pt-0.5 border-t border-slate-100 dark:border-slate-800/80 animate-in fade-in duration-150">
                   <div className="flex items-center gap-1 min-w-0 flex-1">
@@ -305,7 +333,7 @@ export const TooltipImageGalleryPanel: React.FC<TooltipImageGalleryPanelProps> =
                       type="button"
                       onClick={() => handleCopyLink(img.url)}
                       className="p-1 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 rounded hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                      title={copiedLink === img.url ? "Đã sao chép link!" : "Sao chép link"}
+                      title={copiedLink === img.url ? "Copied!" : "Copy link"}
                     >
                       {copiedLink === img.url ? (
                         <Check className="w-3 h-3 text-green-500" />
@@ -318,11 +346,11 @@ export const TooltipImageGalleryPanel: React.FC<TooltipImageGalleryPanelProps> =
                       target="_blank"
                       rel="noopener noreferrer"
                       className="p-1 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 rounded hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                      title="Mở link trong tab mới"
+                      title="Open link in new tab"
                     >
                       <ExternalLink className="w-3 h-3" />
                     </a>
-                    {img.isCustom && (
+                    {canWrite && (img.isCustom || img.url?.includes('hcm.taka-pm.org') || img.url?.includes('Taka-Pm-folder') || img.url?.includes('firebasestorage.googleapis.com')) && (
                       <button
                         type="button"
                         onPointerDown={(e) => {
@@ -334,7 +362,7 @@ export const TooltipImageGalleryPanel: React.FC<TooltipImageGalleryPanelProps> =
                           handleDeleteCustomImage(img.id, img.url);
                         }}
                         className="p-1.5 text-slate-400 hover:text-red-600 dark:hover:text-red-400 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors cursor-pointer active:scale-95 touch-manipulation flex items-center justify-center"
-                        title="Xóa link này"
+                        title="Delete image from R2 Cloud & Project"
                       >
                         <Trash2 className="w-3.5 h-3.5 text-red-500 hover:text-red-600" />
                       </button>
@@ -345,6 +373,22 @@ export const TooltipImageGalleryPanel: React.FC<TooltipImageGalleryPanelProps> =
             </div>
           ))}
         </div>
+      )}
+
+      {/* Screenshot & Interactive Crop Modal */}
+      {showScreenshotModal && (
+        <ScreenshotCropModal
+          isOpen={showScreenshotModal}
+          onClose={() => setShowScreenshotModal(false)}
+          onSuccess={(publicUrl) => {
+            setUploadSuccessUrl(publicUrl);
+            setNewLinkInput(publicUrl);
+            handleAddCustomImage(undefined, publicUrl);
+            setTimeout(() => setUploadSuccessUrl(null), 4500);
+          }}
+          unitCode={unitCode}
+          activeStore={activeStore}
+        />
       )}
     </div>
   );

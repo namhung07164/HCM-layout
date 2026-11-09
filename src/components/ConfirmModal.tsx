@@ -1,9 +1,10 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Draggable from 'react-draggable';
 import { useLanguage } from "../lib/LanguageContext";
 import { Portal } from './Portal';
-import { AlertTriangle, Info, X, GripHorizontal } from 'lucide-react';
-import { getZIndexClass } from '../lib/zIndexManager';
+import { AlertTriangle, Info, X, GripHorizontal, RefreshCw } from 'lucide-react';
+import { getZIndexClass, getZIndexValue } from '../lib/zIndexManager';
+import { cn } from '../lib/utils';
 
 interface ConfirmModalProps {
   isOpen: boolean;
@@ -11,13 +12,22 @@ interface ConfirmModalProps {
   message: string;
   confirmText?: string;
   confirmStyle?: "danger" | "primary";
-  onConfirm: () => void;
+  onConfirm: () => void | Promise<void>;
   onCancel: () => void;
 }
 
-export function ConfirmModal({ isOpen, title = "Confirm", message, confirmText = "Delete", confirmStyle = "danger", onConfirm, onCancel}: ConfirmModalProps) {
+export function ConfirmModal({
+  isOpen,
+  title = "Confirm",
+  message,
+  confirmText = "OK",
+  confirmStyle = "primary",
+  onConfirm,
+  onCancel
+}: ConfirmModalProps) {
   const { t } = useLanguage();
   const nodeRef = useRef<HTMLDivElement>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -34,9 +44,29 @@ export function ConfirmModal({ isOpen, title = "Confirm", message, confirmText =
 
   if (!isOpen) return null;
 
+  // Rule: Replace 'Delete' button with 'OK' across all confirm dialogs
+  const rawText = (!confirmText || confirmText === "Delete") ? "OK" : confirmText;
+  const displayText = t(rawText) || rawText;
+
+  const handleConfirm = async () => {
+    if (isProcessing) return;
+    setIsProcessing(true);
+    try {
+      await onConfirm();
+    } catch (err) {
+      console.error('[ConfirmModal] Error during confirm action:', err);
+    } finally {
+      setIsProcessing(false);
+      onCancel();
+    }
+  };
+
   return (
     <Portal>
-      <div className={`fixed inset-0 bg-slate-900/50 flex items-end md:items-center justify-center ${getZIndexClass('CONFIRM_ALERT')} p-0 md:p-4`}>
+      <div 
+        className="fixed inset-0 bg-slate-900/50 flex items-end md:items-center justify-center p-0 md:p-4"
+        style={{ zIndex: getZIndexValue('CONFIRM_ALERT') }}
+      >
         <Draggable disabled={typeof window !== 'undefined' && window.innerWidth < 768} handle=".modal-handle" bounds="parent" nodeRef={nodeRef} cancel="button">
           <div ref={nodeRef} className="bg-white dark:bg-[#1e1e20] rounded-t-2xl md:rounded-2xl shadow-xl w-full max-w-md overflow-hidden border border-transparent dark:border-[#333336] animate-in slide-in-from-bottom-full md:slide-in-from-bottom-0 md:zoom-in-95 duration-200 pointer-events-auto relative">
             <div className="modal-handle cursor-grab active:cursor-grabbing px-6 pt-4 pb-2 flex items-center justify-between border-b border-slate-100 dark:border-[#28282a]">
@@ -47,7 +77,7 @@ export function ConfirmModal({ isOpen, title = "Confirm", message, confirmText =
               <button
                 type="button"
                 onClick={onCancel}
-                className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-[#e3e3e3] rounded-lg hover:bg-slate-100 dark:hover:bg-[#333336] transition-colors"
+                className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-[#e3e3e3] rounded-lg hover:bg-slate-100 dark:hover:bg-[#333336] transition-colors cursor-pointer active:scale-95 touch-manipulation"
                 title={t("Cancel") || "Cancel"}
               >
                 <X className="w-5 h-5" />
@@ -70,17 +100,20 @@ export function ConfirmModal({ isOpen, title = "Confirm", message, confirmText =
               <div className="flex gap-3 justify-end mt-8">
                 <button type="button" title={t("Cancel")}
                   onClick={onCancel}
-                  className="flex-1 md:flex-none px-5 py-2.5 rounded-xl font-bold text-slate-600 dark:text-[#a3a3a3] hover:bg-slate-100 dark:hover:bg-[#333336] transition-colors"
+                  className="flex-1 md:flex-none px-5 py-2.5 rounded-xl font-bold text-slate-600 dark:text-[#a3a3a3] hover:bg-slate-100 dark:hover:bg-[#333336] transition-colors cursor-pointer active:scale-95 touch-manipulation"
                 >{t("Cancel")}</button>
-                <button type="button" onClick={() => {
-                    onConfirm();
-                    onCancel();
-                  }}
-                  className={`flex-1 md:flex-none px-5 py-2.5 rounded-xl font-bold text-white shadow-md transition-colors ${
+                <button
+                  type="button"
+                  disabled={isProcessing}
+                  onClick={handleConfirm}
+                  className={cn(
+                    "flex-1 md:flex-none px-5 py-2.5 rounded-xl font-bold text-white shadow-md transition-all cursor-pointer active:scale-95 touch-manipulation flex items-center justify-center gap-2",
+                    isProcessing ? "opacity-75 cursor-not-allowed" : "",
                     confirmStyle === 'danger' ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'
-                  }`}
+                  )}
                 >
-                  {confirmText}
+                  {isProcessing && <RefreshCw className="w-4 h-4 animate-spin" />}
+                  {displayText}
                 </button>
               </div>
             </div>

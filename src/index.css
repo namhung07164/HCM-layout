@@ -11,7 +11,7 @@ html, body {
   min-height: 100%;
   width: 100%;
   margin: 0;
-  overflow-x: hidden;
+  overflow-x: clip;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-x: none;
 }
@@ -28,7 +28,7 @@ html:not(.dark), html:not(.dark) body {
 
 #root {
   width: 100%;
-  overflow-x: hidden;
+  overflow-x: clip;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
@@ -412,8 +412,8 @@ body.print-preview-active .print\:overflow-hidden {
   -moz-appearance: textfield;
 }
 
-/* Force exact heights for Gantt table rows to prevent html2canvas drift */
-.project-row, .project-row td, .project-row th {
+/* Force exact heights for table rows to prevent html2canvas drift */
+tr.project-row, tr.project-row td, tr.project-row th {
     height: 40px !important;
     max-height: 40px !important;
     min-height: 40px !important;
@@ -423,7 +423,7 @@ body.print-preview-active .print\:overflow-hidden {
     line-height: 40px !important;
 }
 
-.task-row, .task-row td, .task-row th {
+tr.task-row, tr.task-row td, tr.task-row th {
     height: 32px !important;
     max-height: 32px !important;
     min-height: 32px !important;
@@ -442,10 +442,9 @@ body.print-preview-active .print\:overflow-hidden {
     white-space: nowrap !important;
 }
 
-/* High-Performance Table Row Virtualization (Rendering Economy) */
+/* High-Performance Table Row Virtualization (Handled by JS useDetailVirtualization) */
 .table-row-optimized {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 42px;
+  contain: style;
 }
 
 /* High-Performance Mobile Card Virtualization (Rendering Economy) */

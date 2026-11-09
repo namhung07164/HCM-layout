@@ -5,10 +5,12 @@ import { lazyWithRetry } from "../lib/lazyWithRetry";
 import { useAppStore } from "../store/useAppStore";
 import { useEnrichedData } from "../hooks/useEnrichedData";
 import { TabId, Project, Task, AppUser, ActiveNotification, NotificationRule } from "../types";
-import { findProjectLayoutUnit } from "../lib/layoutUnitFinder";
+import { routeNotificationItemClick } from "./appTabNotificationRouter";
+import { PrintPreviewOverlay } from "./PrintPreviewOverlay";
 
 // Code Splitting - JIT Dynamic Imports for all application tabs (Rule 12)
 const GeneralTab = lazyWithRetry(() => import("./GeneralTab"), "GeneralTab");
+const MyWorkTab = lazyWithRetry(() => import("./MyWorkTab"), "MyWorkTab");
 const SummaryTab = lazyWithRetry(() => import("./SummaryTab"), "SummaryTab");
 const LayoutTab = lazyWithRetry(() => import("./LayoutTab"), "LayoutTab");
 const DetailTab = lazyWithRetry(() => import("./DetailTab"), "DetailTab");
@@ -75,6 +77,7 @@ interface AppTabRouterProps {
   setPrefillProjectCode: (val: string) => void;
   setPrefillProjectYear: (val: number | null) => void;
   setPrefillProjectStore: (val: string | null) => void;
+  setPrefillProjectId: (val: string | null) => void;
   isAppReadyRef: React.MutableRefObject<boolean>;
   executeDeepLinkRef: React.MutableRefObject<((type: string, id: string | number, extra?: any) => void) | null>;
   onRenderCallback: (id: string, phase: any, actualDuration: number, baseDuration: number, startTime: number, commitTime: number) => void;
@@ -129,6 +132,7 @@ export const AppTabRouter: React.FC<AppTabRouterProps> = React.memo(({
   setPrefillProjectCode,
   setPrefillProjectYear,
   setPrefillProjectStore,
+  setPrefillProjectId,
   isAppReadyRef,
   executeDeepLinkRef,
   onRenderCallback,
@@ -136,6 +140,36 @@ export const AppTabRouter: React.FC<AppTabRouterProps> = React.memo(({
   const { enrichedProjects: projects, filteredTasks: tasks, visibleDelegationGroups } = useEnrichedData();
   const appUsers = useAppStore(state => state.appUsers);
   const setActiveTab = useAppStore(state => state.setActiveTab);
+  const isPrintPreview = useAppStore(state => state.isPrintPreview);
+  const printOrientation = useAppStore(state => state.printOrientation);
+  const printPaperSize = useAppStore(state => state.printPaperSize);
+  const printScaleMode = useAppStore(state => state.printScaleMode);
+  const printScaleCustom = useAppStore(state => state.printScaleCustom);
+
+  // Idle-time prefetching for primary tabs so switching tabs has 0ms network delay
+  React.useEffect(() => {
+    let idleId: number | null = null;
+    const timer = setTimeout(() => {
+      const prefetchCoreTabs = () => {
+        import("./DetailTab").catch(() => {});
+        import("./GanttTab").catch(() => {});
+        import("./SummaryTab").catch(() => {});
+        import("./CalendarTab").catch(() => {});
+      };
+      if (typeof (window as any).requestIdleCallback === "function") {
+        idleId = (window as any).requestIdleCallback(prefetchCoreTabs, { timeout: 2500 });
+      } else {
+        prefetchCoreTabs();
+      }
+    }, 1500);
+
+    return () => {
+      clearTimeout(timer);
+      if (idleId !== null && typeof (window as any).cancelIdleCallback === "function") {
+        (window as any).cancelIdleCallback(idleId);
+      }
+    };
+  }, []);
 
   return (
     <div className="flex-grow flex flex-col min-h-0 relative z-[10]">
@@ -195,6 +229,10 @@ export const AppTabRouter: React.FC<AppTabRouterProps> = React.memo(({
                   />
                 )}
 
+              {activeTab === "myWork" && (
+                <MyWorkTab />
+              )}
+
               {activeTab === "detail" &&
                 (currentUser.role === "admin" || permissionMatrix[userRole]?.See?.detail) && (
                   <Profiler id="DetailTab" onRender={onRenderCallback}>
@@ -225,6 +263,7 @@ export const AppTabRouter: React.FC<AppTabRouterProps> = React.memo(({
                         setPrefillProjectCode(safeP?.code || "");
                         setPrefillProjectYear(safeP?.year || null);
                         setPrefillProjectStore(safeP?.store || null);
+                        setPrefillProjectId(safeP?.id || null);
                         setEditingTask(null);
                         setIsReadOnlyModal(false);
                         setModalInitialTab("details");
@@ -299,6 +338,12 @@ export const AppTabRouter: React.FC<AppTabRouterProps> = React.memo(({
                       setCostTabSearchTerm(code ? String(code).replace(/["']/g, '').trim() : "");
                       handleTabChange("cost");
                     }}
+                    onAddBudget={() => {
+                      setEditingProject(null);
+                      setIsReadOnlyModal(false);
+                      setModalInitialTab("details");
+                      setIsProjectModalOpen(true);
+                    }}
                   />
                 )}
 
@@ -368,98 +413,24 @@ export const AppTabRouter: React.FC<AppTabRouterProps> = React.memo(({
                     onQuickCompleteTask={notifActions.onQuickCompleteTask}
                     onSnoozeNotif={notifActions.onSnoozeNotif}
                     onClearStaleNotifs={() => notifActions.onClearStaleNotifs(activeNotifications)}
-                    onNotificationClick={(notif) => {
-                      notifActions.onNotificationClick(notif);
-
-                      if (notif.targetId && notif.targetType) {
-                        if (notif.targetType === "notification") {
-                          setNotificationFilterId(notif.targetId);
-                          handleTabChange("notification");
-                          return;
-                        }
-
-                        const canSeeLayout = currentUser.role === "admin" || !!permissionMatrix[userRole]?.See?.layout;
-                        const combinedProjects = (projects && projects.length > 0) ? projects : (useAppStore.getState().allProjectsForNotifs || []);
-                        const combinedTasks = (tasks && tasks.length > 0) ? tasks : (useAppStore.getState().allTasksForNotifs || []);
-                        const layoutMatch = canSeeLayout ? findProjectLayoutUnit(notif, combinedProjects, combinedTasks) : null;
-
-                        if (canSeeLayout && layoutMatch) {
-                          const targetYear = layoutMatch.year || (layoutMatch.project?.year ? String(layoutMatch.project.year) : (notif.projectYear ? String(notif.projectYear) : ''));
-                          if (targetYear && targetYear !== globalYearFilter && targetYear !== 'all') {
-                            setGlobalYearFilter(targetYear);
-                          }
-                          const targetStore = layoutMatch.store || notif.projectStore || 'HCM';
-                          if (targetStore && targetStore !== 'all') {
-                            setGlobalStoreFilter(targetStore);
-                          }
-                          const targetLocation = layoutMatch.location || 'L1';
-                          if (targetLocation && targetLocation !== 'ALL') {
-                            useAppStore.getState().setGlobalLocationFilter([targetLocation]);
-                          }
-
-                          const targetUnitCode = layoutMatch.unitCode || layoutMatch.project?.code || notif.projectCode || (notif.title && notif.title.includes(' - ') ? notif.title.split(' - ')[0].trim() : '');
-
-                          setLayoutTabFilters({
-                            store: targetStore,
-                            location: targetLocation,
-                            projectCode: targetUnitCode,
-                            sourceTaskId: layoutMatch.task?.id,
-                          });
-
-                          handleTabChange("layout");
-
-                          if (layoutMatch.isComment) {
-                            if (layoutMatch.isTaskComment && layoutMatch.task) {
-                              setEditingTask(layoutMatch.task);
-                              setIsReadOnlyModal(false);
-                              setModalInitialTab("chat");
-                              setIsTaskModalOpen(true);
-                            } else if (layoutMatch.project) {
-                              setEditingProject(layoutMatch.project);
-                              setIsReadOnlyModal(false);
-                              setModalInitialTab("chat");
-                              setIsProjectModalOpen(true);
-                            }
-                          }
-                          return;
-                        }
-
-                        if (notif.targetType === "task_delegation") {
-                          handleTabChange("detail");
-                          const targetProject =
-                            layoutMatch?.project ||
-                            combinedProjects.find(
-                              (p) =>
-                                (notif.projectCode && p.code?.toLowerCase() === notif.projectCode.toLowerCase()) ||
-                                String(p.id) === String(notif.targetId) ||
-                                String(p.no) === String(notif.targetId)
-                            );
-
-                          if (targetProject) {
-                            setEditingProject(targetProject);
-                            setIsReadOnlyModal(false);
-                            setModalInitialTab("chat");
-                            setIsProjectModalOpen(true);
-                          } else if (layoutMatch?.task) {
-                            setEditingTask(layoutMatch.task);
-                            setIsReadOnlyModal(false);
-                            setModalInitialTab("chat");
-                            setIsTaskModalOpen(true);
-                            return;
-                          }
-                        }
-
-                        executeDeepLinkRef.current?.(
-                          notif.targetType,
-                          notif.targetId,
-                          {
-                            store: notif.projectStore,
-                            year: String(notif.projectYear),
-                            code: notif.projectCode,
-                          }
-                        );
-                      }
-                    }}
+                    onNotificationClick={(notif) =>
+                      routeNotificationItemClick({
+                        notif,
+                        notifActions,
+                        projects,
+                        tasks,
+                        currentUser,
+                        userRole,
+                        permissionMatrix,
+                        globalYearFilter,
+                        setGlobalYearFilter,
+                        setGlobalStoreFilter,
+                        setLayoutTabFilters,
+                        setNotificationFilterId,
+                        handleTabChange,
+                        executeDeepLinkRef,
+                      })
+                    }
                   />
                 )}
 
@@ -481,6 +452,14 @@ export const AppTabRouter: React.FC<AppTabRouterProps> = React.memo(({
 
               {activeTab === "picture_mapping" && (currentUser.role === "admin" || !!permissionMatrix[userRole]?.See?.pictureMapping || !!permissionMatrix[userRole]?.Write?.pictureMapping) && (
                 <PictureMappingTab />
+              )}
+              {isPrintPreview && activeTab !== "layout" && activeTab !== "gantt" && (
+                <PrintPreviewOverlay
+                  printOrientation={printOrientation}
+                  printPaperSize={printPaperSize}
+                  printScaleMode={printScaleMode}
+                  printScale={printScaleCustom}
+                />
               )}
             </motion.div>
         </Suspense>

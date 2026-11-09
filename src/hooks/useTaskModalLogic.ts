@@ -7,6 +7,7 @@ import { useTaskModalFormState } from './taskModal/useTaskModalFormState';
 import { executeTaskSave } from './taskModal/taskModalSaveService';
 import { hydrateDelegationsForProjects, hydrateDelegationsForTasks, hydrateTasksForProjects } from '../lib/backgroundSyncWorker';
 import { ensureProjectTasksLoaded } from '../lib/taskStateService';
+import { prepareMissingDelegationsForTasks } from '../lib/taskImportService';
 
 export interface UseTaskModalLogicProps {
   task: Task | null;
@@ -15,6 +16,7 @@ export interface UseTaskModalLogicProps {
   prefillProjectCode: string | null;
   prefillProjectYear?: string | number | null;
   prefillProjectStore?: string | null;
+  prefillProjectId?: string | null;
   isReadOnly?: boolean;
   onNavigateToDelegation?: (groupId: string, taskId?: string) => void;
   initialTab?: 'details' | 'chat';
@@ -27,6 +29,7 @@ export function useTaskModalLogic({
   prefillProjectCode,
   prefillProjectYear,
   prefillProjectStore,
+  prefillProjectId,
   isReadOnly = false,
   onNavigateToDelegation: _onNavigateToDelegation,
   initialTab = 'details'
@@ -76,6 +79,7 @@ export function useTaskModalLogic({
     prefillProjectCode,
     prefillProjectYear,
     prefillProjectStore,
+    prefillProjectId,
     projects,
     tasks,
     t
@@ -95,26 +99,92 @@ export function useTaskModalLogic({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose, confirmModal.isOpen]);
 
-  // JIT Targeted Local-First Task & Delegation Hydration
+  // JIT Targeted Local-First Task & Delegation Hydration + Self-Healing Auto-Provisioning
   useEffect(() => {
-    if (isOpen) {
-      const pCode = task?.projectCode || prefillProjectCode;
-      const pId = task?.projectId;
-      const pYear = task?.projectYear ?? prefillProjectYear;
-      const pStore = task?.projectStore ?? prefillProjectStore;
-      const keys = [pId, pCode].filter(Boolean) as string[];
+    if (!isOpen) return;
+    let cancelled = false;
+    const pCode = task?.projectCode || prefillProjectCode;
+    const pId = task?.projectId;
+    const pYear = task?.projectYear ?? prefillProjectYear;
+    const pStore = task?.projectStore ?? prefillProjectStore;
+    const keys = [pId, pCode].filter(Boolean) as string[];
+
+    (async () => {
       if (keys.length > 0) {
-        hydrateTasksForProjects(keys, pYear, pStore).catch(() => {});
-        hydrateDelegationsForProjects(keys, pYear, pStore).catch(() => {});
+        await Promise.all([
+          hydrateTasksForProjects(keys, pYear, pStore).catch(() => {}),
+          hydrateDelegationsForProjects(keys, pYear, pStore).catch(() => {}),
+        ]);
         if (pCode || pId) {
-          ensureProjectTasksLoaded(pCode || '', pId, pYear, pStore).catch(() => {});
+          ensureProjectTasksLoaded(pCode || '', {
+            projectId: pId,
+            store: pStore,
+            year: pYear,
+          }).catch(() => {});
         }
       }
       if (task?.id) {
-        hydrateDelegationsForTasks([task.id]).catch(() => {});
+        await hydrateDelegationsForTasks([task.id]).catch(() => {});
       }
-    }
-  }, [isOpen, task?.id, task?.projectId, task?.projectCode, task?.projectYear, task?.projectStore, prefillProjectCode, prefillProjectYear, prefillProjectStore]);
+      if (cancelled || !task?.id || String(task.id).startsWith('ts_')) return;
+
+      const isDelActive = Boolean(formData?.delegation ?? task?.delegation);
+      if (!isDelActive) return;
+
+      const detId = `del_${task.id}`;
+      const existingInStore = (useAppStore.getState().delegationGroups || []).find(
+        (g) => g.parentTaskId === task.id || g.id === detId || g.id === task.id
+      );
+      if (existingInStore && Array.isArray(existingInStore.subTasks) && existingInStore.subTasks.length > 0) {
+        return;
+      }
+
+      // Check Firestore first in case another device created it, otherwise auto-provision immediately
+      try {
+        const { doc, getDoc } = await import('firebase/firestore');
+        const { db, APP_ID, setDoc } = await import('../lib/firebase');
+        const { bulkPersistDelegations } = await import('../lib/localDb');
+        const snap = await getDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_delegation_groups', detId));
+        if (cancelled) return;
+        if (snap.exists()) {
+          const remoteGroup = { id: snap.id, ...(snap.data() as any) };
+          if (!remoteGroup.isDeleted && Array.isArray(remoteGroup.subTasks) && remoteGroup.subTasks.length > 0) {
+            const cur = useAppStore.getState().delegationGroups || [];
+            const map = new Map(cur.map((d) => [d.id, d]));
+            map.set(remoteGroup.id, remoteGroup);
+            useAppStore.getState().setDelegationGroups(Array.from(map.values()));
+            bulkPersistDelegations([remoteGroup]).catch(() => {});
+            return;
+          }
+        }
+        const mergedTask: Task = {
+          ...task,
+          ...formData,
+          id: task.id,
+          delegation: true,
+        } as Task;
+        const { newDelegations } = prepareMissingDelegationsForTasks([mergedTask], currentUser);
+        if (newDelegations.length > 0) {
+          bulkPersistDelegations(newDelegations).catch(() => {});
+          for (const dg of newDelegations) {
+            setDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_delegation_groups', dg.id), dg, { merge: true }).catch(() => {});
+          }
+        }
+      } catch {
+        const mergedTask: Task = {
+          ...task,
+          ...formData,
+          id: task.id,
+          delegation: true,
+        } as Task;
+        prepareMissingDelegationsForTasks([mergedTask], currentUser);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, task?.id, task?.delegation, formData?.delegation, task?.projectId, task?.projectCode, task?.projectYear, task?.projectStore, prefillProjectCode, prefillProjectYear, prefillProjectStore]);
 
   const setEditingProject = useAppStore(state => state.setEditingProject);
   const setIsProjectModalOpen = useAppStore(state => state.setIsProjectModalOpen);
@@ -170,14 +240,18 @@ export function useTaskModalLogic({
     const prevTasks = useAppStore.getState().tasks;
 
     // 1. Optimistic update
+    const unlinkedTask: Task = { ...task, parentTaskId: undefined, updatedAt: now };
+    delete (unlinkedTask as any).parentId;
     const updatedTasks = prevTasks.map(t =>
-      t.id === task.id ? { ...t, parentTaskId: undefined, parentId: undefined, updatedAt: now } : t
+      t.id === task.id ? unlinkedTask : t
     );
     useAppStore.getState().setTasks(updatedTasks);
     setFormData((prev: any) => ({ ...prev, parentTaskId: undefined, parentId: undefined }));
 
-    // 2. Dexie update
+    // 2. Sync project summaries + Dexie
     try {
+      const { saveTaskStateUnified } = await import('../lib/taskStateService');
+      await saveTaskStateUnified([unlinkedTask]);
       const { localDb } = await import('../lib/localDb');
       await (localDb.tasks.update as any)(task.id, { parentTaskId: null, parentId: null, updatedAt: now });
     } catch (e) {}
@@ -199,6 +273,9 @@ export function useTaskModalLogic({
         action: 'update',
         isPatch: true,
         data: { parentTaskId: null, parentId: null, updatedAt: now },
+        projectId: task.projectId,
+        projectCode: task.projectCode,
+        store: task.projectStore,
         year: task.projectYear ? String(task.projectYear) : undefined,
         updatedBy: currentUser?.email || currentUser?.username,
       }).catch(() => {});
