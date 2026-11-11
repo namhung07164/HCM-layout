@@ -10,7 +10,7 @@ export interface CommandPaletteModalProps {
   onPrintPreviewToggle?: () => void;
 }
 
-export type CommandCategory = 'all' | 'actions' | 'navigation' | 'floors' | 'projects' | 'tasks';
+export type CommandCategory = 'all' | 'actions' | 'navigation' | 'floors' | 'projects';
 
 export interface PaletteQuickAction {
   label: string;
@@ -20,7 +20,7 @@ export interface PaletteQuickAction {
 
 export interface PaletteItem {
   id: string;
-  category: 'actions' | 'navigation' | 'floors' | 'projects' | 'tasks';
+  category: 'actions' | 'navigation' | 'floors' | 'projects';
   title: string;
   subtitle?: string;
   code?: string;

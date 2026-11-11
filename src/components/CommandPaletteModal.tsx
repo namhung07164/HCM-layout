@@ -48,7 +48,6 @@ export function CommandPaletteModal({
     { id: 'navigation', label: 'Navigation', icon: LayoutDashboard },
     { id: 'floors', label: 'Floors', icon: Building2 },
     { id: 'projects', label: 'Projects', icon: Tag },
-    { id: 'tasks', label: 'Tasks', icon: List },
   ];
 
   const { filteredItems } = useCommandPaletteItems({

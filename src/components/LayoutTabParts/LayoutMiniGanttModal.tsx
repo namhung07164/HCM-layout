@@ -220,11 +220,10 @@ export const LayoutMiniGanttModal: React.FC<LayoutMiniGanttModalProps> = ({
             </span>
             <button
               type="button"
-              onClick={handleOpenFullGantt}
-              className="px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs transition-all active:scale-95 touch-manipulation flex items-center gap-1.5 cursor-pointer shadow-xs"
+              onClick={onClose}
+              className="px-3 py-1 rounded-lg bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 font-semibold text-xs transition-all active:scale-95 touch-manipulation cursor-pointer"
             >
-              <BarChartHorizontal className="w-3.5 h-3.5" />
-              <span>Full Gantt View</span>
+              <span>Close</span>
             </button>
           </div>
         </div>

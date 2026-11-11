@@ -88,21 +88,17 @@ export function ProjectQuickNavModal({
   const canSeeCost = isAdmin || !!perms.See?.costDetail;
   const canSeeMyWork = isAdmin || !!perms.See?.myWork || !!perms.See?.general || !!perms.See?.detail;
 
-  // Ordered Quick Navigation tabs:
-  // 1/ Layout: Floor Plan (Indigo)
-  // 2/ Gantt: Timeline (Emerald)
-  // 3/ Detail: Task Detail (Blue)
-  // 4/ My Works: Tasks & Related Work (Violet)
-  // 5/ Budget: Budget (Amber)
-  // 6/ Cost: Expenses (Rose)
+  // Ordered Quick Navigation tabs for Standalone Layout App:
+  // 1/ Layout: Floor Plan & Comparison (Indigo)
+  // 2/ Picture Mapping: CAD & Studio Review (Violet)
   const navItems = [
     {
       id: 'layout' as TabId,
-      allowed: canSeeLayout,
+      allowed: true,
       num: '1',
       icon: MapPin,
-      label: 'Layout',
-      desc: 'Floor Plan',
+      label: 'Floor Layout',
+      desc: 'Floor Plan & Unit Comparison',
       theme: {
         border: 'hover:border-indigo-500/70 dark:hover:border-indigo-400/70',
         bgHover: 'hover:bg-indigo-50/80 dark:hover:bg-indigo-950/40',
@@ -111,73 +107,17 @@ export function ProjectQuickNavModal({
       }
     },
     {
-      id: 'gantt' as TabId,
-      allowed: canSeeGantt,
+      id: 'picture_mapping' as TabId,
+      allowed: true,
       num: '2',
-      icon: BarChartHorizontal,
-      label: 'Gantt',
-      desc: 'Timeline',
-      theme: {
-        border: 'hover:border-emerald-500/70 dark:hover:border-emerald-400/70',
-        bgHover: 'hover:bg-emerald-50/80 dark:hover:bg-emerald-950/40',
-        iconBg: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/60 dark:text-emerald-300',
-        accentText: 'text-emerald-600 dark:text-emerald-400',
-      }
-    },
-    {
-      id: 'detail' as TabId,
-      allowed: canSeeDetail,
-      num: '3',
-      icon: ListOrdered,
-      label: 'Detail',
-      desc: 'Task Detail',
-      theme: {
-        border: 'hover:border-blue-500/70 dark:hover:border-blue-400/70',
-        bgHover: 'hover:bg-blue-50/80 dark:hover:bg-blue-950/40',
-        iconBg: 'bg-blue-100 text-blue-700 dark:bg-blue-900/60 dark:text-blue-300',
-        accentText: 'text-blue-600 dark:text-blue-400',
-      }
-    },
-    {
-      id: 'myWork' as TabId,
-      allowed: canSeeMyWork,
-      num: '4',
-      icon: CheckCircle2,
-      label: 'My Works',
-      desc: 'Tasks & Related Work',
+      icon: Layers,
+      label: 'Picture Mapping',
+      desc: 'CAD Pins & Studio Review',
       theme: {
         border: 'hover:border-violet-500/70 dark:hover:border-violet-400/70',
         bgHover: 'hover:bg-violet-50/80 dark:hover:bg-violet-950/40',
         iconBg: 'bg-violet-100 text-violet-700 dark:bg-violet-900/60 dark:text-violet-300',
         accentText: 'text-violet-600 dark:text-violet-400',
-      }
-    },
-    {
-      id: 'budget' as TabId,
-      allowed: canSeeBudget,
-      num: '5',
-      icon: PieChart,
-      label: 'Budget',
-      desc: 'Allocations',
-      theme: {
-        border: 'hover:border-amber-500/70 dark:hover:border-amber-400/70',
-        bgHover: 'hover:bg-amber-50/80 dark:hover:bg-amber-950/40',
-        iconBg: 'bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-300',
-        accentText: 'text-amber-600 dark:text-amber-400',
-      }
-    },
-    {
-      id: 'cost' as TabId,
-      allowed: canSeeCost,
-      num: '6',
-      icon: Receipt,
-      label: 'Cost',
-      desc: 'Expenses',
-      theme: {
-        border: 'hover:border-rose-500/70 dark:hover:border-rose-400/70',
-        bgHover: 'hover:bg-rose-50/80 dark:hover:bg-rose-950/40',
-        iconBg: 'bg-rose-100 text-rose-700 dark:bg-rose-900/60 dark:text-rose-300',
-        accentText: 'text-rose-600 dark:text-rose-400',
       }
     }
   ];
