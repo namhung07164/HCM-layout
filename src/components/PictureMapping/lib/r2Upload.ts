@@ -211,7 +211,7 @@ export async function uploadSingleR2File(
 ): Promise<R2UploadFileResult> {
   const originalName = file.name || 'Export.jpeg';
   const isJson = originalName.toLowerCase().endsWith('.json');
-  const safeName = originalName.replace(/[\/\\]/g, '_').replace(/\s+/g, '_');
+  const safeName = originalName.replace(/\\/g, '/').replace(/^\/+/, '').replace(/\s+/g, '_');
   const contentType = file.blob.type || (isJson ? 'application/json' : 'image/jpeg');
   const cacheControl = isJson ? 'no-cache, no-store, must-revalidate, max-age=0' : 'public, max-age=604800, immutable';
 

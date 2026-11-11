@@ -41,7 +41,7 @@ export default function App() {
   const printScaleCustom = useAppStore((state) => state.printScaleCustom);
   const printScaleMode = useAppStore((state) => state.printScaleMode);
 
-  // Hydrate standalone local data (Dexie layout shapes + Excel comparison rows) on boot
+  // Hydrate standalone local data & sync with Cloud R2 on boot
   useEffect(() => {
     hydrateSavedComparisonRows();
     getCachedLayoutConfigFromDisk()
@@ -51,6 +51,13 @@ export default function App() {
         }
       })
       .catch(() => {});
+
+    // Initialize lifecycle listeners to auto-save to Cloud R2 & cache on app exit
+    import("./lib/r2UnifiedSyncService").then(({ initAutoSaveOnAppClose, loadUnifiedDataFromCloudR2 }) => {
+      initAutoSaveOnAppClose();
+      // Auto load cloud in background
+      loadUnifiedDataFromCloudR2({ silent: true }).catch(() => {});
+    }).catch(() => {});
   }, []);
 
   // Ensure activeTab is strictly either layout or picture_mapping

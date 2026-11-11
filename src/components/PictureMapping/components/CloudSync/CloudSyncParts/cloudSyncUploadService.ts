@@ -349,6 +349,8 @@ export async function executeCloudUploadSync(params: {
         10000,
         'R2 mapping_config.json upload timed out'
       );
+      // Also sync to folder layout/layout_config.json
+      uploadSingleR2File({ name: 'layout/layout_config.json', blob: configBlob }, creds, s3ClientInstance).catch(() => {});
       if (uploadRes.success) {
         r2UploadSuccess = true;
       } else {

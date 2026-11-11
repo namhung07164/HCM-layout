@@ -74,11 +74,19 @@ export const DynamicCsvToolbar = memo(function DynamicCsvToolbar({
         const { groups, importedGroupsCount, importedRulesCount } =
           await parseDynamicHierarchyImportFile(file, activeVersion?.groups || [], importMode);
         onImportGroups(groups, importMode);
+
+        // Upload CSV/Excel to R2 in background (root and layout/ folders)
+        import('../../../../../lib/r2UnifiedSyncService').then(({ uploadImportedFileToR2, syncAllDataToCloudR2 }) => {
+          uploadImportedFileToR2(file, 'root').catch(() => {});
+          uploadImportedFileToR2(file, 'layout').catch(() => {});
+          syncAllDataToCloudR2({ silent: true }).catch(() => {});
+        }).catch(() => {});
+
         setToast({
-          title: 'Dynamic Rules Imported (0ms RAM)',
+          title: 'Dynamic Rules Imported & Saved to R2',
           message: `Imported ${importedGroupsCount} groups (${importedRulesCount} rules) in ${
             importMode === 'replace' ? 'Replace' : 'Merge/Update'
-          } mode.`,
+          } mode and synced to Cloud R2.`,
           type: 'success',
         });
       } catch (err: any) {

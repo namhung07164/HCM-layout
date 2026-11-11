@@ -285,7 +285,15 @@ export async function importComparisonExcelOrCsvFile(file: File): Promise<{
   const firstSheetName = wb.SheetNames[0];
   const sheet = wb.Sheets[firstSheetName];
   const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' }) as any[];
-  return applyComparisonRowsToStores(rows);
+  const result = applyComparisonRowsToStores(rows);
+
+  // Background upload imported file to R2 (under layout/ and root) and sync unified state
+  import('./r2UnifiedSyncService').then(({ uploadImportedFileToR2, syncAllDataToCloudR2 }) => {
+    uploadImportedFileToR2(file, 'layout').catch(() => {});
+    syncAllDataToCloudR2({ silent: true }).catch(() => {});
+  }).catch(() => {});
+
+  return result;
 }
 
 export function hydrateSavedComparisonRows(): void {

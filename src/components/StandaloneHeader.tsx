@@ -12,6 +12,9 @@ import {
   Maximize2,
   Minimize2,
   CheckCircle2,
+  CloudUpload,
+  CloudDownload,
+  RefreshCw,
 } from 'lucide-react';
 import { TabId } from '../types';
 import { useAppStore } from '../store/useAppStore';
@@ -21,6 +24,10 @@ import {
   exportFullStandaloneWorkspaceJson,
   importFullStandaloneWorkspaceJson,
 } from '../lib/standaloneComparisonService';
+import {
+  syncAllDataToCloudR2,
+  loadUnifiedDataFromCloudR2,
+} from '../lib/r2UnifiedSyncService';
 
 interface StandaloneHeaderProps {
   activeTab: TabId;
@@ -193,6 +200,33 @@ export const StandaloneHeader: React.FC<StandaloneHeaderProps> = React.memo(({
         >
           <FolderUp className="w-3.5 h-3.5" />
           <span className="hidden lg:inline">Load JSON</span>
+        </button>
+
+        <div className="h-4 w-px bg-slate-200 dark:bg-slate-700 mx-0.5 hidden sm:block" />
+
+        {/* Cloudflare R2 Sync (layout/ folder) */}
+        <button
+          type="button"
+          onClick={async () => {
+            await syncAllDataToCloudR2();
+          }}
+          title="Lưu đồng bộ toàn bộ app vào thư mục layout/ trên Cloudflare R2"
+          className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-bold bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800/70 hover:bg-sky-100 dark:hover:bg-sky-900/60 transition-all active:scale-95"
+        >
+          <CloudUpload className="w-3.5 h-3.5 text-sky-500" />
+          <span className="hidden md:inline">Save R2</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={async () => {
+            await loadUnifiedDataFromCloudR2();
+          }}
+          title="Tải lại toàn bộ dữ liệu từ thư mục layout/ trên Cloudflare R2"
+          className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all active:scale-95"
+        >
+          <CloudDownload className="w-3.5 h-3.5" />
+          <span className="hidden md:inline">Load R2</span>
         </button>
 
         {/* Theme & Focus Mode */}

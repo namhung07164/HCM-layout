@@ -299,6 +299,7 @@ export async function saveStoreToCloudR2(
 
   const configBlob = new Blob([JSON.stringify(configData, null, 2)], { type: 'application/json' });
   const uploadRes = await uploadSingleR2File({ name: 'mapping_config.json', blob: configBlob }, creds, s3);
+  uploadSingleR2File({ name: 'layout/layout_config.json', blob: configBlob }, creds, s3).catch(() => {});
   if (!uploadRes.success) {
     throw new Error(`Lỗi tải lên R2 Cloudflare: ${uploadRes.error}`);
   }
