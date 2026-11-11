@@ -9,7 +9,8 @@ import {
   Clipboard, 
   Save,
   Palette,
-  SlidersHorizontal
+  SlidersHorizontal,
+  TableProperties,
 } from 'lucide-react';
 import { DebouncedSearchInput } from '../DebouncedSearchInput';
 import { useAppStore } from '../../store/useAppStore';
@@ -57,6 +58,7 @@ interface LayoutTabFilterToolbarProps {
   filteredUnitSuggestions: Array<{ unit: string; location?: string; brand?: string; project?: string; code?: string }>;
   onSelectSearchUnit: (item: any) => void;
   onClearSearchAndFocus: () => void;
+  onOpenIndexModal?: () => void;
 }
 
 export const LayoutTabFilterToolbar = React.memo(function LayoutTabFilterToolbar({
@@ -92,6 +94,7 @@ export const LayoutTabFilterToolbar = React.memo(function LayoutTabFilterToolbar
   filteredUnitSuggestions,
   onSelectSearchUnit,
   onClearSearchAndFocus,
+  onOpenIndexModal,
 }: LayoutTabFilterToolbarProps) {
   const layoutPaintCategory = useAppStore(state => state.layoutPaintCategory);
   const setLayoutPaintCategory = useAppStore(state => state.setLayoutPaintCategory);
@@ -204,6 +207,19 @@ export const LayoutTabFilterToolbar = React.memo(function LayoutTabFilterToolbar
                 <span className="text-xs text-slate-400 dark:text-slate-500 italic px-2">No accessible projects</span>
               )}
             </div>
+
+            {/* Index Data Table Modal Button */}
+            {onOpenIndexModal && (
+              <button
+                type="button"
+                onClick={onOpenIndexModal}
+                title="Mở bảng dữ liệu đối chiếu CSV/Excel chi tiết, kiểm tra CAD Matching & chỉnh sửa thủ công"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold bg-white dark:bg-[#1e1e20] text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/80 shadow-2xs hover:bg-indigo-50 dark:hover:bg-indigo-950/50 hover:border-indigo-300 transition-all active:scale-95 cursor-pointer"
+              >
+                <TableProperties className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                <span>Index</span>
+              </button>
+            )}
           </div>
 
           {/* Top Right Action Buttons on Mobile */}

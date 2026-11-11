@@ -344,3 +344,30 @@ export async function importFullStandaloneWorkspaceJson(file: File): Promise<voi
     applyComparisonRowsToStores(parsed.comparisonRows);
   }
 }
+
+export function getSavedComparisonRows(): ComparisonRowInput[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_COMPARISON_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    }
+  } catch {}
+  return [...SAMPLE_COMPARISON_DATA];
+}
+
+export function updateSavedComparisonRows(rows: ComparisonRowInput[]): {
+  matchedUnits: number;
+  projectsCount: number;
+} {
+  const result = applyComparisonRowsToStores(rows);
+
+  // Trigger background R2 sync and local disk cache update
+  import('./r2UnifiedSyncService').then(({ syncAllDataToCloudR2 }) => {
+    syncAllDataToCloudR2({ silent: true }).catch(() => {});
+  }).catch(() => {});
+
+  return result;
+}

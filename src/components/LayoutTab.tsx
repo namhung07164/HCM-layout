@@ -1,10 +1,11 @@
-import React from "react";
+import React, { useState } from "react";
 import { Map } from 'lucide-react';
 import { LiveLayoutViewer } from './LiveLayoutViewer';
 import { useLayoutTabData } from './LayoutTabParts/useLayoutTabData';
 import { LayoutTabFilterToolbar } from './LayoutTabParts/LayoutTabFilterToolbar';
 import { LayoutTabFullscreenView } from './LayoutTabParts/LayoutTabFullscreenView';
 import { LayoutTabStaticViewer } from './LayoutTabParts/LayoutTabStaticViewer';
+import { LayoutDataIndexModal } from './LayoutTabParts/LayoutDataIndexModal';
 
 export interface LayoutTabProps {
   initialStore?: string;
@@ -21,6 +22,7 @@ export function LayoutTab({
   onClearFocus,
   onBackToGantt
 }: LayoutTabProps) {
+  const [isIndexModalOpen, setIsIndexModalOpen] = useState(false);
   const {
     allowedStores,
     activeStore,
@@ -123,6 +125,16 @@ export function LayoutTab({
           filteredUnitSuggestions={filteredUnitSuggestions}
           onSelectSearchUnit={handleSelectSearchUnit}
           onClearSearchAndFocus={handleClearSearchAndFocus}
+          onOpenIndexModal={() => setIsIndexModalOpen(true)}
+        />
+
+        {/* Modal Index Data Table */}
+        <LayoutDataIndexModal
+          isOpen={isIndexModalOpen}
+          onClose={() => setIsIndexModalOpen(false)}
+          activeStore={activeStore}
+          activeLocation={locFilterStr}
+          activeYear={effectiveYear}
         />
 
         <div className="flex-grow flex w-full min-h-[320px] sm:min-h-[480px] h-[calc(100dvh-140px)] sm:h-[calc(100vh-135px)] bg-slate-50 dark:bg-slate-900/50 rounded-2xl shadow-inner border border-slate-200 dark:border-slate-800 overflow-hidden relative print:h-[100vh] print:w-full print:min-h-0 print:border-none print:shadow-none print:rounded-none print:bg-white">
