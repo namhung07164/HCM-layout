@@ -1,5 +1,3 @@
-import { doc, setDoc } from 'firebase/firestore';
-import { db, APP_ID } from '../../../lib/firebase';
 import { useAppStore } from '../../../store/useAppStore';
 import { useDataStore } from '../DataContext';
 import { UnitShape, MapVersion } from '../components/DataMapping/types';
@@ -304,52 +302,6 @@ export async function saveStoreToCloudR2(
     throw new Error(`Lỗi tải lên R2 Cloudflare: ${uploadRes.error}`);
   }
 
-  try {
-    await setDoc(
-      doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_config', 'versions'),
-      { pictureMappingVersion: configData.timestamp, updatedAt: new Date().toISOString() },
-      { merge: true }
-    );
-
-    const firestoreStoreLocationData: Record<string, any> = {};
-    for (const key in cloudStoreLocationData) {
-      const part = cloudStoreLocationData[key];
-      if (!part) continue;
-      firestoreStoreLocationData[key] = {
-        activeMapVersionId: part.activeMapVersionId,
-        mapUnits: part.mapUnits || [],
-        mapVersions: (part.mapVersions || []).map((v: any) => {
-          const bg = v.backgroundUrl || '';
-          const safeBg = bg.startsWith('data:') ? ((v as any).r2Key ? `r2://${(v as any).r2Key}` : '') : bg;
-          return { ...v, backgroundUrl: safeBg };
-        }),
-      };
-    }
-
-    const firestorePayload = {
-      storeLocationData: firestoreStoreLocationData,
-      store: targetStore,
-      location: dataState.location,
-      year: targetYear,
-      globalYearFilter: targetYear,
-      activeMapVersionId: dataState.activeMapVersionId,
-      reviewSelectedLabels: configData.reviewSelectedLabels,
-      reviewLabelColors: configData.reviewLabelColors,
-      updatedAt: new Date().toISOString(),
-      timestamp: configData.timestamp,
-    };
-
-    const estimatedBytes = new Blob([JSON.stringify(firestorePayload)]).size;
-    if (estimatedBytes < 950000) {
-      await setDoc(
-        doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_config', 'picture_mapping_config'),
-        firestorePayload,
-        { merge: true }
-      );
-    }
-  } catch (fsErr) {
-    console.warn('[dynamicExportService] Firestore backup error:', fsErr);
-  }
 
   try {
     localStorage.setItem(
@@ -456,15 +408,10 @@ export async function executeTriggerExportProcess(
   await saveStoreToCloudR2(targetStore, updatedStoreLocationData);
 
   try {
-    const docRef = doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_settings', 'layout_trigger');
-    await setDoc(
-      docRef,
-      { is_ready_to_export: true, requested_at: Date.now(), store: targetStore },
-      { merge: true }
-    );
-  } catch (firestoreErr) {
-    console.warn('[TriggerExport] Lỗi cập nhật layout_trigger Firestore:', firestoreErr);
-  }
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('hcm_layout_trigger_ready', { detail: { store: targetStore, timestamp: Date.now() } }));
+    }
+  } catch {}
 
   onProgress?.('Bước 4/4: Đang tải lại dữ liệu từ Cloudflare R2 về ứng dụng (Reload Cloud R2)...');
   try {

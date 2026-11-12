@@ -1,7 +1,4 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { doc, getDoc } from 'firebase/firestore';
-import { setDoc } from '../../lib/firestoreWrites';
-import { db, APP_ID } from '../../lib/firebase';
 import { useAppStore } from '../../store/useAppStore';
 import { TooltipImageItem } from './TooltipParts/tooltipTypes';
 import { removeUploadedImageEverywhere } from '../../lib/projectImageSync';
@@ -27,7 +24,7 @@ export function useColorLegendImages(canWrite: boolean = false) {
   }, [globalLocationFilter]);
 
   const cleanCode = useMemo(() => `COLOR_LEGEND_${targetLoc}`, [targetLoc]);
-  const storageKey = useMemo(() => `taka_unit_images_${activeStore}_${cleanCode}`, [activeStore, cleanCode]);
+  const storageKey = useMemo(() => `hcm_unit_images_${activeStore}_${cleanCode}`, [activeStore, cleanCode]);
   const docKey = useMemo(() => `${activeStore}_${cleanCode}`, [activeStore, cleanCode]);
 
   const [showImagePanel, setShowImagePanel] = useState(false);
@@ -49,19 +46,17 @@ export function useColorLegendImages(canWrite: boolean = false) {
     return [];
   });
 
-  // Load from localStorage immediately on store/floor switch, and sync from Firestore
+  // Load from localStorage immediately on store/floor switch (Zero Firestore)
   useEffect(() => {
-    let localList: Array<{ id: string; url: string; title?: string; createdAt?: string; store?: string }> = [];
     if (legendImagesMemoryCache.has(docKey)) {
-      localList = legendImagesMemoryCache.get(docKey)!;
-      setCustomImages(localList);
+      setCustomImages(legendImagesMemoryCache.get(docKey)!);
     } else {
       try {
         const saved = localStorage.getItem(storageKey);
         if (saved) {
           const parsed = JSON.parse(saved);
           if (Array.isArray(parsed)) {
-            localList = parsed.filter(item => !item.store || normalizeStore(item.store) === activeStore);
+            const localList = parsed.filter(item => !item.store || normalizeStore(item.store) === activeStore);
             legendImagesMemoryCache.set(docKey, localList);
             setCustomImages(localList);
           } else {
@@ -74,41 +69,7 @@ export function useColorLegendImages(canWrite: boolean = false) {
         setCustomImages([]);
       }
     }
-
-    // Only fetch from Firestore when the user opens the Color Legend image panel and it is not yet cached in memory
-    if (!showImagePanel || legendImagesMemoryCache.has(docKey)) {
-      return;
-    }
-
-    let cancelled = false;
-    const docRef = doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_unit_images', docKey);
-    getDoc(docRef)
-      .then((snap) => {
-        if (cancelled) return;
-        if (snap.exists()) {
-          const cloudData = snap.data();
-          if (Array.isArray(cloudData?.images)) {
-            const cloudImages = cloudData.images.filter(
-              (item: any) => !item.store || normalizeStore(item.store) === activeStore
-            );
-            legendImagesMemoryCache.set(docKey, cloudImages);
-            setCustomImages(cloudImages);
-            try {
-              localStorage.setItem(storageKey, JSON.stringify(cloudImages));
-            } catch {}
-            return;
-          }
-        }
-        legendImagesMemoryCache.set(docKey, localList);
-      })
-      .catch((err) => {
-        console.warn('[useColorLegendImages] Cloud fetch:', err);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [storageKey, activeStore, cleanCode, docKey, showImagePanel]);
+  }, [storageKey, activeStore, cleanCode, docKey]);
 
   const handleAddCustomImage = (e?: React.FormEvent, customUrl?: string) => {
     if (e) e.preventDefault();
@@ -136,20 +97,6 @@ export function useColorLegendImages(canWrite: boolean = false) {
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('taka_unit_images_changed'));
     }
-
-    const docRef = doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_unit_images', docKey);
-    setDoc(
-      docRef,
-      {
-        unitCode: cleanCode,
-        store: activeStore,
-        images: updated,
-        updatedAt: new Date().toISOString(),
-      },
-      { merge: true }
-    ).catch((err) => {
-      console.error('[useColorLegendImages] Failed to save legend images to Firestore:', err);
-    });
   };
 
   const handleDeleteCustomImage = (id: string, urlToDelete?: string) => {

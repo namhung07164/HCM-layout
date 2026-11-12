@@ -159,46 +159,7 @@ export function isR2CredentialsValid(creds: R2Credentials | null): { valid: bool
 }
 
 export async function getStoredR2CredentialsAsync(): Promise<R2Credentials | null> {
-  const syncCreds = getStoredR2Credentials();
-  if (syncCreds) return syncCreds;
-
-  try {
-    const { doc, getDoc } = await import('firebase/firestore');
-    const { db, APP_ID } = await import('../../../lib/firebase');
-    const r2Doc = await getDoc(doc(db, "artifacts", APP_ID, "public", "data", "taka_config", "r2_credentials"));
-    if (r2Doc.exists()) {
-      const data = r2Doc.data() as any;
-      const acc = (data?.accountId || data?.account_id || '').trim();
-      const bkt = (data?.bucketName || data?.bucket_name || '').trim();
-      const key = (data?.accessKeyId || data?.access_key_id || data?.accessKey || '').trim();
-      const sec = (data?.secretAccessKey || data?.secret_access_key || data?.secretKey || '').trim();
-
-      if (acc && bkt && key && sec) {
-        const creds: R2Credentials = {
-          accountId: acc,
-          accessKeyId: key,
-          secretAccessKey: sec,
-          bucketName: bkt,
-        };
-        try {
-          useAppStore.getState().setR2Config(creds);
-        } catch {}
-        try {
-          localStorage.setItem('r2_account_id', creds.accountId);
-          localStorage.setItem('r2_bucket_name', creds.bucketName);
-          localStorage.setItem('r2_access_key', creds.accessKeyId);
-          localStorage.setItem('r2_access_key_id', creds.accessKeyId);
-          localStorage.setItem('r2_secret_key', creds.secretAccessKey);
-          localStorage.setItem('r2_secret_access_key', creds.secretAccessKey);
-          localStorage.setItem('taka_cache_r2_config_v1', JSON.stringify(creds));
-        } catch {}
-        return creds;
-      }
-    }
-  } catch (err) {
-    console.warn('[R2 Async Creds] Failed to fetch r2_credentials from Firestore:', err);
-  }
-  return null;
+  return getStoredR2Credentials();
 }
 
 const resolvedR2UrlCache = new Map<string, { url: string; expiresAt: number }>();

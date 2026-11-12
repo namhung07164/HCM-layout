@@ -1,9 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { doc, onSnapshot } from 'firebase/firestore';
-import { setDoc } from '../../lib/firestoreWrites';
-import { db, APP_ID } from '../../lib/firebase';
-import { usePerformanceStore } from '../../store/usePerformanceStore';
-import { executeTriggerExportProcess } from '../PictureMapping/lib/dynamicExportService';
+import { executeTriggerExportProcess, triggerBackgroundR2Sync } from '../PictureMapping/lib/dynamicExportService';
 import { isValidUrl } from './layoutTabSearchUtils';
 
 interface UseLayoutTabSettingsProps {
@@ -12,58 +8,29 @@ interface UseLayoutTabSettingsProps {
   canWrite?: boolean;
 }
 
-const LAYOUT_SETTINGS_CACHE_KEY = 'taka_cache_layout_settings_v1';
-const LAYOUT_EXPORT_TS_KEY = 'taka_layout_export_ts_v1';
+const LAYOUT_SETTINGS_CACHE_KEY = 'hcm_layout_settings_v1';
+const LAYOUT_EXPORT_TS_KEY = 'hcm_layout_export_ts_v1';
 
-// Module-level singleton listener pool to prevent re-reading taka_settings on every tab switch
 let sharedLayoutSettingsData: Record<string, any> | null = null;
-let sharedLayoutTriggerData: Record<string, any> | null = null;
-let sharedUnsubLayout: (() => void) | null = null;
-let sharedUnsubTrigger: (() => void) | null = null;
 const layoutSettingsSubscribers = new Set<(data: Record<string, any>) => void>();
-const layoutTriggerSubscribers = new Set<(data: Record<string, any>) => void>();
 
-function ensureSharedLayoutListeners() {
-  if (!sharedUnsubLayout) {
-    usePerformanceStore.getState().registerListener('taka_settings/layout');
-    sharedUnsubLayout = onSnapshot(doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_settings', 'layout'), (docSnap) => {
-      usePerformanceStore.getState().trackSnapshot('taka_settings/layout', docSnap);
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        sharedLayoutSettingsData = data;
-        try {
-          localStorage.setItem(LAYOUT_SETTINGS_CACHE_KEY, JSON.stringify(data));
-        } catch {}
-        layoutSettingsSubscribers.forEach((cb) => cb(data));
-      }
-    }, (error) => {
-      console.error('Error listening to layout settings', error);
-    });
-  }
-  if (!sharedUnsubTrigger) {
-    usePerformanceStore.getState().registerListener('taka_settings/layout_trigger');
-    sharedUnsubTrigger = onSnapshot(doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_settings', 'layout_trigger'), (docSnap) => {
-      usePerformanceStore.getState().trackSnapshot('taka_settings/layout_trigger', docSnap);
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        sharedLayoutTriggerData = data;
-        layoutTriggerSubscribers.forEach((cb) => cb(data));
-      }
-    }, (error) => {
-      console.error('Error listening to layout_trigger', error);
-    });
-  }
+function getInitialSettings(): Record<string, any> {
+  if (sharedLayoutSettingsData) return sharedLayoutSettingsData;
+  try {
+    let raw = localStorage.getItem(LAYOUT_SETTINGS_CACHE_KEY);
+    if (!raw) {
+      raw = localStorage.getItem('taka_cache_layout_settings_v1');
+    }
+    if (raw) {
+      sharedLayoutSettingsData = JSON.parse(raw) || {};
+      return sharedLayoutSettingsData || {};
+    }
+  } catch {}
+  return {};
 }
 
 export function useLayoutTabSettings({ activeStore, locFilterStr, canWrite = false }: UseLayoutTabSettingsProps) {
-  const [layoutSettings, setLayoutSettings] = useState<Record<string, any>>(() => {
-    if (sharedLayoutSettingsData) return sharedLayoutSettingsData;
-    try {
-      const raw = localStorage.getItem(LAYOUT_SETTINGS_CACHE_KEY);
-      if (raw) return JSON.parse(raw) || {};
-    } catch {}
-    return {};
-  });
+  const [layoutSettings, setLayoutSettings] = useState<Record<string, any>>(getInitialSettings);
   const [url, setUrl] = useState<string>('https://drive.google.com/file/d/1hxzPKKhQWhQ-tAThmgan8eNqqy5GN-Ds/preview');
   const [isEditing, setIsEditing] = useState(false);
   const [editUrl, setEditUrl] = useState('');
@@ -71,7 +38,10 @@ export function useLayoutTabSettings({ activeStore, locFilterStr, canWrite = fal
   const [exportStatusMessage, setExportStatusMessage] = useState<string>('');
   const [cacheBuster, setCacheBuster] = useState<number>(() => {
     try {
-      const saved = Number(localStorage.getItem(LAYOUT_EXPORT_TS_KEY));
+      let saved = Number(localStorage.getItem(LAYOUT_EXPORT_TS_KEY));
+      if (!saved || saved <= 0) {
+        saved = Number(localStorage.getItem('taka_layout_export_ts_v1'));
+      }
       if (saved > 0) return saved;
     } catch {}
     return 1;
@@ -79,38 +49,10 @@ export function useLayoutTabSettings({ activeStore, locFilterStr, canWrite = fal
 
   const docKey = `url_${activeStore}_${locFilterStr}`;
 
-  // Reuse warm singleton listener for layout settings & triggers across tab switches (0 extra reads)
   useEffect(() => {
-    ensureSharedLayoutListeners();
-    if (sharedLayoutSettingsData) {
-      setLayoutSettings(sharedLayoutSettingsData);
-    }
-    const handleTriggerUpdate = (data: Record<string, any>) => {
-      if (data.is_ready_to_export === false) {
-        setIsExporting(false);
-        if (data.export_completed_at) {
-          setCacheBuster(data.export_completed_at);
-          try {
-            localStorage.setItem(LAYOUT_EXPORT_TS_KEY, String(data.export_completed_at));
-          } catch {}
-        }
-      } else if (data.is_ready_to_export === true) {
-        if (data.requested_at && Date.now() - data.requested_at < 15000) {
-          setIsExporting(true);
-        } else {
-          setIsExporting(false);
-        }
-      }
-    };
-    if (sharedLayoutTriggerData) {
-      handleTriggerUpdate(sharedLayoutTriggerData);
-    }
     layoutSettingsSubscribers.add(setLayoutSettings);
-    layoutTriggerSubscribers.add(handleTriggerUpdate);
-
     return () => {
       layoutSettingsSubscribers.delete(setLayoutSettings);
-      layoutTriggerSubscribers.delete(handleTriggerUpdate);
     };
   }, []);
 
@@ -141,11 +83,23 @@ export function useLayoutTabSettings({ activeStore, locFilterStr, canWrite = fal
   const handleSave = async () => {
     if (!canWrite) return;
     try {
-      const docRef = doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_settings', 'layout');
-      const updates: Record<string, any> = { [docKey]: editUrl };
-      setDoc(docRef, updates, { merge: true });
+      const nextSettings = {
+        ...layoutSettings,
+        [docKey]: editUrl,
+      };
+      sharedLayoutSettingsData = nextSettings;
+      setLayoutSettings(nextSettings);
+      try {
+        localStorage.setItem(LAYOUT_SETTINGS_CACHE_KEY, JSON.stringify(nextSettings));
+      } catch {}
+      layoutSettingsSubscribers.forEach((cb) => cb(nextSettings));
       setUrl(editUrl);
       setIsEditing(false);
+
+      // Trigger Cloudflare R2 sync in background (Zero Firestore)
+      try {
+        triggerBackgroundR2Sync(activeStore as any);
+      } catch {}
     } catch (error) {
       console.error('Error saving layout URL', error);
     }
@@ -162,7 +116,11 @@ export function useLayoutTabSettings({ activeStore, locFilterStr, canWrite = fal
         setExportStatusMessage(status);
       });
 
-      setCacheBuster(Date.now());
+      const now = Date.now();
+      setCacheBuster(now);
+      try {
+        localStorage.setItem(LAYOUT_EXPORT_TS_KEY, String(now));
+      } catch {}
       setIsExporting(false);
       setExportStatusMessage('');
       alert(`✅ ${res.message}`);

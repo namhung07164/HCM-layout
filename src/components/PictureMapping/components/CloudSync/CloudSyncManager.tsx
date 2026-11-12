@@ -22,8 +22,6 @@ import { useAppStore } from '../../../../store/useAppStore';
 import { useShallow } from 'zustand/react/shallow';
 import R2UploadModal from '../R2UploadModal';
 import { cn } from '../../lib/utils';
-import { doc, getDoc } from 'firebase/firestore';
-import { db, APP_ID } from '../../../../lib/firebase';
 import {
   executeCloudUploadSync,
   getScopeName,
@@ -112,27 +110,6 @@ export default function CloudSyncManager({
       const creds = await getStoredR2CredentialsAsync();
       if (creds && creds.accountId && creds.accessKeyId) {
         executeSync('download', true, 'all');
-      } else {
-        try {
-          const snap = await getDoc(
-            doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_config', 'picture_mapping_config')
-          );
-          if (snap.exists()) {
-            const fsData = snap.data() as any;
-            if (fsData?.storeLocationData) {
-              loadFullCloudData({
-                storeLocationData: fsData.storeLocationData,
-                store,
-                location,
-                activeMapVersionId,
-                reviewSelectedLabels: fsData.reviewSelectedLabels || [],
-                reviewLabelColors: fsData.reviewLabelColors || {},
-              });
-            }
-          }
-        } catch (e) {
-          console.warn('[AutoLoad Fallback] Firestore boot fallback error:', e);
-        }
       }
     }
     checkAutoLoad();

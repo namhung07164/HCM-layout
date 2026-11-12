@@ -1,5 +1,3 @@
-import { doc, getDoc } from 'firebase/firestore';
-import { db, APP_ID } from '../../../../../lib/firebase';
 import { useAppStore } from '../../../../../store/useAppStore';
 import { useDataStore, StoreLocationRecord } from '../../../DataContext';
 import { MapVersion } from '../../DataMapping/types';
@@ -12,7 +10,6 @@ import {
   R2Credentials,
 } from '../../../lib/r2Upload';
 import type { CloudSyncScope } from '../CloudSyncManager';
-import { saveCloudBackupToFirestore } from './cloudSyncFirestoreBackup';
 
 export function sanitizeForFirestore(val: any): any {
   if (val === undefined) return null;
@@ -113,20 +110,6 @@ export async function executeCloudUploadSync(params: {
     }
   }
 
-  if (!existingCloudData) {
-    try {
-      const snap = await withSyncTimeout(
-        getDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_config', 'picture_mapping_config')),
-        5000,
-        'Firestore pre-fetch timed out'
-      );
-      if (snap.exists()) {
-        existingCloudData = snap.data();
-      }
-    } catch (e) {
-      console.warn('Could not pre-fetch Firestore backup for merge:', e);
-    }
-  }
 
   const allValidBgNames: string[] = [];
   const cloudStoreLocationData: Record<string, StoreLocationRecord> = existingCloudData?.storeLocationData
@@ -366,18 +349,6 @@ export async function executeCloudUploadSync(params: {
     console.warn('[R2 Upload Warning]', r2ErrorMessage);
   }
 
-  const firestoreSaveSuccess = await saveCloudBackupToFirestore({
-    cloudStoreLocationData,
-    store,
-    location,
-    targetYear,
-    activeMapVersionId: activeCloudPartition.activeMapVersionId || activeMapVersionId || null,
-    reviewSelectedLabels: configData.reviewSelectedLabels || [],
-    reviewLabelColors: configData.reviewLabelColors || {},
-    currentScope,
-    timestamp: configData.timestamp,
-  });
-
   try {
     const payload = JSON.stringify({
       storeLocationData: cloudStoreLocationData,
@@ -441,16 +412,8 @@ export async function executeCloudUploadSync(params: {
     );
     useAppStore.getState().setToast({
       title: 'Save Cloud Success',
-      message: `Successfully saved ${totalUnits} units and ${totalVersions} versions across all floors to Cloudflare R2 & Firestore in ${elapsedSec}s!`,
+      message: `Successfully saved ${totalUnits} units and ${totalVersions} versions across all floors to Cloudflare R2 in ${elapsedSec}s!`,
       type: 'success',
-    });
-  } else if (firestoreSaveSuccess) {
-    const warnNote = r2ErrorMessage ? ` (Lưu ý: ${r2ErrorMessage})` : '';
-    setStatusText(`Đã lưu ${totalUnits} units, ${totalVersions} versions vào Firestore Cloud (${elapsedSec}s)!`);
-    useAppStore.getState().setToast({
-      title: 'Saved to Firestore Cloud',
-      message: `Data saved successfully to Firestore Cloud in ${elapsedSec}s!${warnNote}`,
-      type: r2ErrorMessage ? 'warning' : 'success',
     });
   } else {
     setStatusText(`Lỗi lưu Cloud (${elapsedSec}s): ${r2ErrorMessage || 'Không thể ghi dữ liệu'}`);

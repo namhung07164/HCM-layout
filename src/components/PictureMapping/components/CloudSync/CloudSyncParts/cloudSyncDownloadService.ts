@@ -1,5 +1,3 @@
-import { doc, getDoc } from 'firebase/firestore';
-import { db, APP_ID } from '../../../../../lib/firebase';
 import { useAppStore } from '../../../../../store/useAppStore';
 import { useDataStore, StoreLocationRecord } from '../../../DataContext';
 import { MapVersion } from '../../DataMapping/types';
@@ -70,31 +68,6 @@ export async function executeCloudDownloadSync(params: {
     }
   }
 
-  let knownPicMapVer = 0;
-  try {
-    const rawVer = localStorage.getItem('taka_cache_config_versions_v1');
-    if (rawVer) knownPicMapVer = JSON.parse(rawVer)?.pictureMappingVersion || 0;
-  } catch {}
-  if (!data || (knownPicMapVer > 0 && knownPicMapVer > (data.timestamp || 0))) {
-    try {
-      const snap = await withSyncTimeout(
-        getDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_config', 'picture_mapping_config')),
-        5000,
-        'Firestore download timed out'
-      );
-      if (snap.exists()) {
-        const fsData = snap.data() as any;
-        if (fsData?.storeLocationData) {
-          if (!data || (fsData.timestamp && (!data.timestamp || fsData.timestamp > data.timestamp))) {
-            data = fsData;
-            loadSource = 'Firestore Cloud';
-          }
-        }
-      }
-    } catch (fsErr) {
-      console.warn('[Firestore Fallback] Error reading backup:', fsErr);
-    }
-  }
 
   if (!data) {
     try {

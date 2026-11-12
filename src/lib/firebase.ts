@@ -12,7 +12,8 @@ import {
   updateDoc as firestoreUpdateDoc, 
   deleteDoc as firestoreDeleteDoc, 
   collection, 
-  doc 
+  doc,
+  disableNetwork 
 } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import { getMessaging, isSupported, getToken } from "firebase/messaging";
@@ -95,10 +96,15 @@ export const db = initializeFirestore(app, {
     tabManager: (isIframe || isPWA || isDevMode || isIOS) 
       ? persistentSingleTabManager({ forceOwnership: true }) 
       : persistentMultipleTabManager(),
-    // Setting unlimited cache size for Desktop while bounding iOS to 40MB (41943040) to avoid WebKit IDB purge / QuotaExceeded
     cacheSizeBytes: isIOS ? 41943040 : CACHE_SIZE_UNLIMITED 
   }),
 });
+
+// Standalone mode: permanently disable Firestore network connection to ensure 100% offline/local-first/R2 operation
+try {
+  disableNetwork(db).catch(() => {});
+} catch {}
+
 export const storage = getStorage(app);
 
 // Initialize Messaging conditionally (it might not be supported in some browsers/environments)

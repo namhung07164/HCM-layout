@@ -9,8 +9,6 @@ import Draggable from 'react-draggable';
 import { testR2Connection } from '../lib/r2Upload';
 import { cn } from '../lib/utils';
 import { useAppStore } from '../../../store/useAppStore';
-import { doc, setDoc } from 'firebase/firestore';
-import { db, APP_ID } from '../../../lib/firebase';
 
 interface R2UploadModalProps {
   isOpen: boolean;
@@ -136,7 +134,7 @@ export default function R2UploadModal({ isOpen, onClose, onStartExport, uploadin
     localStorage.setItem('cf_zone_id', cleanCfZoneId);
     localStorage.setItem('cf_api_token', cleanCfApiToken);
 
-    // Đồng bộ cấu hình lên Firestore để dùng chung toàn hệ thống
+    // Đồng bộ cấu hình vào store và cache local
     if (cleanAccountId && cleanBucketName && cleanAccessKey && cleanSecretKey) {
       const configData = {
         accountId: cleanAccountId,
@@ -145,18 +143,9 @@ export default function R2UploadModal({ isOpen, onClose, onStartExport, uploadin
         secretAccessKey: cleanSecretKey
       };
       setR2Config(configData);
-      try {
-        await setDoc(doc(db, "artifacts", APP_ID, "public", "data", "taka_config", "r2_credentials"), configData);
-        await setDoc(doc(db, "artifacts", APP_ID, "public", "data", "taka_config", "versions"), { 
-          r2Version: Date.now(),
-          updatedAt: new Date().toISOString()
-        }, { merge: true });
-      } catch (e) {
-        console.error("Lỗi khi lưu cấu hình R2 lên server:", e);
-      }
     }
 
-    if (window.confirm("Đồng ý lưu bản mới lên Cloudflare R2?\nHệ thống sẽ tự động dọn dẹp các bản cũ trên R2 để chỉ lưu 1 version duy nhất, tránh rác lưu trữ.\nĐồng thời, khoá kết nối R2 sẽ được đồng bộ lên Server cho toàn hệ thống.")) {
+    if (window.confirm("Đồng ý lưu bản mới lên Cloudflare R2?\nHệ thống sẽ tự động dọn dẹp các bản cũ trên R2 để chỉ lưu 1 version duy nhất, tránh rác lưu trữ.")) {
       onStartExport();
     }
   };

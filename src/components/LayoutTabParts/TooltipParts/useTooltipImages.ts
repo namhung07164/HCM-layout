@@ -1,9 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Project } from '../../../types';
 import { useAppStore } from '../../../store/useAppStore';
-import { doc, getDoc } from 'firebase/firestore';
-import { setDoc } from '../../../lib/firestoreWrites';
-import { db, APP_ID } from '../../../lib/firebase';
 import { extractAllProjectCodes, projectMatchesUnitCode, extractProjectMetadata } from '../../../lib/utils';
 import { TooltipImageItem } from './tooltipTypes';
 import { removeUploadedImageEverywhere } from '../../../lib/projectImageSync';
@@ -49,23 +46,21 @@ export function useTooltipImages({
   const activeStore = normalizeStore(rawStore) || 'HCM';
 
   const cleanCode = String(data?.code || data?.unit || data?.name || unitCode || 'default').trim();
-  const activeUnitStorageKey = `taka_unit_images_${activeStore}_${cleanCode}`;
+  const activeUnitStorageKey = `hcm_unit_images_${activeStore}_${cleanCode}`;
   const unitImagesDocKey = `${activeStore}_${cleanCode}`;
 
-  // 1. Instant 0ms load from session memory cache / localStorage
-  // 2. Smart Firestore sync on taka_unit_images: avoid hover read-storms by reusing session cache unless image panel is opened
+  // Instant 0ms load from session memory cache / localStorage (Zero Firestore)
   useEffect(() => {
-    let localImages: any[] = [];
     if (unitImagesSessionCache.has(unitImagesDocKey)) {
-      localImages = unitImagesSessionCache.get(unitImagesDocKey)!;
-      setCustomUnitImages(localImages);
+      setCustomUnitImages(unitImagesSessionCache.get(unitImagesDocKey)!);
     } else {
       try {
         const saved = localStorage.getItem(activeUnitStorageKey);
         if (saved) {
           const parsed = JSON.parse(saved);
           if (Array.isArray(parsed)) {
-            localImages = parsed.filter(item => !item.store || normalizeStore(item.store) === activeStore);
+            const localImages = parsed.filter(item => !item.store || normalizeStore(item.store) === activeStore);
+            unitImagesSessionCache.set(unitImagesDocKey, localImages);
             setCustomUnitImages(localImages);
           } else {
             setCustomUnitImages([]);
@@ -77,39 +72,7 @@ export function useTooltipImages({
         setCustomUnitImages([]);
       }
     }
-
-    // Zero-Read Hover Guard: Only fetch from Firestore when user explicitly opens the Image Panel, and at most once per unit per session
-    if ((!showImagePanel && !quickImageMode) || unitImagesSessionCache.has(unitImagesDocKey)) {
-      return;
-    }
-
-    let cancelled = false;
-    const docRef = doc(db, "artifacts", APP_ID, "public", "data", "taka_unit_images", unitImagesDocKey);
-    getDoc(docRef)
-      .then((snap) => {
-        if (cancelled) return;
-        if (snap.exists()) {
-          const cloudData = snap.data();
-          if (Array.isArray(cloudData?.images)) {
-            const cloudImages = cloudData.images.filter((item: any) => !item.store || normalizeStore(item.store) === activeStore);
-            unitImagesSessionCache.set(unitImagesDocKey, cloudImages);
-            setCustomUnitImages(cloudImages);
-            try {
-              localStorage.setItem(activeUnitStorageKey, JSON.stringify(cloudImages));
-            } catch {}
-            return;
-          }
-        }
-        unitImagesSessionCache.set(unitImagesDocKey, localImages);
-      })
-      .catch((err) => {
-        console.warn("[useTooltipImages] Cloud fetch:", err);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [activeUnitStorageKey, activeStore, cleanCode, unitImagesDocKey, showImagePanel, quickImageMode]);
+  }, [activeUnitStorageKey, activeStore, cleanCode, unitImagesDocKey]);
 
   useEffect(() => {
     setShowImagePanel(Boolean(quickImageMode));
@@ -168,18 +131,7 @@ export function useTooltipImages({
       window.dispatchEvent(new CustomEvent('taka_unit_images_changed'));
     }
 
-    // 1. Direct Cloud Firestore persistence for taka_unit_images (Multi-device sync iOS <-> Desktop)
-    const unitImagesDocRef = doc(db, "artifacts", APP_ID, "public", "data", "taka_unit_images", unitImagesDocKey);
-    setDoc(unitImagesDocRef, {
-      unitCode: cleanCode,
-      store: activeStore,
-      images: updated,
-      updatedAt: new Date().toISOString(),
-    }, { merge: true }).catch(err => {
-      console.error("[useTooltipImages] Failed to save unit images to Firestore:", err);
-    });
-
-    // 2. Also persist link to matched project document
+    // Persist link to matched project document in local app store
     try {
       const allProjects = useAppStore.getState().projects;
       const targetProj = (p && normalizeStore(extractProjectMetadata(p).store) === activeStore ? p : null) || allProjects.find(item => {
@@ -215,19 +167,6 @@ export function useTooltipImages({
         useAppStore.getState().setProjects(
           allProjects.map(proj => proj.id === targetProj.id ? updatedProject : proj)
         );
-
-        if (targetProj.id) {
-          const updateData = {
-            imageUrl: updatedProject.imageUrl,
-            thumbnail: updatedProject.thumbnail,
-            imageLinks: updatedImageLinks,
-            updatedAt: nowIso,
-          };
-          // setDoc from firestoreWrites.ts automatically queues and emits the delta via autoDeltaQueue
-          setDoc(doc(db, "artifacts", APP_ID, "public", "data", "taka_projects", targetProj.id), updateData, { merge: true }).catch(err => {
-            console.error("Failed to sync to Firestore:", err);
-          });
-        }
       }
     } catch (err) {
       console.error("Error updating project image link:", err);
