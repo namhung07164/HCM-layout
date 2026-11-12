@@ -328,6 +328,7 @@ export const LayoutPaintCategoriesSection: React.FC<LayoutPaintCategoriesSection
               }}
               className="bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 text-xs font-bold px-2 py-1 rounded-lg border border-indigo-200 dark:border-indigo-800 outline-none cursor-pointer"
             >
+              <option value="all">🎨 Tất cả (All Rules)</option>
               {allCategories.map(cat => (
                 <option key={cat} value={cat}>{cat}</option>
               ))}

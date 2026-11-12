@@ -111,12 +111,9 @@ export const LayoutTabFilterToolbar = React.memo(function LayoutTabFilterToolbar
       if (config.groupMappings && Object.keys(config.groupMappings).length > 0) {
         applyGroupMappingsToVersions(config.groupMappings, storeKey);
       }
-      if (config.activePaintFilter && config.activePaintFilter.trim()) {
-        setLayoutPaintCategory(config.activePaintFilter.trim());
-      }
     });
     return () => unsub();
-  }, [activeStore, setLayoutPaintCategory]);
+  }, [activeStore]);
 
   const availablePaintCategories = useMemo(() => {
     const baseCats = syncedCustomCats.length > 0 ? syncedCustomCats : getSavedCustomPaintCategories();
@@ -124,17 +121,16 @@ export const LayoutTabFilterToolbar = React.memo(function LayoutTabFilterToolbar
   }, [syncedCustomCats]);
 
   React.useEffect(() => {
-    if (availablePaintCategories.length > 0) {
-      if (layoutPaintCategory === 'all' || (!availablePaintCategories.includes(layoutPaintCategory) && layoutPaintCategory !== 'none')) {
+    // Keep active filter local to this app/device; only initialize if invalid
+    if (layoutPaintCategory !== 'all' && layoutPaintCategory !== 'none') {
+      if (availablePaintCategories.length > 0 && !availablePaintCategories.includes(layoutPaintCategory)) {
         const saved = getSavedActivePaintFilter();
-        if (availablePaintCategories.includes(saved)) {
+        if (saved === 'all' || saved === 'none' || availablePaintCategories.includes(saved)) {
           setLayoutPaintCategory(saved);
         } else {
-          setLayoutPaintCategory(availablePaintCategories[0]);
+          setLayoutPaintCategory('all');
         }
       }
-    } else if (layoutPaintCategory === 'all') {
-      setLayoutPaintCategory('none');
     }
   }, [availablePaintCategories, layoutPaintCategory, setLayoutPaintCategory]);
 
@@ -335,6 +331,7 @@ export const LayoutTabFilterToolbar = React.memo(function LayoutTabFilterToolbar
                     className="bg-transparent border-none text-xs text-indigo-700 dark:text-indigo-300 font-bold outline-none cursor-pointer w-full truncate"
                     title="Lọc đơn vị theo Danh mục Màu vẽ"
                   >
+                    <option value="all">🎨 Tất cả (All Rules)</option>
                     {availablePaintCategories.map(cat => (
                       <option key={cat} value={cat}>{cat}</option>
                     ))}

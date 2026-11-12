@@ -4,17 +4,19 @@ import { db, APP_ID } from '../../lib/firebase';
 import { useDataStore } from '../PictureMapping/DataContext';
 import { useAppStore } from '../../store/useAppStore';
 
-export const CUSTOM_PAINT_CATEGORIES_STORAGE_KEY = 'taka_layout_custom_paint_categories';
-export const ACTIVE_PAINT_FILTER_STORAGE_KEY = 'taka_layout_active_paint_filter';
-export const PAINT_GROUP_MAPPINGS_STORAGE_KEY = 'taka_layout_paint_group_mappings';
+// Dedicated isolated storage keys for HCM Layout App (completely decoupled from PM or other apps)
+export const CUSTOM_PAINT_CATEGORIES_STORAGE_KEY = 'hcm_layout_custom_paint_categories';
+export const ACTIVE_PAINT_FILTER_STORAGE_KEY = 'hcm_layout_active_paint_filter';
+export const PAINT_GROUP_MAPPINGS_STORAGE_KEY = 'hcm_layout_paint_group_mappings';
+
+// Firestore collection & document name isolated for Layout App
+export const LAYOUT_PAINT_CATEGORIES_DOC = 'hcm_layout_paint_categories';
 
 export const DEFAULT_PRESET_CATEGORIES = [
-  'Status',
-  'Timeline',
-  'Department',
-  'Risk',
   'Progress',
   'Shop type',
+  'Status',
+  'Timeline',
 ];
 
 export interface PaintCategoriesConfig {
@@ -37,14 +39,18 @@ let sharedFirestoreUnsub: Unsubscribe | null = null;
 let hasSeededInitialDoc = false;
 
 /**
- * Get locally cached paint categories (0ms read)
+ * Get locally cached paint categories (0ms read) - Isolated for Layout App
  */
 export function getSavedCustomPaintCategories(): string[] {
   if (cachedCategories && cachedCategories.length > 0) {
     return cachedCategories;
   }
   try {
-    const raw = localStorage.getItem(CUSTOM_PAINT_CATEGORIES_STORAGE_KEY);
+    let raw = localStorage.getItem(CUSTOM_PAINT_CATEGORIES_STORAGE_KEY);
+    // Legacy fallback check if fresh layout app key not populated yet
+    if (!raw) {
+      raw = localStorage.getItem('taka_layout_custom_paint_categories');
+    }
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
@@ -62,12 +68,16 @@ export function getSavedCustomPaintCategories(): string[] {
 }
 
 /**
- * Get locally cached active paint filter (Device-local UI state only)
+ * Get locally cached active paint filter (Device-local UI state only, defaults to 'all' to show all rules)
  */
 export function getSavedActivePaintFilter(): string {
   if (cachedActiveFilter) return cachedActiveFilter;
   try {
-    const raw = localStorage.getItem(ACTIVE_PAINT_FILTER_STORAGE_KEY);
+    let raw = localStorage.getItem(ACTIVE_PAINT_FILTER_STORAGE_KEY);
+    if (!raw) {
+      // Legacy fallback
+      raw = localStorage.getItem('taka_layout_active_paint_filter');
+    }
     if (raw && typeof raw === 'string' && raw.trim()) {
       cachedActiveFilter = raw.trim();
       return cachedActiveFilter;
@@ -75,11 +85,13 @@ export function getSavedActivePaintFilter(): string {
   } catch {
     // fallback
   }
-  return 'Status';
+  // Default to 'all' so by default all dynamic colors appear on the layout
+  cachedActiveFilter = 'all';
+  return cachedActiveFilter;
 }
 
 /**
- * Save active paint filter locally on this device only (never overwrites other devices' active view)
+ * Save active paint filter locally on this device only (isolated to HCM Layout App)
  */
 export function saveActivePaintFilterLocal(activeCategory: string): void {
   const trimmed = String(activeCategory || '').trim();
@@ -93,12 +105,15 @@ export function saveActivePaintFilterLocal(activeCategory: string): void {
 }
 
 /**
- * Get locally cached condition group mappings
+ * Get locally cached condition group mappings (Isolated for HCM Layout App)
  */
 export function getSavedPaintGroupMappings(): Record<string, string> {
   if (cachedGroupMappings) return cachedGroupMappings;
   try {
-    const raw = localStorage.getItem(PAINT_GROUP_MAPPINGS_STORAGE_KEY);
+    let raw = localStorage.getItem(PAINT_GROUP_MAPPINGS_STORAGE_KEY);
+    if (!raw) {
+      raw = localStorage.getItem('taka_layout_paint_group_mappings');
+    }
     if (raw) {
       const parsed = JSON.parse(raw);
       if (parsed && typeof parsed === 'object') {
@@ -109,49 +124,46 @@ export function getSavedPaintGroupMappings(): Record<string, string> {
   } catch {
     // fallback
   }
-  return {};
+  cachedGroupMappings = {};
+  return cachedGroupMappings;
 }
 
 /**
- * Resolve effective paint category string for a dynamic condition group,
- * prioritizing synced cloud groupMappings (including empty string "" when unassigned).
+ * Resolve effective paint category for a condition group
  */
 export function resolveGroupPaintCategory(
   group: any,
-  groupMappings?: Record<string, string> | null
+  groupMappings?: Record<string, string>
 ): string {
   if (!group) return '';
-  const mappings = groupMappings ?? getSavedPaintGroupMappings();
-  if (mappings && typeof mappings === 'object') {
-    if (group.id && Object.prototype.hasOwnProperty.call(mappings, group.id)) {
-      return String(mappings[group.id] ?? '').trim();
-    }
-    if (group.name && Object.prototype.hasOwnProperty.call(mappings, gNameKey(group.name))) {
-      return String(mappings[gNameKey(group.name)] ?? '').trim();
-    }
-    if (group.name && Object.prototype.hasOwnProperty.call(mappings, group.name)) {
-      return String(mappings[group.name] ?? '').trim();
-    }
+  const mappings = groupMappings || getSavedPaintGroupMappings();
+
+  if (group.id && mappings[group.id]) {
+    return String(mappings[group.id] || '').trim();
   }
-  return String(group.paintCategory ?? group.category ?? '').trim();
+  if (group.name && mappings[group.name]) {
+    return String(mappings[group.name] || '').trim();
+  }
+  const direct = group.paintCategory || group.category || '';
+  return String(direct || '').trim();
 }
 
-function gNameKey(name: string): string {
-  return String(name || '').trim();
-}
-
+/**
+ * Notify all in-memory subscribers (0ms)
+ */
 function notifySubscribers(config: PaintCategoriesConfig) {
   subscribers.forEach((cb) => {
     try {
       cb(config);
     } catch (err) {
-      console.warn('[layoutPaintCategoriesService] subscriber error:', err);
+      console.error('[layoutPaintCategoriesService] Subscriber error:', err);
     }
   });
 }
 
 /**
  * Save paint categories filter data (categories list & condition mappings) to LocalStorage + Cloud Firestore
+ * Isolated to 'hcm_layout_paint_categories' so it NEVER interferes with other apps!
  */
 export async function savePaintCategoriesConfig(
   config: Partial<PaintCategoriesConfig>,
@@ -200,7 +212,7 @@ export async function savePaintCategoriesConfig(
       );
     }
 
-    // 2. Cloud Firestore Persistence (taka_config/paint_categories)
+    // 2. Cloud Firestore Persistence (Isolated: taka_config/hcm_layout_paint_categories)
     const paintCategoriesDocRef = doc(
       db,
       'artifacts',
@@ -208,7 +220,7 @@ export async function savePaintCategoriesConfig(
       'public',
       'data',
       'taka_config',
-      'paint_categories'
+      LAYOUT_PAINT_CATEGORIES_DOC
     );
 
     const payload: Record<string, any> = {
@@ -222,13 +234,11 @@ export async function savePaintCategoriesConfig(
     if (config.groupMappings !== undefined) {
       payload.groupMappings = cachedGroupMappings;
     }
-    if (config.activePaintFilter !== undefined) {
-      payload.activePaintFilter = config.activePaintFilter;
-    }
+    // Note: activePaintFilter is kept device-local so different tabs/apps don't force-override each other
 
     await setDoc(paintCategoriesDocRef, payload, { merge: true });
 
-    // 3. Touch versions document to alert snapshot listeners
+    // 3. Touch layout versions document to alert snapshot listeners
     const versionsDocRef = doc(
       db,
       'artifacts',
@@ -236,12 +246,12 @@ export async function savePaintCategoriesConfig(
       'public',
       'data',
       'taka_config',
-      'versions'
+      'hcm_layout_versions'
     );
     await setDoc(
       versionsDocRef,
       {
-        paintCategoriesVersion: Date.now(),
+        layoutPaintCategoriesVersion: Date.now(),
         updatedAt: currentConfigSnapshot.updatedAt,
       },
       { merge: true }
@@ -259,43 +269,41 @@ export function applyGroupMappingsToVersions(
   targetStore: 'HCM' | 'HN'
 ) {
   if (!groupMappings || Object.keys(groupMappings).length === 0) return;
+
   try {
     const dataStore = useDataStore.getState();
-    const allVers = dataStore.getAllStoreVersions(targetStore) || [];
-    if (!allVers || allVers.length === 0) return;
+    const versions = dataStore.getAllStoreVersions?.(targetStore);
+    if (!Array.isArray(versions) || versions.length === 0) return;
 
     let hasChanges = false;
-    const updatedVers = allVers.map((v) => {
-      let vChanged = false;
-      const nextGroups = (v.groups || []).map((g: any) => {
-        const hasId = g?.id && Object.prototype.hasOwnProperty.call(groupMappings, g.id);
-        const hasName = g?.name && Object.prototype.hasOwnProperty.call(groupMappings, g.name);
-        if (!hasId && !hasName) return g;
-
-        const assigned = hasId ? String(groupMappings[g.id] ?? '').trim() : String(groupMappings[g.name] ?? '').trim();
-        const currentCat = String(g.paintCategory ?? g.category ?? '').trim();
-        if (assigned !== currentCat) {
-          vChanged = true;
+    const updated = versions.map((v) => {
+      if (!Array.isArray(v.groups) || v.groups.length === 0) return v;
+      let versionChanged = false;
+      const nextGroups = v.groups.map((g: any) => {
+        const resolved = resolveGroupPaintCategory(g, groupMappings);
+        if (resolved && (g.paintCategory !== resolved || g.category !== resolved)) {
+          versionChanged = true;
           return {
             ...g,
-            paintCategory: assigned,
-            category: assigned,
+            paintCategory: resolved,
+            category: resolved,
           };
         }
         return g;
       });
-      if (vChanged) {
+
+      if (versionChanged) {
         hasChanges = true;
         return { ...v, groups: nextGroups };
       }
       return v;
     });
 
-    if (hasChanges) {
-      dataStore.updateStoreVersionsAcrossLocations(updatedVers, targetStore);
+    if (hasChanges && dataStore.updateStoreVersionsAcrossLocations) {
+      dataStore.updateStoreVersionsAcrossLocations(updated, targetStore);
     }
   } catch (err) {
-    console.warn('[layoutPaintCategoriesService] applyGroupMappingsToVersions error:', err);
+    console.warn('[layoutPaintCategoriesService] applyGroupMappings error:', err);
   }
 }
 
@@ -309,7 +317,7 @@ function ensureSharedListener() {
     'public',
     'data',
     'taka_config',
-    'paint_categories'
+    LAYOUT_PAINT_CATEGORIES_DOC
   );
 
   sharedFirestoreUnsub = onSnapshot(
@@ -324,7 +332,7 @@ function ensureSharedListener() {
         };
         notifySubscribers(initialConfig);
 
-        // Seed initial document once so all devices share the same cloud filter data
+        // Seed initial document once so layout app has its independent configuration
         if (!hasSeededInitialDoc) {
           hasSeededInitialDoc = true;
           setDoc(
@@ -366,21 +374,10 @@ function ensureSharedListener() {
       applyGroupMappingsToVersions(groupMappings, 'HCM');
       applyGroupMappingsToVersions(groupMappings, 'HN');
 
-      if (data.activePaintFilter && typeof data.activePaintFilter === 'string' && data.activePaintFilter.trim()) {
-        const nextFilter = data.activePaintFilter.trim();
-        cachedActiveFilter = nextFilter;
-        try {
-          localStorage.setItem(ACTIVE_PAINT_FILTER_STORAGE_KEY, nextFilter);
-        } catch {}
-        try {
-          useAppStore.getState().setLayoutPaintCategory(nextFilter);
-        } catch {}
-      }
-
       const nextConfig: PaintCategoriesConfig = {
         categories,
         groupMappings,
-        activePaintFilter: data.activePaintFilter || cachedActiveFilter || undefined,
+        activePaintFilter: cachedActiveFilter || getSavedActivePaintFilter(),
         updatedAt: data.updatedAt,
         updatedBy: data.updatedBy,
       };
@@ -402,7 +399,7 @@ function ensureSharedListener() {
 }
 
 /**
- * Real-time listener for taka_config/paint_categories filter data across all devices and users
+ * Real-time listener for layout filter data across devices (Isolated to Layout App)
  */
 export function subscribePaintCategoriesConfig(
   onUpdate: (config: PaintCategoriesConfig) => void
@@ -420,9 +417,5 @@ export function subscribePaintCategoriesConfig(
 
   return () => {
     subscribers.delete(onUpdate);
-    if (subscribers.size === 0 && sharedFirestoreUnsub) {
-      sharedFirestoreUnsub();
-      sharedFirestoreUnsub = null;
-    }
   };
 }

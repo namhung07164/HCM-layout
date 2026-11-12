@@ -443,8 +443,17 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
     safeSetItemLocal("taka_layout_tooltip_visibility", JSON.stringify(defaultVal));
     return { layoutTooltipVisibility: defaultVal };
   }),
-  layoutPaintCategory: "all",
-  setLayoutPaintCategory: (layoutPaintCategory) => set({ layoutPaintCategory }),
+  layoutPaintCategory: (() => {
+    try {
+      const saved = safeGetItemLocal("hcm_layout_active_paint_filter");
+      if (saved) return saved;
+    } catch {}
+    return "all";
+  })(),
+  setLayoutPaintCategory: (layoutPaintCategory) => {
+    safeSetItemLocal("hcm_layout_active_paint_filter", layoutPaintCategory);
+    set({ layoutPaintCategory });
+  },
   zoomableImageSrc: null,
   setZoomableImageSrc: (zoomableImageSrc) => set({ zoomableImageSrc }),
   isDetailEditMode: false,
