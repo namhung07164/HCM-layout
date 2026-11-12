@@ -399,10 +399,11 @@ export function useLayoutFloorData({
     try {
       const activeStore = (overrideStore || (storeFilter === 'HN' ? 'HN' : 'HCM')).toUpperCase();
       const storeKey = `taka_unit_images_${activeStore}_${key}`;
+      const hcmStoreKey = `hcm_unit_images_${activeStore}_${key}`;
       const cached = unitImagesCheckCacheRef.current.get(storeKey);
       if (cached !== undefined) return cached;
 
-      const raw = localStorage.getItem(storeKey);
+      const raw = localStorage.getItem(hcmStoreKey) || localStorage.getItem(storeKey);
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed) && parsed.length > 0) {

@@ -51,8 +51,20 @@ export function useLayoutTabSettings({ activeStore, locFilterStr, canWrite = fal
 
   useEffect(() => {
     layoutSettingsSubscribers.add(setLayoutSettings);
+    const handleCloudUpdate = () => {
+      try {
+        const raw = localStorage.getItem(LAYOUT_SETTINGS_CACHE_KEY) || localStorage.getItem('taka_cache_layout_settings_v1');
+        if (raw) {
+          const parsed = JSON.parse(raw) || {};
+          sharedLayoutSettingsData = parsed;
+          setLayoutSettings(parsed);
+        }
+      } catch {}
+    };
+    window.addEventListener('taka_cloud_sync_updated', handleCloudUpdate);
     return () => {
       layoutSettingsSubscribers.delete(setLayoutSettings);
+      window.removeEventListener('taka_cloud_sync_updated', handleCloudUpdate);
     };
   }, []);
 
@@ -95,6 +107,10 @@ export function useLayoutTabSettings({ activeStore, locFilterStr, canWrite = fal
       layoutSettingsSubscribers.forEach((cb) => cb(nextSettings));
       setUrl(editUrl);
       setIsEditing(false);
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('taka_layout_settings_updated'));
+      }
 
       // Trigger Cloudflare R2 sync in background (Zero Firestore)
       try {

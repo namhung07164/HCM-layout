@@ -257,7 +257,7 @@ export function useLiveLayoutR2Config(): LiveLayoutR2ConfigState {
         !forceRefresh &&
         Boolean(activeCached) &&
         lastCheck > 0 &&
-        Date.now() - lastCheck < 5 * 60 * 1000 &&
+        Date.now() - lastCheck < 15 * 1000 &&
         (knownPicMapVer === 0 || (cachedTs > 0 && cachedTs >= knownPicMapVer));
 
       if (isCacheFreshEnough) {
@@ -368,11 +368,29 @@ export function useLiveLayoutR2Config(): LiveLayoutR2ConfigState {
 
   const loadConfigRef = useRef(loadConfig);
   loadConfigRef.current = loadConfig;
+  const applyAndCacheRef = useRef(applyAndCacheConfig);
+  applyAndCacheRef.current = applyAndCacheConfig;
 
   useEffect(() => {
     loadConfigRef.current(false);
 
-    const handleSyncUpdate = () => {
+    const handleSyncUpdate = (e: any) => {
+      const fullData = e?.detail?.fullData;
+      if (fullData && isValidLayoutConfig(fullData)) {
+        markLayoutNetworkChecked();
+        const accountId = (localStorage.getItem('r2_account_id') || '').trim();
+        const accessKeyId = (localStorage.getItem('r2_access_key') || localStorage.getItem('r2_access_key_id') || '').trim();
+        const secretAccessKey = (localStorage.getItem('r2_secret_key') || localStorage.getItem('r2_secret_access_key') || '').trim();
+        const bucketName = (localStorage.getItem('r2_bucket_name') || '').trim();
+        if (accountId && accessKeyId && secretAccessKey && bucketName) {
+          resolveConfigSignedUrls({ ...fullData }, { accountId, accessKeyId, secretAccessKey, bucketName })
+            .then((signed) => applyAndCacheRef.current(signed, false))
+            .catch(() => applyAndCacheRef.current({ ...fullData }, false));
+        } else {
+          applyAndCacheRef.current({ ...fullData }, false);
+        }
+        return;
+      }
       loadConfigRef.current(true);
     };
 

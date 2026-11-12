@@ -47,15 +47,18 @@ export function useTooltipImages({
 
   const cleanCode = String(data?.code || data?.unit || data?.name || unitCode || 'default').trim();
   const activeUnitStorageKey = `hcm_unit_images_${activeStore}_${cleanCode}`;
+  const legacyUnitStorageKey = `taka_unit_images_${activeStore}_${cleanCode}`;
   const unitImagesDocKey = `${activeStore}_${cleanCode}`;
 
   // Instant 0ms load from session memory cache / localStorage (Zero Firestore)
   useEffect(() => {
-    if (unitImagesSessionCache.has(unitImagesDocKey)) {
-      setCustomUnitImages(unitImagesSessionCache.get(unitImagesDocKey)!);
-    } else {
+    const loadFromStorage = (bypassCache = false) => {
+      if (!bypassCache && unitImagesSessionCache.has(unitImagesDocKey)) {
+        setCustomUnitImages(unitImagesSessionCache.get(unitImagesDocKey)!);
+        return;
+      }
       try {
-        const saved = localStorage.getItem(activeUnitStorageKey);
+        const saved = localStorage.getItem(activeUnitStorageKey) || localStorage.getItem(legacyUnitStorageKey);
         if (saved) {
           const parsed = JSON.parse(saved);
           if (Array.isArray(parsed)) {
@@ -71,8 +74,21 @@ export function useTooltipImages({
       } catch {
         setCustomUnitImages([]);
       }
-    }
-  }, [activeUnitStorageKey, activeStore, cleanCode, unitImagesDocKey]);
+    };
+
+    loadFromStorage(false);
+
+    const handleCloudOrImageSync = () => {
+      unitImagesSessionCache.delete(unitImagesDocKey);
+      loadFromStorage(true);
+    };
+    window.addEventListener('taka_cloud_sync_updated', handleCloudOrImageSync);
+    window.addEventListener('taka_unit_images_changed', handleCloudOrImageSync);
+    return () => {
+      window.removeEventListener('taka_cloud_sync_updated', handleCloudOrImageSync);
+      window.removeEventListener('taka_unit_images_changed', handleCloudOrImageSync);
+    };
+  }, [activeUnitStorageKey, legacyUnitStorageKey, activeStore, cleanCode, unitImagesDocKey]);
 
   useEffect(() => {
     setShowImagePanel(Boolean(quickImageMode));
@@ -124,7 +140,9 @@ export function useTooltipImages({
     setShowAddLinkInput(false);
 
     try {
-      localStorage.setItem(activeUnitStorageKey, JSON.stringify(updated));
+      const serialized = JSON.stringify(updated);
+      localStorage.setItem(activeUnitStorageKey, serialized);
+      localStorage.setItem(legacyUnitStorageKey, serialized);
     } catch {}
 
     if (typeof window !== 'undefined') {

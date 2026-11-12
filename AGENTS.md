@@ -13,7 +13,8 @@
 - **SSoT Lookup Order**:
   1. `ARCHITECTURE.md`: Folder structure, `*Parts/` submodules, `src/lib/` & `src/hooks/` catalog. Never introduce non-conforming folders.
   2. `src/api-contracts.ts` & `src/types.ts`: Interfaces, types, enums, store actions, and data contracts. Always verify prop names and signatures here.
-  3. `src/lib/standaloneComparisonService.ts`: SSoT for Option A Excel/CSV data schema, template generator, unit code matcher, and JSON backup format.
+  3. `src/lib/r2UnifiedSyncService.ts`: SSoT for Cloudflare R2 unified workspace payload (`layout/layout_config.json` & `mapping_config.json`), auto-load on app open, real-time sync, and auto-save on app exit.
+  4. `src/lib/standaloneComparisonService.ts` & `src/lib/comparisonTemplateSpec.ts`: SSoT for Option A Excel/CSV data schema, template generator, unit code matcher, and JSON backup format.
 - **3-Step Workflow**:
   1. **Check Map & Contracts**: Locate submodule in `ARCHITECTURE.md` and verify types in `src/types.ts`.
   2. **Implement**: Keep files `< 500` lines, strict TypeScript (zero `any`), atomic Zustand selectors, and memoized sub-components.
@@ -21,26 +22,31 @@
 
 ## 2. Standalone App Architecture & State Management
 - **2-Tab Core Scope**: The app exclusively operates two core modules:
-  - `layout`: Floor Layout Canvas (CAD/PDF polygons, unit sizing, heatmap metrics, unit lightboxes).
+  - `layout`: Floor Layout Canvas (CAD/PDF polygons, unit sizing, heatmap metrics, unit lightboxes, isolated paint filter manager).
   - `picture_mapping`: 360° & photo pins on floorplans, hotspot navigation, and dynamic hierarchy review.
+- **Zero-Firebase / 100% Local Cache + Cloudflare R2 Storage**:
+  - Zero Firestore or Firebase Auth network calls (`firebase/*` aliased to `src/lib/firebaseStubs.ts`).
+  - Persist all state strictly across In-Memory Cache + Local Disk Cache (`Dexie IndexedDB`, `CacheStorage`, `localStorage`) + Cloudflare R2 (`layout/layout_config.json` and `mapping_config.json`).
+  - Isolate layout paint filter settings under `hcm_layout_*` keys (`src/components/LayoutTabParts/layoutPaintCategoriesService.ts`) to prevent cross-app collisions.
 - **Zero-Login Standalone Mode**:
   - Boot directly at `activeTab = "layout"` (see `src/store/slices/createUISlice.ts`).
   - Default user role set to `admin` with full edit rights (see `src/store/slices/createDataSlice.ts`). No authentication walls or login barriers.
 - **Standalone Navigation Header (`src/components/StandaloneHeader.tsx`)**:
-  - Hosts the 2-tab switcher (`layout` ⇄ `picture_mapping`).
+  - Hosts the 2-tab switcher (`layout` ⇄ `picture_mapping`) and live `Auto Cloud R2` sync indicator.
   - Houses Option A Toolbar: Download Excel Template, Import Excel/CSV Comparison, and Export/Import Full Workspace JSON.
-- **Zustand Slices (`src/store/useAppStore.ts`)**:
-  - Use atomic selectors (`state => state.layoutConfigs`) and shallow hooks to prevent unnecessary re-renders.
+- **Zustand Slices (`src/store/useAppStore.ts` & `DataContext.tsx`)**:
+  - Use atomic selectors and shallow hooks to prevent unnecessary re-renders.
   - Apply immediate (0ms) optimistic state updates for UI gestures, polygon selections, and pin placements.
 
-## 3. Option A Standalone Comparison & Workspace Backup Engine
+## 3. Unified Cloudflare R2 Lifecycle & Option A Comparison Engine
+- **Unified R2 Cloud Sync (`src/lib/r2UnifiedSyncService.ts`)**:
+  - **Auto-Load on App Open**: `loadUnifiedDataFromCloudR2({ initialBoot: true })` hydrates 0ms local disk cache first, then fetches latest `layout/layout_config.json` (fallback `mapping_config.json`) from Cloudflare R2 and restores 100% of workspace state (`storeLocationData`, `mapUnits`, `versions`, `unitInfo`, `sales`, `profits`, `comparisonRows`, `projects`, `tasks`, `layoutSettings`, `paintCategoriesConfig`, `unitImagesMap`).
+  - **Real-Time Sync**: Subscribes to `useDataStore`, `useAppStore` (`projects`/`tasks`), comparison edits, paint filter updates, and unit image changes; broadcasts across browser tabs via `BroadcastChannel('hcm_layout_realtime_sync')`; schedules debounced R2 uploads (`markWorkspaceDirty`); revalidates R2 on window `focus`/`visibilitychange`.
+  - **Auto-Save on App Close / Exit**: `initAutoSaveOnAppClose()` binds `beforeunload`, `pagehide`, `freeze`, and `visibilitychange (hidden)` to immediately persist local disk cache and push unified state to Cloudflare R2 using pre-warmed S3 client (`getOrCreateS3Client()`).
 - **Independent Client-Side Data SSoT (`src/lib/standaloneComparisonService.ts`)**:
-  - **Template Download**: `downloadComparisonTemplate()` exports standard `Taka_Layout_Comparison_Template.xlsx` with complete columns (`Unit Code`, `Brand`, `Zone`, `Floor`, `Category`, `Contract Size (m2)`, `Progress (%)`, `Status`, `Plan Start/End`, `Actual Start/End`, `Sales`, `Profit`, `Rent Cost`).
-  - **Excel/CSV Ingestion**: `importComparisonExcelOrCsvFile()` parses `.xlsx`/`.csv`, normalizes unit codes (`uName.toLowerCase().trim()`), computes diff against CAD polygon $m^2$, and maps schedule/financial attributes.
-  - **Persistent Storage**: Hydrates and saves comparison rows into `localStorage` (`taka_standalone_comparison_rows`) + IndexedDB.
-  - **Full JSON Workspace Backup/Restore**:
-    - `exportFullStandaloneWorkspaceJson()` bundles floor configs, CAD polygons, picture mapping pins, and comparison records into a single `.json` file for cold migration.
-    - `importFullStandaloneWorkspaceJson()` validates and restores full workspace state with zero data loss.
+  - **Template Download**: `downloadComparisonTemplate()` exports standard `Taka_Layout_Comparison_Template.xlsx`.
+  - **Excel/CSV Ingestion**: `importComparisonExcelOrCsvFile()` parses `.xlsx`/`.csv`, updates stores in 0ms, and uploads raw file + unified JSON to Cloudflare R2 (`layout/`).
+  - **Full JSON Workspace Backup/Restore**: `exportFullStandaloneWorkspaceJson()` and `importFullStandaloneWorkspaceJson()` bundle and restore full workspace state with zero data loss.
 
 ## 4. Konva Canvas, PDF/CAD & Picture Mapping Rules
 - **Konva & Canvas 60 FPS Performance**:

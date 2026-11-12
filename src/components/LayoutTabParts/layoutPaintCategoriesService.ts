@@ -212,6 +212,43 @@ export async function savePaintCategoriesConfig(
 }
 
 /**
+ * Hydrate paint categories config from Cloud R2 payload into local cache and notify subscribers (without circular R2 upload)
+ */
+export function hydratePaintCategoriesFromCloud(config?: Partial<PaintCategoriesConfig>): void {
+  if (!config || typeof config !== 'object') return;
+  try {
+    if (Array.isArray(config.categories) && config.categories.length > 0) {
+      const cleaned = Array.from(
+        new Set(config.categories.map((c) => String(c || '').trim()).filter(Boolean))
+      );
+      if (cleaned.length > 0) {
+        cachedCategories = cleaned;
+        localStorage.setItem(CUSTOM_PAINT_CATEGORIES_STORAGE_KEY, JSON.stringify(cleaned));
+      }
+    }
+    if (config.groupMappings && typeof config.groupMappings === 'object') {
+      cachedGroupMappings = config.groupMappings;
+      localStorage.setItem(PAINT_GROUP_MAPPINGS_STORAGE_KEY, JSON.stringify(config.groupMappings));
+    }
+    if (typeof config.activePaintFilter === 'string' && config.activePaintFilter.trim()) {
+      const trimmedFilter = config.activePaintFilter.trim();
+      cachedActiveFilter = trimmedFilter;
+      localStorage.setItem(ACTIVE_PAINT_FILTER_STORAGE_KEY, trimmedFilter);
+    }
+
+    const snapshot: PaintCategoriesConfig = {
+      categories: cachedCategories || getSavedCustomPaintCategories(),
+      groupMappings: cachedGroupMappings || getSavedPaintGroupMappings(),
+      activePaintFilter: cachedActiveFilter || getSavedActivePaintFilter(),
+      updatedAt: config.updatedAt || new Date().toISOString(),
+    };
+    notifySubscribers(snapshot);
+  } catch (err) {
+    console.warn('[layoutPaintCategoriesService] Hydrate from cloud failed:', err);
+  }
+}
+
+/**
  * Apply cloud group mappings onto local versions in DataStore
  */
 export function applyGroupMappingsToVersions(

@@ -46,11 +46,13 @@ export function useColorLegendImages(canWrite: boolean = false) {
     return [];
   });
 
-  // Load from localStorage immediately on store/floor switch (Zero Firestore)
+  // Load from localStorage immediately on store/floor switch or cloud sync (Zero Firestore)
   useEffect(() => {
-    if (legendImagesMemoryCache.has(docKey)) {
-      setCustomImages(legendImagesMemoryCache.get(docKey)!);
-    } else {
+    const loadLegend = (bypassCache = false) => {
+      if (!bypassCache && legendImagesMemoryCache.has(docKey)) {
+        setCustomImages(legendImagesMemoryCache.get(docKey)!);
+        return;
+      }
       try {
         const saved = localStorage.getItem(storageKey);
         if (saved) {
@@ -68,7 +70,18 @@ export function useColorLegendImages(canWrite: boolean = false) {
       } catch {
         setCustomImages([]);
       }
-    }
+    };
+
+    loadLegend(false);
+
+    const handleCloudOrImageSync = () => {
+      legendImagesMemoryCache.delete(docKey);
+      loadLegend(true);
+    };
+    window.addEventListener('taka_cloud_sync_updated', handleCloudOrImageSync);
+    return () => {
+      window.removeEventListener('taka_cloud_sync_updated', handleCloudOrImageSync);
+    };
   }, [storageKey, activeStore, cleanCode, docKey]);
 
   const handleAddCustomImage = (e?: React.FormEvent, customUrl?: string) => {
