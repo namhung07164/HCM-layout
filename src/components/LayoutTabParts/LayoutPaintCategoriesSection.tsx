@@ -41,7 +41,7 @@ export const LayoutPaintCategoriesSection: React.FC<LayoutPaintCategoriesSection
   const setLayoutPaintCategory = useAppStore(state => state.setLayoutPaintCategory);
 
   const isAdmin = currentUser?.role?.toLowerCase() === 'admin';
-  const canModify = canWrite && isAdmin;
+  const canModify = canWrite || isAdmin;
 
   const storeLocationData = useDataStore(state => state.storeLocationData);
   const getAllStoreVersions = useDataStore(state => state.getAllStoreVersions);
@@ -302,11 +302,11 @@ export const LayoutPaintCategoriesSection: React.FC<LayoutPaintCategoriesSection
       {!isCollapsed && (
         <div className="space-y-3 pt-1 animate-in fade-in duration-150">
           {/* Non-Admin Informational Banner */}
-          {!isAdmin && (
+          {!canModify && (
             <div className="flex items-center gap-2 p-2 rounded-xl bg-amber-50/80 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-900/50 text-[11px] text-amber-800 dark:text-amber-300">
               <Lock className="w-3.5 h-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
               <span>
-                Only <strong>Admin</strong> can configure paint categories and condition assignments. All users automatically apply the active filter configured by Admin.
+                Chế độ chỉ xem: Bạn cần quyền chỉnh sửa (Write/Admin) để thay đổi gán nhóm điều kiện và danh mục.
               </span>
             </div>
           )}

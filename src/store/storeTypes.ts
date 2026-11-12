@@ -182,6 +182,15 @@ export interface LayoutTooltipVisibility {
   progressBars: boolean;
   shopType?: boolean;
   area: boolean;
+  // Financial & Comparison Metrics
+  sales?: boolean;
+  profit?: boolean;
+  margin?: boolean;
+  budget?: boolean;
+  actualCost?: boolean;
+  classCode?: boolean;
+  vendorCode?: boolean;
+  contractor?: boolean;
   // Smart Notifications & Alerts Config
   notifications?: boolean;
   alertOverdue?: boolean;
@@ -189,6 +198,7 @@ export interface LayoutTooltipVisibility {
   alertHandover?: boolean;
   alertOpening?: boolean;
   alertOpeningRisk?: boolean;
+  [key: string]: boolean | undefined;
 }
 
 export interface DataSlice {

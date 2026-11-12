@@ -98,6 +98,12 @@ export function buildAggregatedUnitData({
           brandName: sumData.brandName || "",
           floor: dataMap[key].floor || (sumData as any).floor || "",
           shopType: (sumData as any).shopType || (sumData as any).shop_type || dataMap[key].shopType || "",
+          classCode: (sumData as any).classCode || dataMap[key].classCode || "",
+          vendorCode: (sumData as any).vendorCode || dataMap[key].vendorCode || "",
+          brandCode: (sumData as any).brandCode || dataMap[key].brandCode || "",
+          budget: (sumData as any).budget || (sumData as any).appProjectBudget || dataMap[key].appProjectBudget || 0,
+          actualCost: (sumData as any).actualCost || (sumData as any).appProjectActual || dataMap[key].appProjectActual || 0,
+          party: (sumData as any).party || (sumData as any).contractor || dataMap[key].party || "",
       });
     }
   });

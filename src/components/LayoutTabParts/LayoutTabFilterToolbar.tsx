@@ -317,26 +317,43 @@ export const LayoutTabFilterToolbar = React.memo(function LayoutTabFilterToolbar
 
             {/* Paint Categories Filter (LiveView Mode) */}
             {isLiveMapMode && (
-              <div className="flex items-center gap-1 bg-white dark:bg-[#1e1e20] px-2 py-1 rounded-xl border border-slate-200 dark:border-[#444446] shadow-2xs shrink-0 max-w-[140px] sm:max-w-[180px]">
-                <Palette className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
-                <select
-                  value={layoutPaintCategory}
-                  onChange={(e) => {
-                    const nextVal = e.target.value;
-                    setLayoutPaintCategory(nextVal);
-                    saveActivePaintFilterLocal(nextVal);
-                    if (isAdmin) {
+              <div className="flex items-center gap-1.5 shrink-0">
+                <div className="flex items-center gap-1 bg-white dark:bg-[#1e1e20] px-2 py-1 rounded-xl border border-slate-200 dark:border-[#444446] shadow-2xs shrink-0 max-w-[140px] sm:max-w-[180px]">
+                  <Palette className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                  <select
+                    value={layoutPaintCategory}
+                    onChange={(e) => {
+                      const nextVal = e.target.value;
+                      if (nextVal === '__open_edit_filter_mode__') {
+                        window.dispatchEvent(new CustomEvent('open-layout-edit-mode'));
+                        return;
+                      }
+                      setLayoutPaintCategory(nextVal);
+                      saveActivePaintFilterLocal(nextVal);
                       savePaintCategoriesConfig({ activePaintFilter: nextVal });
-                    }
-                  }}
-                  className="bg-transparent border-none text-xs text-indigo-700 dark:text-indigo-300 font-bold outline-none cursor-pointer w-full truncate"
-                  title="Filter units by Paint Category"
+                    }}
+                    className="bg-transparent border-none text-xs text-indigo-700 dark:text-indigo-300 font-bold outline-none cursor-pointer w-full truncate"
+                    title="Lọc đơn vị theo Danh mục Màu vẽ"
+                  >
+                    {availablePaintCategories.map(cat => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))}
+                    <option value="none">None (Unpainted)</option>
+                    <option value="__open_edit_filter_mode__">⚙️ Quản lý Filter (Edit Mode)...</option>
+                  </select>
+                </div>
+
+                {/* Direct button to open Filter Management (Edit Mode) */}
+                <button
+                  type="button"
+                  onClick={() => window.dispatchEvent(new CustomEvent('open-layout-edit-mode'))}
+                  title="Mở Bảng Quản Lý Filter (Edit Mode) để tùy chỉnh các điều kiện và trường dữ liệu hiển thị trên layout"
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold bg-white dark:bg-[#1e1e20] text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800/80 shadow-2xs hover:bg-purple-50 dark:hover:bg-purple-950/50 hover:border-purple-300 transition-all active:scale-95 cursor-pointer shrink-0"
                 >
-                  {availablePaintCategories.map(cat => (
-                    <option key={cat} value={cat}>{cat}</option>
-                  ))}
-                  <option value="none">None (Unpainted)</option>
-                </select>
+                  <SlidersHorizontal className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+                  <span className="hidden sm:inline">Quản lý Filter</span>
+                  <span className="text-[10px] bg-purple-100 dark:bg-purple-900/60 px-1 py-0.2 rounded font-mono font-semibold text-purple-800 dark:text-purple-300">Edit</span>
+                </button>
               </div>
             )}
           </div>

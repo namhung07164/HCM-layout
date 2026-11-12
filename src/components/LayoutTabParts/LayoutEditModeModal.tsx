@@ -1,17 +1,25 @@
-import React, { Dispatch, FC, SetStateAction } from 'react';
+import React, { useState, FC } from 'react';
 import { createPortal } from 'react-dom';
 import { 
   X, 
   Search, 
   Bell, 
-  ChevronDown, 
-  ChevronUp, 
   Check, 
   SlidersHorizontal, 
   RefreshCw, 
   Printer, 
   Download, 
-  Settings 
+  Settings,
+  Palette,
+  Eye,
+  EyeOff,
+  Building2,
+  TrendingUp,
+  Tag,
+  Calendar,
+  Layers,
+  Sparkles,
+  RotateCcw,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { DebouncedSearchInput } from '../DebouncedSearchInput';
@@ -39,13 +47,13 @@ export interface LayoutEditModeModalProps {
   storeFilter?: string;
 }
 
+type EditTab = 'paint' | 'fields' | 'alerts' | 'export';
+
 export const LayoutEditModeModal: React.FC<LayoutEditModeModalProps> = ({
   showMenu,
   onClose,
   searchQuery,
   setSearchQuery,
-  isSmartAlertCollapsed,
-  setIsSmartAlertCollapsed,
   layoutTooltipVisibility,
   setLayoutTooltipVisibility,
   resetLayoutTooltipVisibility,
@@ -60,292 +68,514 @@ export const LayoutEditModeModal: React.FC<LayoutEditModeModalProps> = ({
   version,
   storeFilter,
 }) => {
+  const [activeTab, setActiveTab] = useState<EditTab>('paint');
+  const [fieldSearch, setFieldSearch] = useState('');
+
   if (!showMenu) return null;
+
+  // Field Groups Definition for Tab 2
+  const fieldGroups = [
+    {
+      title: 'A. Định danh & Vị trí (Identification & Location)',
+      icon: Building2,
+      color: 'text-blue-600 dark:text-blue-400',
+      fields: [
+        { key: 'projectCode', label: 'Project Code', desc: 'Mã dự án / Mã Unit' },
+        { key: 'projectName', label: 'Project Name', desc: 'Tên dự án / Tên gian hàng' },
+        { key: 'shopType', label: 'Shop Type', desc: 'Loại hình / Format gian hàng' },
+        { key: 'floor', label: 'Floor / Store', desc: 'Tầng và Chi nhánh' },
+        { key: 'area', label: 'Area (m²)', desc: 'Diện tích mặt bằng' },
+        { key: 'legendColor', label: 'Legend Color', desc: 'Màu tô theo nhóm điều kiện' },
+      ],
+    },
+    {
+      title: 'B. Trạng thái & Tiến độ (Status & Progress)',
+      icon: Layers,
+      color: 'text-purple-600 dark:text-purple-400',
+      fields: [
+        { key: 'mdStatus', label: 'MD Status', desc: 'Trạng thái Merchandising' },
+        { key: 'actStatus', label: 'Act Status', desc: 'Trạng thái thi công thực tế' },
+        { key: 'progressBars', label: 'Progress Bars', desc: 'Thanh tiến độ Kế hoạch vs Thực tế' },
+        { key: 'startDate', label: 'Start Date', desc: 'Ngày bắt đầu dự án' },
+        { key: 'endDate', label: 'End Date / Finish', desc: 'Ngày kết thúc / Bàn giao' },
+      ],
+    },
+    {
+      title: 'C. Chỉ số tài chính & Dữ liệu mở rộng (Financials & Details)',
+      icon: TrendingUp,
+      color: 'text-emerald-600 dark:text-emerald-400',
+      fields: [
+        { key: 'sales', label: 'Sales (Doanh thu)', desc: 'Doanh thu gian hàng' },
+        { key: 'profit', label: 'Profit (Lợi nhuận)', desc: 'Lợi nhuận gian hàng' },
+        { key: 'margin', label: 'Margin (%)', desc: 'Tỷ suất lợi nhuận biên' },
+        { key: 'budget', label: 'Budget (Ngân sách)', desc: 'Dự toán ngân sách' },
+        { key: 'actualCost', label: 'Actual Cost', desc: 'Chi phí thi công thực tế' },
+        { key: 'classCode', label: 'Class Code', desc: 'Mã phân loại ngành hàng' },
+        { key: 'vendorCode', label: 'Vendor Code', desc: 'Mã nhà cung cấp' },
+        { key: 'contractor', label: 'Contractor', desc: 'Nhà thầu / Đối tác' },
+        { key: 'detail', label: 'Detail', desc: 'Chi tiết các hạng mục' },
+        { key: 'description', label: 'Description', desc: 'Ghi chú mô tả công việc' },
+      ],
+    },
+  ];
+
+  // Quick Action: Enable All
+  const handleEnableAllFields = () => {
+    const updated: any = {};
+    fieldGroups.forEach(group => {
+      group.fields.forEach(f => {
+        updated[f.key] = true;
+      });
+    });
+    setLayoutTooltipVisibility(updated);
+  };
+
+  // Quick Action: Disable All
+  const handleDisableAllFields = () => {
+    const updated: any = {};
+    fieldGroups.forEach(group => {
+      group.fields.forEach(f => {
+        updated[f.key] = false;
+      });
+    });
+    setLayoutTooltipVisibility(updated);
+  };
+
+  // Filtered fields based on search
+  const filteredGroups = fieldGroups.map(group => ({
+    ...group,
+    fields: group.fields.filter(f => {
+      if (!fieldSearch.trim()) return true;
+      const q = fieldSearch.toLowerCase();
+      return f.label.toLowerCase().includes(q) || f.desc.toLowerCase().includes(q) || f.key.toLowerCase().includes(q);
+    }),
+  })).filter(group => group.fields.length > 0);
+
+  // Active fields count
+  const allFieldKeys = fieldGroups.flatMap(g => g.fields.map(f => f.key));
+  const activeFieldsCount = allFieldKeys.filter(k => (layoutTooltipVisibility as any)?.[k] !== false).length;
 
   const content = (
     <div 
-      className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-end sm:items-center justify-center p-3 animate-in fade-in duration-150 hide-on-actual-print print:hidden"
+      className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-3 animate-in fade-in duration-150 hide-on-actual-print print:hidden"
       style={{ zIndex: 150000 }}
     >
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-md p-5 text-slate-800 dark:text-slate-200 shadow-2xl space-y-4 max-h-[85vh] overflow-y-auto">
-        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
-          <div className="flex items-center gap-2 font-bold text-base text-slate-800 dark:text-slate-100">
-            <SlidersHorizontal className="w-5 h-5 text-purple-600 dark:text-purple-400" />
-            Edit Mode
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-3xl text-slate-800 dark:text-slate-100 shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
+        
+        {/* Modal Header */}
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-200 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-900/90 shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-purple-600 via-indigo-600 to-blue-600 flex items-center justify-center text-white shadow-md">
+              <SlidersHorizontal className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-base sm:text-lg font-extrabold tracking-tight">
+                  Quản Lý Filter & Tùy Chỉnh Hiển Thị Layout
+                </h2>
+                <span className="text-[10px] uppercase tracking-wider font-extrabold px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 dark:bg-purple-950/80 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
+                  Edit Mode
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Tùy chỉnh danh mục màu vẽ (Paint Category), điều kiện Dynamic, trường dữ liệu Tooltip và cảnh báo trên mặt bằng
+              </p>
+            </div>
           </div>
+
           <button 
+            type="button"
             onClick={onClose}
-            className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white"
+            className="p-1.5 hover:bg-slate-200/70 dark:hover:bg-slate-800 rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-white transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Search Input */}
-        <div className="relative">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 z-10 pointer-events-none" />
-          <DebouncedSearchInput 
-            value={searchQuery}
-            onChange={(val) => setSearchQuery(val)}
-            debounceMs={250}
-            placeholder="Search Unit / Brand / Project..."
-            className="w-full pl-9 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-medium outline-none focus:ring-2 focus:ring-purple-500"
-          />
+        {/* Tab Navigation Bar */}
+        <div className="flex items-center gap-1.5 px-5 py-2 border-b border-slate-200 dark:border-slate-800 bg-slate-100/60 dark:bg-slate-900/60 shrink-0 overflow-x-auto">
+          <button
+            type="button"
+            onClick={() => setActiveTab('paint')}
+            className={cn(
+              "flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer",
+              activeTab === 'paint'
+                ? "bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-xs border border-slate-200 dark:border-slate-700"
+                : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200"
+            )}
+          >
+            <Palette className="w-3.5 h-3.5 text-indigo-500" />
+            <span>1. Màu vẽ & Nhóm điều kiện</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('fields')}
+            className={cn(
+              "flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer",
+              activeTab === 'fields'
+                ? "bg-white dark:bg-slate-800 text-purple-600 dark:text-purple-400 shadow-xs border border-slate-200 dark:border-slate-700"
+                : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200"
+            )}
+          >
+            <SlidersHorizontal className="w-3.5 h-3.5 text-purple-500" />
+            <span>2. Trường hiển thị ({activeFieldsCount}/{allFieldKeys.length})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('alerts')}
+            className={cn(
+              "flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer",
+              activeTab === 'alerts'
+                ? "bg-white dark:bg-slate-800 text-red-600 dark:text-red-400 shadow-xs border border-slate-200 dark:border-slate-700"
+                : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200"
+            )}
+          >
+            <Bell className="w-3.5 h-3.5 text-red-500" />
+            <span>3. Cảnh báo thông minh</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('export')}
+            className={cn(
+              "flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer",
+              activeTab === 'export'
+                ? "bg-white dark:bg-slate-800 text-emerald-600 dark:text-emerald-400 shadow-xs border border-slate-200 dark:border-slate-700"
+                : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200"
+            )}
+          >
+            <RefreshCw className="w-3.5 h-3.5 text-emerald-500" />
+            <span>4. Tác vụ & Cloud</span>
+          </button>
         </div>
 
-        {/* Paint Categories Mapping Section */}
-        <LayoutPaintCategoriesSection
-          version={version}
-          storeFilter={storeFilter}
-          canWrite={canWrite}
-        />
+        {/* Tab Body Content */}
+        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+          
+          {/* TAB 1: Paint Categories Mapping */}
+          {activeTab === 'paint' && (
+            <div className="space-y-4 animate-in fade-in duration-150">
+              <div className="p-3 bg-indigo-50/70 dark:bg-indigo-950/30 rounded-xl border border-indigo-200/80 dark:border-indigo-900/40 text-xs text-indigo-900 dark:text-indigo-200">
+                <span className="font-bold">Hướng dẫn:</span> Chọn danh mục màu vẽ (ví dụ: <code className="font-bold">Progress</code> hoặc <code className="font-bold">Shop type</code>) hoặc bấm <code className="font-bold">Add</code> để thêm danh mục mới. Bạn có thể bật/tắt các điều kiện Dynamic được gán vào từng danh mục để tô màu tương ứng trên mặt bằng CAD.
+              </div>
 
-        {/* Smart Notifications & Alerts Config (Collapsible Accordion) */}
-        <div className="space-y-2 p-3 bg-red-50/50 dark:bg-red-950/20 border border-red-100 dark:border-red-900/40 rounded-2xl">
-          <div className="flex items-center justify-between">
-            <button
-              type="button"
-              onClick={() => setIsSmartAlertCollapsed(prev => !prev)}
-              className="flex items-center gap-1.5 text-[11px] uppercase font-bold text-red-600 dark:text-red-400 tracking-wider hover:opacity-80 cursor-pointer active:scale-95 touch-manipulation"
-            >
-              <Bell className="w-3.5 h-3.5 text-red-600 dark:text-red-400" />
-              <span>Smart Alerts & Badges</span>
-              {isSmartAlertCollapsed ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
-            </button>
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={() => {
-                  setLayoutTooltipVisibility({
-                    notifications: true,
-                    alertOverdue: true,
-                    alertDelay: true,
-                    alertHandover: true,
-                    alertOpening: true,
-                    alertOpeningRisk: true,
-                  });
-                }}
-                className="text-[10px] text-red-600 dark:text-red-400 hover:underline font-semibold cursor-pointer active:scale-95"
-              >
-                Enable All
-              </button>
-              <span className="text-red-200 dark:text-red-800">|</span>
-              <button
-                type="button"
-                onClick={() => {
-                  setLayoutTooltipVisibility({
-                    notifications: false,
-                    alertOverdue: false,
-                    alertDelay: false,
-                    alertHandover: false,
-                    alertOpening: false,
-                    alertOpeningRisk: false,
-                  });
-                }}
-                className="text-[10px] text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 font-medium cursor-pointer active:scale-95"
-              >
-                Disable All
-              </button>
+              <LayoutPaintCategoriesSection
+                version={version}
+                storeFilter={storeFilter}
+                canWrite={canWrite}
+              />
             </div>
-          </div>
+          )}
 
-          {!isSmartAlertCollapsed && (
-            <div className="grid grid-cols-2 gap-1.5 pt-1 animate-in fade-in duration-150">
-              {[
-                { key: 'notifications', label: 'All Alert Badges', desc: 'Master alert switch' },
-                { key: 'alertOverdue', label: 'Overdue Tasks', desc: 'Past due unfinished tasks' },
-                { key: 'alertDelay', label: 'Project Delay', desc: 'Late / delayed status' },
-                { key: 'alertOpeningRisk', label: 'Opening Risk', desc: '<80% prg in 5 days' },
-                { key: 'alertHandover', label: 'Handover Notice', desc: 'Handover within 3 days' },
-                { key: 'alertOpening', label: 'Opening Notice', desc: 'Opening within 3 days' },
-              ].map((item) => {
-                const isActive = (layoutTooltipVisibility as any)?.[item.key] !== false;
-                return (
+          {/* TAB 2: Display & Tooltip Fields */}
+          {activeTab === 'fields' && (
+            <div className="space-y-4 animate-in fade-in duration-150">
+              
+              {/* Toolbar: Search & Quick actions */}
+              <div className="flex flex-wrap items-center justify-between gap-2.5 pb-2 border-b border-slate-100 dark:border-slate-800">
+                <div className="relative flex-1 min-w-[200px] max-w-sm">
+                  <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    value={fieldSearch}
+                    onChange={(e) => setFieldSearch(e.target.value)}
+                    placeholder="Tìm trường thông tin (Code, Brand, Sales...)"
+                    className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 outline-none focus:ring-1 focus:ring-purple-500 font-medium"
+                  />
+                  {fieldSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setFieldSearch('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2">
                   <button
-                    key={item.key}
+                    type="button"
+                    onClick={handleEnableAllFields}
+                    className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-lg bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800 hover:bg-purple-100 transition-colors cursor-pointer"
+                  >
+                    <Eye className="w-3 h-3" />
+                    <span>Bật tất cả</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleDisableAllFields}
+                    className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 transition-colors cursor-pointer"
+                  >
+                    <EyeOff className="w-3 h-3" />
+                    <span>Tắt tất cả</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => resetLayoutTooltipVisibility()}
+                    className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 transition-colors cursor-pointer"
+                    title="Khôi phục cài đặt mặc định"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    <span>Mặc định</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Field Groups Grid */}
+              <div className="space-y-4">
+                {filteredGroups.map((group) => {
+                  const Icon = group.icon;
+                  return (
+                    <div key={group.title} className="space-y-2">
+                      <div className="flex items-center gap-2 text-xs font-bold text-slate-700 dark:text-slate-200">
+                        <Icon className={cn("w-4 h-4", group.color)} />
+                        <span>{group.title}</span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                        {group.fields.map((item) => {
+                          const isActive = (layoutTooltipVisibility as any)?.[item.key] !== false;
+                          return (
+                            <button
+                              key={item.key}
+                              type="button"
+                              onClick={() => {
+                                setLayoutTooltipVisibility((prev: any) => ({
+                                  ...prev,
+                                  [item.key]: !isActive,
+                                }));
+                              }}
+                              className={cn(
+                                "flex items-center justify-between p-2.5 rounded-xl border text-left transition-all active:scale-95 touch-manipulation cursor-pointer",
+                                isActive
+                                  ? "bg-purple-50/80 dark:bg-purple-950/40 border-purple-300 dark:border-purple-800 text-purple-900 dark:text-purple-200 shadow-2xs"
+                                  : "bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700/60 text-slate-400 dark:text-slate-500 opacity-60 hover:opacity-100"
+                              )}
+                            >
+                              <div className="min-w-0 flex-1 pr-1">
+                                <div className="text-xs font-bold truncate leading-tight">
+                                  {item.label}
+                                </div>
+                                <div className="text-[10px] opacity-75 truncate mt-0.5">
+                                  {item.desc}
+                                </div>
+                              </div>
+                              <div
+                                className={cn(
+                                  "w-4 h-4 rounded-full flex items-center justify-center shrink-0 transition-colors",
+                                  isActive
+                                    ? "bg-purple-600 text-white"
+                                    : "bg-slate-200 dark:bg-slate-700 text-transparent"
+                                )}
+                              >
+                                <Check className="w-2.5 h-2.5 stroke-[3]" />
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* TAB 3: Smart Alerts & Badges */}
+          {activeTab === 'alerts' && (
+            <div className="space-y-4 animate-in fade-in duration-150">
+              <div className="flex items-center justify-between p-3 bg-red-50/60 dark:bg-red-950/30 rounded-xl border border-red-200 dark:border-red-900/50">
+                <div className="flex items-center gap-2.5">
+                  <Bell className="w-5 h-5 text-red-600 dark:text-red-400" />
+                  <div>
+                    <div className="text-xs font-bold text-red-900 dark:text-red-200">
+                      Cảnh báo thông minh trên bản đồ CAD (Smart Alerts & Badges)
+                    </div>
+                    <div className="text-[11px] text-red-700/80 dark:text-red-300/80">
+                      Hiển thị các huy hiệu màu sắc trực tiếp trên polygon từng gian hàng để phát hiện nhanh rủi ro
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <button
                     type="button"
                     onClick={() => {
-                      setLayoutTooltipVisibility((prev: any) => ({
-                        ...prev,
-                        [item.key]: !isActive,
-                      }));
+                      setLayoutTooltipVisibility({
+                        notifications: true,
+                        alertOverdue: true,
+                        alertDelay: true,
+                        alertHandover: true,
+                        alertOpening: true,
+                        alertOpeningRisk: true,
+                      });
                     }}
-                    className={cn(
-                      "flex items-center justify-between p-2 rounded-xl border text-left transition-all active:scale-95 touch-manipulation cursor-pointer",
-                      isActive
-                        ? "bg-red-500/10 dark:bg-red-950/40 border-red-300 dark:border-red-800/80 text-red-900 dark:text-red-200 shadow-xs"
-                        : "bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700/60 text-slate-400 dark:text-slate-500 opacity-60 hover:opacity-100"
-                    )}
+                    className="text-xs font-semibold px-2 py-1 rounded-lg bg-red-600 text-white hover:bg-red-500 cursor-pointer"
                   >
-                    <div className="min-w-0 flex-1">
-                      <div className="text-xs font-bold truncate leading-tight">
-                        {item.label}
-                      </div>
-                      <div className="text-[9px] opacity-75 truncate">
-                        {item.desc}
-                      </div>
-                    </div>
-                    <div
+                    Bật tất cả
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLayoutTooltipVisibility({
+                        notifications: false,
+                        alertOverdue: false,
+                        alertDelay: false,
+                        alertHandover: false,
+                        alertOpening: false,
+                        alertOpeningRisk: false,
+                      });
+                    }}
+                    className="text-xs font-semibold px-2 py-1 rounded-lg bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-300 cursor-pointer"
+                  >
+                    Tắt tất cả
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {[
+                  { key: 'notifications', label: 'Tất cả Huy hiệu Cảnh báo', desc: 'Công tắc tổng cho toàn bộ badge' },
+                  { key: 'alertOverdue', label: 'Công việc Quá hạn (Overdue)', desc: 'Nhiệm vụ chưa hoàn thành đã quá ngày kết thúc' },
+                  { key: 'alertDelay', label: 'Dự án Chậm tiến độ (Delay)', desc: 'Trạng thái dự án bị chậm trễ tiến độ' },
+                  { key: 'alertOpeningRisk', label: 'Nguy cơ Khai trương (Opening Risk)', desc: 'Tiến độ <80% khi còn dưới 5 ngày' },
+                  { key: 'alertHandover', label: 'Thông báo Bàn giao (Handover)', desc: 'Thời điểm bàn giao trong vòng 3 ngày tới' },
+                  { key: 'alertOpening', label: 'Thông báo Khai trương (Opening)', desc: 'Thời điểm khai trương trong vòng 3 ngày tới' },
+                ].map((item) => {
+                  const isActive = (layoutTooltipVisibility as any)?.[item.key] !== false;
+                  return (
+                    <button
+                      key={item.key}
+                      type="button"
+                      onClick={() => {
+                        setLayoutTooltipVisibility((prev: any) => ({
+                          ...prev,
+                          [item.key]: !isActive,
+                        }));
+                      }}
                       className={cn(
-                        "w-4 h-4 rounded-full flex items-center justify-center shrink-0 ml-1.5 transition-colors",
+                        "flex items-center justify-between p-3 rounded-xl border text-left transition-all active:scale-95 touch-manipulation cursor-pointer",
                         isActive
-                          ? "bg-red-600 text-white"
-                          : "bg-slate-200 dark:bg-slate-700 text-transparent"
+                          ? "bg-red-500/10 dark:bg-red-950/40 border-red-300 dark:border-red-800 text-red-900 dark:text-red-200 shadow-xs"
+                          : "bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700/60 text-slate-400 dark:text-slate-500 opacity-60 hover:opacity-100"
                       )}
                     >
-                      <Check className="w-2.5 h-2.5 stroke-[3]" />
-                    </div>
-                  </button>
-                );
-              })}
+                      <div className="min-w-0 flex-1 pr-1">
+                        <div className="text-xs font-bold leading-tight">
+                          {item.label}
+                        </div>
+                        <div className="text-[10px] opacity-75 mt-0.5">
+                          {item.desc}
+                        </div>
+                      </div>
+                      <div
+                        className={cn(
+                          "w-4 h-4 rounded-full flex items-center justify-center shrink-0 transition-colors ml-2",
+                          isActive
+                            ? "bg-red-600 text-white"
+                            : "bg-slate-200 dark:bg-slate-700 text-transparent"
+                        )}
+                      >
+                        <Check className="w-2.5 h-2.5 stroke-[3]" />
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           )}
-        </div>
 
-        {/* Labels Appear / Tooltip Visibility Config */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1.5 text-[11px] uppercase font-bold text-slate-500 dark:text-slate-400 tracking-wider">
-              <SlidersHorizontal className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
-              <span>Display & Tooltip Fields</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={() => {
-                  setLayoutTooltipVisibility({
-                    projectCode: true,
-                    projectName: true,
-                    mdStatus: true,
-                    actStatus: true,
-                    legendColor: true,
-                    floor: true,
-                    startDate: true,
-                    endDate: true,
-                    detail: true,
-                    description: true,
-                    progressBars: true,
-                    shopType: true,
-                    area: true,
-                  });
-                }}
-                className="text-[10px] text-purple-600 dark:text-purple-400 hover:underline font-semibold cursor-pointer"
-              >
-                Enable All
-              </button>
-              <span className="text-slate-300 dark:text-slate-600">|</span>
-              <button
-                type="button"
-                onClick={() => resetLayoutTooltipVisibility()}
-                className="text-[10px] text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 font-medium cursor-pointer"
-              >
-                Default
-              </button>
-            </div>
-          </div>
+          {/* TAB 4: Export & Cloud Actions */}
+          {activeTab === 'export' && (
+            <div className="space-y-4 animate-in fade-in duration-150">
+              <div className="p-3 bg-slate-50 dark:bg-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-700 text-xs text-slate-600 dark:text-slate-300">
+                Các tác vụ đồng bộ hóa đám mây Cloudflare R2, lưu ảnh mặt bằng CAD độ phân giải cao và xem trước bản in.
+              </div>
 
-          {/* Toggle Items Grid */}
-          <div className="grid grid-cols-2 gap-1.5 max-h-56 overflow-y-auto pr-1">
-            {[
-              { key: 'projectCode', label: 'Project Code', desc: 'Unit / Project ID' },
-              { key: 'projectName', label: 'Project Name', desc: 'Brand / Tenant Name' },
-              { key: 'mdStatus', label: 'MD Status', desc: 'Merchandising status' },
-              { key: 'actStatus', label: 'AC Status', desc: 'Fit-out actual status' },
-              { key: 'legendColor', label: 'Legend Color', desc: 'Unit & Tooltip color' },
-              { key: 'floor', label: 'Floor / Store', desc: 'Location & Store level' },
-              { key: 'startDate', label: 'Start Date', desc: 'Planned start date' },
-              { key: 'endDate', label: 'End Date', desc: 'Planned end date' },
-              { key: 'detail', label: 'Detail', desc: 'Work breakdown summary' },
-              { key: 'description', label: 'Description', desc: 'Notes & Descriptions' },
-              { key: 'progressBars', label: 'Progress Bars', desc: 'Plan & Actual progress' },
-              { key: 'shopType', label: 'Shop Type', desc: 'Store layout & format' },
-              { key: 'area', label: 'Area (m²)', desc: 'Floor surface area' },
-            ].map((item) => {
-              const isActive = (layoutTooltipVisibility as any)?.[item.key] !== false;
-              return (
-                <button
-                  key={item.key}
+              {canWrite && (
+                <div className="p-4 rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-950/30 flex flex-col sm:flex-row items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-xs font-bold text-emerald-900 dark:text-emerald-200">
+                      Áp dụng Quy tắc Dynamic & Đồng bộ Cloud R2
+                    </h3>
+                    <p className="text-[11px] text-emerald-700/80 dark:text-emerald-300/80">
+                      Tự động tính toán lại toàn bộ quy tắc phân tầng Dynamic và lưu trữ đồng bộ lên Cloudflare R2.
+                    </p>
+                  </div>
+                  <button 
+                    type="button"
+                    onClick={handleTriggerExport}
+                    disabled={isExporting}
+                    className="w-full sm:w-auto flex items-center justify-center gap-1.5 py-2 px-4 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all shadow-sm shrink-0 cursor-pointer active:scale-95"
+                  >
+                    <RefreshCw className={cn("w-3.5 h-3.5", isExporting && "animate-spin")} />
+                    <span>{isExporting ? (exportStatus || 'Đang xử lý...') : 'Trigger Export & R2'}</span>
+                  </button>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                <button 
                   type="button"
                   onClick={() => {
-                    setLayoutTooltipVisibility((prev: any) => ({
-                      ...prev,
-                      [item.key]: !isActive,
-                    }));
+                    onClose();
+                    setIsPrintPreview(!isPrintPreview);
                   }}
-                  className={cn(
-                    "flex items-center justify-between p-2 rounded-xl border text-left transition-all active:scale-95 touch-manipulation cursor-pointer",
-                    isActive
-                      ? "bg-purple-50/80 dark:bg-purple-950/40 border-purple-200 dark:border-purple-800/80 text-purple-900 dark:text-purple-200 shadow-xs"
-                      : "bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700/60 text-slate-400 dark:text-slate-500 opacity-60 hover:opacity-100"
-                  )}
+                  className="flex items-center justify-center gap-2 p-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition-all shadow-sm active:scale-95 cursor-pointer"
                 >
-                  <div className="min-w-0 flex-1">
-                    <div className="text-xs font-bold truncate leading-tight">
-                      {item.label}
-                    </div>
-                    <div className="text-[9px] opacity-75 truncate">
-                      {item.desc}
-                    </div>
-                  </div>
-                  <div
-                    className={cn(
-                      "w-4 h-4 rounded-full flex items-center justify-center shrink-0 ml-1.5 transition-colors",
-                      isActive
-                        ? "bg-purple-600 text-white"
-                        : "bg-slate-200 dark:bg-slate-700 text-transparent"
-                    )}
-                  >
-                    <Check className="w-2.5 h-2.5 stroke-[3]" />
-                  </div>
+                  <Printer className="w-4 h-4" />
+                  <span>Xem trước bản in (Print Preview)</span>
                 </button>
-              );
-            })}
-          </div>
+
+                <button 
+                  type="button"
+                  onClick={handleExport}
+                  className="flex items-center justify-center gap-2 p-3 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-bold transition-all shadow-sm active:scale-95 cursor-pointer"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Xuất ảnh CAD HD (Export Image)</span>
+                </button>
+
+                {canWrite && (
+                  <button 
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      onOpenR2Config();
+                    }}
+                    className="flex items-center justify-center gap-2 p-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold transition-all border border-slate-200 dark:border-slate-700 active:scale-95 cursor-pointer"
+                  >
+                    <Settings className="w-4 h-4" />
+                    <span>Cấu hình Cloud R2 Storage</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
         </div>
 
-        {/* Action Buttons */}
-        <div className="pt-2 flex flex-col gap-2 border-t border-slate-100 dark:border-slate-800">
-          {canWrite && (
-            <button 
-              onClick={handleTriggerExport}
-              disabled={isExporting}
-              title="Automatically: Step 1 Apply all rules Dynamic -> Step 2 Save Cloud R2"
-              className="w-full flex items-center justify-center gap-1.5 py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-semibold transition-colors shadow-sm"
-            >
-              <RefreshCw className={`w-4 h-4 ${isExporting ? 'animate-spin' : ''}`} />
-              {isExporting ? (exportStatus || 'Processing...') : 'Trigger Export (Apply Rules & Cloud)'}
-            </button>
-          )}
-          
-          <div className="grid grid-cols-2 gap-2">
-            <button 
-              onClick={() => {
-                onClose();
-                setIsPrintPreview(!isPrintPreview);
-              }}
-              className="flex items-center justify-center gap-1.5 py-2 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold transition-colors shadow-sm active:scale-95 touch-manipulation"
-            >
-              <Printer className="w-4 h-4" /> Print Preview
-            </button>
-            <button 
-              onClick={handleExport}
-              className="flex items-center justify-center gap-1.5 py-2 px-3 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-semibold transition-colors shadow-sm active:scale-95 touch-manipulation"
-            >
-              <Download className="w-4 h-4" /> Export HD Image
-            </button>
-            {canWrite && (
-              <button 
-                onClick={() => {
-                  onClose();
-                  onOpenR2Config();
-                }}
-                className="col-span-2 flex items-center justify-center gap-1.5 py-2 px-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-semibold transition-colors border border-slate-200 dark:border-slate-700 active:scale-95 touch-manipulation"
-              >
-                <Settings className="w-4 h-4" /> R2 Storage Config
-              </button>
-            )}
+        {/* Modal Footer */}
+        <div className="px-5 py-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 flex items-center justify-between text-xs text-slate-500 shrink-0">
+          <div className="flex items-center gap-2">
+            <span className="inline-block w-2 h-2 rounded-full bg-emerald-500"></span>
+            <span>Bộ lọc & Trường hiển thị tự động lưu vào bộ nhớ tạm & Cloud</span>
           </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-100 font-bold transition-colors cursor-pointer text-slate-700 dark:text-slate-200"
+          >
+            Đóng
+          </button>
         </div>
+
       </div>
     </div>
   );
