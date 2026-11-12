@@ -1,6 +1,4 @@
 import { getStoredR2Credentials, getS3Sdk, extractR2Key, listR2Objects, deleteR2Object, R2Credentials } from '../components/PictureMapping/lib/r2Upload';
-import { doc, getDoc } from 'firebase/firestore';
-import { db, APP_ID } from './firebase';
 import { useAppStore } from '../store/useAppStore';
 import { compressImageToWebp } from './imageCompression';
 
@@ -189,27 +187,7 @@ export async function uploadPictureToTakaFolder(
   unitCode?: string,
   store?: string
 ): Promise<{ success: boolean; publicUrl?: string; error?: string }> {
-  let creds = getStoredR2Credentials() || useAppStore.getState().r2Config;
-  if (!creds) {
-    try {
-      const snap = await getDoc(doc(db, "artifacts", APP_ID, "public", "data", "taka_config", "r2_credentials"));
-      if (snap.exists()) {
-        const data = snap.data() as any;
-        if (data.accountId && data.accessKeyId && data.secretAccessKey && data.bucketName) {
-          creds = {
-            accountId: data.accountId,
-            accessKeyId: data.accessKeyId,
-            secretAccessKey: data.secretAccessKey,
-            bucketName: data.bucketName,
-          };
-          useAppStore.getState().setR2Config(data);
-        }
-      }
-    } catch (e) {
-      console.error("[R2 Upload] Error fetching R2 credentials:", e);
-    }
-  }
-
+  const creds = getStoredR2Credentials() || useAppStore.getState().r2Config;
   if (!creds) {
     return { success: false, error: "Chưa cấu hình thông tin Cloudflare R2 (r2_credentials)." };
   }
@@ -283,26 +261,7 @@ export async function deleteR2ImageCleanly(
     return { success: false, deletedKeys: [] };
   }
 
-  let creds = customCreds || getStoredR2Credentials() || useAppStore.getState().r2Config;
-  if (!creds) {
-    try {
-      const snap = await getDoc(doc(db, "artifacts", APP_ID, "public", "data", "taka_config", "r2_credentials"));
-      if (snap.exists()) {
-        const data = snap.data() as any;
-        if (data.accountId && data.accessKeyId && data.secretAccessKey && data.bucketName) {
-          creds = {
-            accountId: data.accountId,
-            accessKeyId: data.accessKeyId,
-            secretAccessKey: data.secretAccessKey,
-            bucketName: data.bucketName,
-          };
-          useAppStore.getState().setR2Config(data);
-        }
-      }
-    } catch (e) {
-      console.error("[R2 Purge] Error fetching credentials:", e);
-    }
-  }
+  const creds = customCreds || getStoredR2Credentials() || useAppStore.getState().r2Config;
 
   if (!creds || !creds.accountId || !creds.bucketName) {
     console.warn('[R2 Purge] Cannot delete from R2: Credentials missing.');

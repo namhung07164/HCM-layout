@@ -1,7 +1,4 @@
-import { doc, deleteField } from 'firebase/firestore';
-import { setDoc } from './firestoreWrites';
-import { db, APP_ID, storage } from './firebase';
-import { ref as storageRef, deleteObject } from 'firebase/storage';
+
 import { useAppStore } from '../store/useAppStore';
 import { Project } from '../types';
 import { deleteR2ImageCleanly } from './r2StorageUtils';
@@ -77,21 +74,6 @@ export async function syncUploadedImageToProjectAndUnit(
       localStorage.setItem(activeUnitStorageKey, JSON.stringify(updatedImages));
     } catch {}
 
-    try {
-      const unitImagesDocRef = doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_unit_images', unitImagesDocKey);
-      setDoc(
-        unitImagesDocRef,
-        {
-          unitCode,
-          store,
-          images: updatedImages,
-          updatedAt: new Date().toISOString(),
-        },
-        { merge: true }
-      ).catch((err) => console.warn('[projectImageSync] Error saving unit images doc:', err));
-    } catch (e) {
-      console.warn('[projectImageSync] Failed to push to taka_unit_images:', e);
-    }
   }
 
   // 3. Dispatch UI event so Layout Unit Tooltip immediately updates in 0ms
@@ -99,7 +81,7 @@ export async function syncUploadedImageToProjectAndUnit(
     window.dispatchEvent(new CustomEvent('taka_unit_images_changed'));
   }
 
-  // 4. Update the Project document in Zustand + Firestore + Delta
+  // 4. Update the Project document in Zustand
   if (project && project.id) {
     try {
       const allProjects = useAppStore.getState().projects;
@@ -124,18 +106,6 @@ export async function syncUploadedImageToProjectAndUnit(
       useAppStore
         .getState()
         .setProjects(allProjects.map((p) => (p.id === project.id ? updatedProject : p)));
-
-      // Firestore Update
-      const projDocRef = doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_projects', project.id);
-      const updateData = {
-        imageUrl: updatedProject.imageUrl,
-        thumbnail: updatedProject.thumbnail,
-        imageLinks: updatedImageLinks,
-        updatedAt: nowIso,
-      };
-
-      // setDoc from firestoreWrites automatically queues and emits the delta via autoDeltaQueue
-      await setDoc(projDocRef, updateData, { merge: true });
     } catch (err) {
       console.error('[projectImageSync] Failed to update project imageLinks:', err);
     }
@@ -168,13 +138,6 @@ export async function removeUploadedImageEverywhere(
     console.warn('[removeUploadedImageEverywhere] R2 error:', e);
   }
 
-  // 2. Purge from Firebase Storage if it's a storage URL
-  if (trimmedUrl.includes('firebasestorage.googleapis.com')) {
-    try {
-      const fileRef = storageRef(storage, trimmedUrl);
-      deleteObject(fileRef).catch((e) => console.warn('Storage delete error:', e));
-    } catch {}
-  }
 
   const store = normalizeStore(project?.store);
   const primaryCode = String(project?.code || unitCodeParam || '').trim();
@@ -220,19 +183,6 @@ export async function removeUploadedImageEverywhere(
       }
     } catch {}
 
-    try {
-      const unitImagesDocRef = doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_unit_images', unitImagesDocKey);
-      setDoc(
-        unitImagesDocRef,
-        {
-          unitCode: uCode,
-          store,
-          images: updatedImages,
-          updatedAt: new Date().toISOString(),
-        },
-        { merge: true }
-      ).catch(console.error);
-    } catch {}
   }
 
   // 4. Dispatch event so Layout Unit Tooltip updates immediately
@@ -317,22 +267,6 @@ export async function removeUploadedImageEverywhere(
       useAppStore
         .getState()
         .setProjects(allProjects.map((p) => (p.id === targetProj.id ? updatedProject : p)));
-
-      // Firestore Update
-      const projDocRef = doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_projects', targetProj.id);
-      const firestoreUpdate: Record<string, any> = {
-        comments: updatedComments,
-        imageLinks: updatedImageLinks,
-        taskSummaries: filteredSummaries,
-        updatedAt: nowIso,
-      };
-      if (targetProj.imageUrl === trimmedUrl) firestoreUpdate.imageUrl = deleteField();
-      if (targetProj.thumbnail === trimmedUrl) firestoreUpdate.thumbnail = deleteField();
-      if ((targetProj as any).photo === trimmedUrl) firestoreUpdate.photo = deleteField();
-      if ((targetProj as any).image === trimmedUrl) firestoreUpdate.image = deleteField();
-
-      // setDoc from firestoreWrites automatically queues and emits the delta via autoDeltaQueue
-      await setDoc(projDocRef, firestoreUpdate, { merge: true });
     } catch (err) {
       console.error('[removeUploadedImageEverywhere] Error updating project:', err);
     }
