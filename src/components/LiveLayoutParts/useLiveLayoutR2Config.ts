@@ -12,6 +12,7 @@ import {
   isValidLayoutConfig,
 } from '../../lib/layoutConfigCache';
 import { getLocalConfigVersions } from '../../lib/configCacheService';
+import { applyComparisonRowsToStores } from '../../lib/standaloneComparisonService';
 
 export interface LiveLayoutR2ConfigState {
   config: any;
@@ -283,22 +284,41 @@ export function useLiveLayoutR2Config(): LiveLayoutR2ConfigState {
           credentials: { accessKeyId, secretAccessKey },
         });
 
-        const downloadRes = await downloadR2JsonFile<any>(
-          'mapping_config.json',
+        let downloadRes = await downloadR2JsonFile<any>(
+          'layout/layout_config.json',
           { accountId, accessKeyId, secretAccessKey, bucketName },
           s3
         );
-        let data: any = downloadRes.success && downloadRes.data ? downloadRes.data : null;
+        let data: any = downloadRes.success && downloadRes.data && isValidLayoutConfig(downloadRes.data)
+          ? downloadRes.data
+          : null;
+
+        if (!data) {
+          downloadRes = await downloadR2JsonFile<any>(
+            'mapping_config.json',
+            { accountId, accessKeyId, secretAccessKey, bucketName },
+            s3
+          );
+          data = downloadRes.success && downloadRes.data ? downloadRes.data : null;
+        }
 
         if (!data || !isValidLayoutConfig(data)) {
           if (activeCached) return;
           throw new Error(
             downloadRes.error ||
-              'Configuration file (mapping_config.json) not found on Cloud. Please check your Bucket or export floor plans first.'
+              'Configuration file (layout/layout_config.json) not found on Cloud. Please check your Bucket or export floor plans first.'
           );
         }
 
         markLayoutNetworkChecked();
+
+        // Also hydrate DataStore so Picture Mapping & Layout remain 100% unified
+        try {
+          useDataStore.getState().loadFullCloudData(data);
+          if (Array.isArray(data.comparisonRows) && data.comparisonRows.length > 0) {
+            applyComparisonRowsToStores(data.comparisonRows);
+          }
+        } catch {}
 
         // Resolve all R2 signed URLs locally (<3ms) before applying state once (prevents double-render & double-fetch)
         await resolveConfigSignedUrls(data, { accountId, accessKeyId, secretAccessKey, bucketName }, s3);

@@ -116,7 +116,7 @@ export function getStoredR2Credentials(): R2Credentials | null {
 
   if (!accountId || !accessKeyId || !secretAccessKey || !bucketName) {
     try {
-      const cached = localStorage.getItem('taka_cache_r2_config_v1');
+      const cached = localStorage.getItem('taka_cache_r2_config_v1') ?? localStorage.getItem('taka_r2_config_cache_v1');
       if (cached) {
         const parsed = JSON.parse(cached);
         const a = parsed?.accountId || parsed?.account_id;

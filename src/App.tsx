@@ -55,8 +55,8 @@ export default function App() {
     // Initialize lifecycle listeners to auto-save to Cloud R2 & cache on app exit
     import("./lib/r2UnifiedSyncService").then(({ initAutoSaveOnAppClose, loadUnifiedDataFromCloudR2 }) => {
       initAutoSaveOnAppClose();
-      // Auto load cloud in background
-      loadUnifiedDataFromCloudR2({ silent: true }).catch(() => {});
+      // Automatically load cloud data from R2 on app open
+      loadUnifiedDataFromCloudR2({ silent: false, initialBoot: true }).catch(() => {});
     }).catch(() => {});
   }, []);
 

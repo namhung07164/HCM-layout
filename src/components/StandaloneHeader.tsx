@@ -205,6 +205,14 @@ export const StandaloneHeader: React.FC<StandaloneHeaderProps> = React.memo(({
         <div className="h-4 w-px bg-slate-200 dark:bg-slate-700 mx-0.5 hidden sm:block" />
 
         {/* Cloudflare R2 Sync (layout/ folder) */}
+        <div
+          title="Tự động nạp Cloud R2 khi mở app và tự động lưu Cloud R2 khi chỉnh sửa hoặc tắt app"
+          className="hidden xl:flex items-center gap-1.5 px-2 py-1 rounded-lg text-[11px] font-semibold bg-emerald-50/80 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200/80 dark:border-emerald-800/50 cursor-default select-none"
+        >
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+          <span>Auto Cloud R2</span>
+        </div>
+
         <button
           type="button"
           onClick={async () => {

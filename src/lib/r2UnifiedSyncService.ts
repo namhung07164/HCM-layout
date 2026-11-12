@@ -1,10 +1,10 @@
 /**
  * Comprehensive R2 Cloud Synchronization Service for Layout & Picture Mapping
  * Handles:
- * 1. Synchronizing layout and comparison data under folder `layout/` (e.g. `layout/layout_config.json`, `layout/comparison_latest.csv`)
- * 2. Automatic cloud pull when opening Layout tab
- * 3. Local disk caching (IndexedDB + CacheStorage + localStorage)
- * 4. Auto-save on app close / unload (pagehide / visibilitychange / beforeunload)
+ * 1. Synchronizing layout and comparison data under folder `layout/` (`layout/layout_config.json`, `mapping_config.json`)
+ * 2. Automatic cloud pull when opening the app (with instant local-disk hydration fallback)
+ * 3. Continuous debounced auto-sync to Cloud R2 during edits
+ * 4. Automatic cloud save on app close / exit (beforeunload / pagehide / visibilitychange hidden)
  */
 
 import { getStoredR2CredentialsAsync, getS3Sdk, uploadSingleR2File, downloadR2JsonFile, R2Credentials } from '../components/PictureMapping/lib/r2Upload';
@@ -20,6 +20,60 @@ const ROOT_MAPPING_CONFIG_KEY = 'mapping_config.json';
 let isAutoSaving = false;
 let pendingAutoSave = false;
 let isPullingFromCloud = false;
+
+// Pre-warmed S3 client cache for fast zero-latency exit saves
+let _prewarmedS3Client: any = null;
+let _prewarmedCredsKey = '';
+
+// Dirty tracker for debounced auto-save
+let _autoSaveDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+let _hasUnsavedEdits = false;
+let _isLifecycleBound = false;
+
+/**
+ * Gets or creates a singleton S3 Client instance to eliminate SDK re-initialization overhead.
+ */
+export async function getOrCreateS3Client(): Promise<{ s3: any; creds: R2Credentials } | null> {
+  const creds = await getStoredR2CredentialsAsync();
+  if (!creds) return null;
+  const credsKey = `${creds.accountId}:${creds.accessKeyId}:${creds.bucketName}`;
+  if (_prewarmedS3Client && _prewarmedCredsKey === credsKey) {
+    return { s3: _prewarmedS3Client, creds };
+  }
+  try {
+    const { S3Client } = await getS3Sdk();
+    _prewarmedS3Client = new S3Client({
+      region: 'auto',
+      endpoint: `https://${creds.accountId.trim()}.r2.cloudflarestorage.com`,
+      credentials: {
+        accessKeyId: creds.accessKeyId.trim(),
+        secretAccessKey: creds.secretAccessKey.trim(),
+      },
+    });
+    _prewarmedCredsKey = credsKey;
+    return { s3: _prewarmedS3Client, creds };
+  } catch (e) {
+    console.warn('[R2 S3Client] Failed to initialize S3 SDK client:', e);
+    return null;
+  }
+}
+
+/**
+ * Marks workspace as modified and schedules a debounced auto-save to Cloudflare R2.
+ */
+export function markWorkspaceDirty(delayMs = 2500): void {
+  _hasUnsavedEdits = true;
+  if (_autoSaveDebounceTimer) {
+    clearTimeout(_autoSaveDebounceTimer);
+  }
+  _autoSaveDebounceTimer = setTimeout(() => {
+    _autoSaveDebounceTimer = null;
+    if (_hasUnsavedEdits) {
+      _hasUnsavedEdits = false;
+      syncAllDataToCloudR2({ silent: true }).catch(() => {});
+    }
+  }, delayMs);
+}
 
 /**
  * Builds the complete unified workspace payload to be synced to R2 cloud.
@@ -75,24 +129,14 @@ export async function uploadImportedFileToR2(
   folder: 'root' | 'layout' = 'layout'
 ): Promise<{ success: boolean; key?: string; error?: string }> {
   try {
-    const creds = await getStoredR2CredentialsAsync();
-    if (!creds) {
+    const clientBundle = await getOrCreateS3Client();
+    if (!clientBundle) {
       console.info('[R2 Upload] No R2 credentials configured, skip file upload.');
       return { success: false, error: 'Chưa cấu hình R2 credentials' };
     }
-
-    const { S3Client } = await getS3Sdk();
-    const s3 = new S3Client({
-      region: 'auto',
-      endpoint: `https://${creds.accountId.trim()}.r2.cloudflarestorage.com`,
-      credentials: {
-        accessKeyId: creds.accessKeyId.trim(),
-        secretAccessKey: creds.secretAccessKey.trim(),
-      },
-    });
+    const { s3, creds } = clientBundle;
 
     const cleanName = file.name.replace(/[^a-zA-Z0-9_.-]/g, '_');
-    const timestamp = Date.now();
     const key = folder === 'layout' ? `layout/${cleanName}` : cleanName;
 
     const res = await uploadSingleR2File({ name: key, blob: file }, creds, s3);
@@ -122,25 +166,19 @@ export async function syncAllDataToCloudR2(options?: {
 
   isAutoSaving = true;
   try {
-    const creds = await getStoredR2CredentialsAsync();
-    if (!creds) {
-      return { success: false, message: 'Chưa cấu hình R2 Cloudflare.' };
-    }
-
-    const { S3Client } = await getS3Sdk();
-    const s3 = new S3Client({
-      region: 'auto',
-      endpoint: `https://${creds.accountId.trim()}.r2.cloudflarestorage.com`,
-      credentials: {
-        accessKeyId: creds.accessKeyId.trim(),
-        secretAccessKey: creds.secretAccessKey.trim(),
-      },
-    });
-
+    const clientBundle = await getOrCreateS3Client();
     const payload = buildUnifiedWorkspacePayload();
 
-    // 1. Save locally to disk cache (IndexedDB + CacheStorage)
+    // 1. Immediately save synchronously to local disk cache (IndexedDB + CacheStorage + localStorage)
     await saveLayoutConfigToDisk(payload);
+    try {
+      localStorage.setItem('taka_mapping_config_backup', JSON.stringify(payload));
+    } catch {}
+
+    if (!clientBundle) {
+      return { success: false, message: 'Chưa cấu hình R2 Cloudflare (đã lưu bộ nhớ đệm cục bộ).' };
+    }
+    const { s3, creds } = clientBundle;
 
     // 2. Upload to layout/layout_config.json
     const layoutBlob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
@@ -190,10 +228,12 @@ export async function syncAllDataToCloudR2(options?: {
 }
 
 /**
- * Loads full cloud data from Cloudflare R2 (checks `layout/layout_config.json` first, falls back to `mapping_config.json`).
+ * Loads full cloud data from Cloudflare R2 on app open or tab switch
+ * (checks `layout/layout_config.json` first, falls back to `mapping_config.json`, then local disk cache).
  */
 export async function loadUnifiedDataFromCloudR2(options?: {
   silent?: boolean;
+  initialBoot?: boolean;
 }): Promise<{ success: boolean; source?: string; message: string }> {
   if (isPullingFromCloud) {
     return { success: true, message: 'Đang tải dữ liệu từ Cloud...' };
@@ -201,37 +241,29 @@ export async function loadUnifiedDataFromCloudR2(options?: {
 
   isPullingFromCloud = true;
   try {
-    const creds = await getStoredR2CredentialsAsync();
+    const clientBundle = await getOrCreateS3Client();
     let data: any = null;
     let source = '';
 
-    if (creds) {
-      const { S3Client } = await getS3Sdk();
-      const s3 = new S3Client({
-        region: 'auto',
-        endpoint: `https://${creds.accountId.trim()}.r2.cloudflarestorage.com`,
-        credentials: {
-          accessKeyId: creds.accessKeyId.trim(),
-          secretAccessKey: creds.secretAccessKey.trim(),
-        },
-      });
+    if (clientBundle) {
+      const { s3, creds } = clientBundle;
 
       // Try layout/layout_config.json first
       const layoutRes = await downloadR2JsonFile<any>(LAYOUT_R2_CONFIG_KEY, creds, s3);
       if (layoutRes.success && layoutRes.data && isValidLayoutConfig(layoutRes.data)) {
         data = layoutRes.data;
-        source = 'R2 layout/ folder';
+        source = 'Cloud R2 (layout/layout_config.json)';
       } else {
         // Fallback to root mapping_config.json
         const rootRes = await downloadR2JsonFile<any>(ROOT_MAPPING_CONFIG_KEY, creds, s3);
         if (rootRes.success && rootRes.data && isValidLayoutConfig(rootRes.data)) {
           data = rootRes.data;
-          source = 'R2 root folder';
+          source = 'Cloud R2 (mapping_config.json)';
         }
       }
     }
 
-    // Fallback to local disk cache if R2 unavailable
+    // Fallback to local disk cache if R2 unavailable or offline
     if (!data) {
       const diskData = await getCachedLayoutConfigFromDisk();
       if (diskData && isValidLayoutConfig(diskData)) {
@@ -241,6 +273,13 @@ export async function loadUnifiedDataFromCloudR2(options?: {
     }
 
     if (!data) {
+      if (options?.initialBoot && !clientBundle) {
+        useAppStore.getState().setToast({
+          title: 'Chế độ Local Cache',
+          message: 'Đang sử dụng dữ liệu bộ nhớ cục bộ. Bạn có thể cấu hình Cloudflare R2 để kích hoạt đồng bộ đám mây.',
+          type: 'info',
+        });
+      }
       return { success: false, message: 'Chưa có cấu hình trên Cloudflare R2.' };
     }
 
@@ -253,10 +292,26 @@ export async function loadUnifiedDataFromCloudR2(options?: {
       applyComparisonRowsToStores(data.comparisonRows);
     }
 
-    if (!options?.silent) {
+    // Notify LayoutViewer and other listeners to update
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('taka_cloud_sync_updated', {
+          detail: {
+            timestamp: data.timestamp || Date.now(),
+            store: data.store,
+            location: data.location,
+            storeLocationData: data.storeLocationData,
+          },
+        })
+      );
+    }
+
+    if (!options?.silent || options?.initialBoot) {
       useAppStore.getState().setToast({
-        title: 'Loaded from Cloud R2',
-        message: `Đã nạp dữ liệu từ ${source}.`,
+        title: source.includes('Cloud R2') ? 'Cloudflare R2' : 'Local Cache',
+        message: source.includes('Cloud R2')
+          ? `Đã tự động tải cấu hình mới nhất từ ${source}.`
+          : `Đã nạp dữ liệu từ ${source}.`,
         type: 'success',
       });
     }
@@ -275,30 +330,66 @@ export async function loadUnifiedDataFromCloudR2(options?: {
 }
 
 /**
- * Initializes auto-save on browser unload / tab close / visibility hidden.
+ * Initializes auto-save on browser unload / tab close / visibility hidden / mobile exit.
+ * Also subscribes to active data changes to keep Cloud R2 continuously updated.
  */
-let isLifecycleBound = false;
 export function initAutoSaveOnAppClose(): void {
-  if (typeof window === 'undefined' || isLifecycleBound) return;
-  isLifecycleBound = true;
+  if (typeof window === 'undefined' || _isLifecycleBound) return;
+  _isLifecycleBound = true;
 
+  // Pre-warm S3 client in background immediately on boot
+  getOrCreateS3Client().catch(() => {});
+
+  // 1. Subscribe to active data changes to continuously schedule background auto-save
+  try {
+    useDataStore.subscribe((state, prevState) => {
+      if (
+        state.storeLocationData !== prevState.storeLocationData ||
+        state.mapUnits !== prevState.mapUnits ||
+        state.mapVersions !== prevState.mapVersions ||
+        state.unitInfo !== prevState.unitInfo ||
+        state.sales !== prevState.sales ||
+        state.activeMapVersionId !== prevState.activeMapVersionId
+      ) {
+        markWorkspaceDirty(3000);
+      }
+    });
+  } catch (subErr) {
+    console.warn('[AutoSave] DataStore subscription warning:', subErr);
+  }
+
+  // 2. Trigger save on app close / exit
   const triggerSaveOnExit = () => {
     try {
-      // 1. Immediately backup to local cache
+      if (_autoSaveDebounceTimer) {
+        clearTimeout(_autoSaveDebounceTimer);
+        _autoSaveDebounceTimer = null;
+      }
+      _hasUnsavedEdits = false;
+
+      // 1. Synchronously backup to local cache
       const payload = buildUnifiedWorkspacePayload();
-      localStorage.setItem('taka_mapping_config_backup', JSON.stringify(payload));
+      try {
+        localStorage.setItem('taka_mapping_config_backup', JSON.stringify(payload));
+      } catch {}
       saveLayoutConfigToDisk(payload).catch(() => {});
 
-      // 2. Trigger asynchronous background save to Cloud R2
+      // 2. Immediately trigger background save to Cloud R2
       syncAllDataToCloudR2({ silent: true }).catch(() => {});
     } catch (_e) {}
   };
 
   window.addEventListener('beforeunload', triggerSaveOnExit);
   window.addEventListener('pagehide', triggerSaveOnExit);
+  window.addEventListener('freeze', triggerSaveOnExit);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') {
       triggerSaveOnExit();
     }
+  });
+
+  // Listen for custom comparison row updates
+  window.addEventListener('taka_comparison_data_saved', () => {
+    markWorkspaceDirty(1500);
   });
 }
