@@ -11,9 +11,6 @@ import {
   getCachedLayoutConfigTimestamp,
   isValidLayoutConfig,
 } from '../../lib/layoutConfigCache';
-import { db, APP_ID } from '../../lib/firebase';
-import { doc, getDoc } from 'firebase/firestore';
-import { setDoc } from '../../lib/firestoreWrites';
 import { getLocalConfigVersions } from '../../lib/configCacheService';
 
 export interface LiveLayoutR2ConfigState {
@@ -271,32 +268,6 @@ export function useLiveLayoutR2Config(): LiveLayoutR2ConfigState {
       }
 
       try {
-        const alreadyVerifiedEmptyByConfigSync = localStorage.getItem('taka_cache_r2_config_v1') === '';
-
-        if ((!accountId || !accessKeyId || !secretAccessKey || !bucketName) && !alreadyVerifiedEmptyByConfigSync) {
-          try {
-            const r2Doc = await getDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_config', 'r2_credentials'));
-            if (r2Doc.exists()) {
-              const r2Data = r2Doc.data() as any;
-              if (r2Data?.accountId && r2Data?.accessKeyId) {
-                accountId = r2Data.accountId;
-                accessKeyId = r2Data.accessKeyId;
-                secretAccessKey = r2Data.secretAccessKey;
-                bucketName = r2Data.bucketName;
-                localStorage.setItem('taka_cache_r2_config_v1', JSON.stringify(r2Data));
-                localStorage.setItem('taka_r2_config_cache_v1', JSON.stringify(r2Data));
-                useAppStore.getState().setR2Config(r2Data);
-              } else {
-                localStorage.setItem('taka_cache_r2_config_v1', '');
-              }
-            } else {
-              localStorage.setItem('taka_cache_r2_config_v1', '');
-            }
-          } catch (fetchErr) {
-            console.warn('Could not fetch r2_credentials from Firestore:', fetchErr);
-          }
-        }
-
         if (!accountId || !accessKeyId || !secretAccessKey || !bucketName) {
           if (activeCached) return;
           initFormFromStorage();
@@ -318,33 +289,6 @@ export function useLiveLayoutR2Config(): LiveLayoutR2ConfigState {
           s3
         );
         let data: any = downloadRes.success && downloadRes.data ? downloadRes.data : null;
-
-        const r2Timestamp = data?.timestamp || 0;
-        if (!data || (knownPicMapVer > 0 && knownPicMapVer > r2Timestamp)) {
-          try {
-            const snap = await getDoc(
-              doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_config', 'picture_mapping_config')
-            );
-            if (snap.exists()) {
-              const fsData = snap.data() as any;
-              if (fsData?.storeLocationData) {
-                const fsTimestamp = fsData.timestamp || (fsData.updatedAt ? new Date(fsData.updatedAt).getTime() : 0);
-                if (fsTimestamp > r2Timestamp || !data) {
-                  data = {
-                    ...(data || {}),
-                    ...fsData,
-                    storeLocationData: {
-                      ...(data?.storeLocationData || {}),
-                      ...fsData.storeLocationData,
-                    },
-                  };
-                }
-              }
-            }
-          } catch (fsErr) {
-            console.warn('Could not check Firestore backup:', fsErr);
-          }
-        }
 
         if (!data || !isValidLayoutConfig(data)) {
           if (activeCached) return;
@@ -397,20 +341,6 @@ export function useLiveLayoutR2Config(): LiveLayoutR2ConfigState {
     };
     localStorage.setItem('taka_r2_config_cache_v1', JSON.stringify(configData));
     setR2Config(configData);
-
-    try {
-      await setDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_config', 'r2_credentials'), configData);
-      await setDoc(
-        doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_config', 'versions'),
-        {
-          r2Version: Date.now(),
-          updatedAt: new Date().toISOString(),
-        },
-        { merge: true }
-      );
-    } catch (e) {
-      console.error('Failed to save R2 config to server:', e);
-    }
 
     setShowConfigModal(false);
     loadConfig(true);

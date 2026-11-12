@@ -4,7 +4,7 @@ import App from './App.tsx';
 import './index.css';
 import { LanguageProvider } from './lib/LanguageContext';
 import { checkAndCleanStorageQuota, cleanupBloatedStorage } from './lib/storage';
-import { bootstrapLocalStore } from './lib/backgroundSyncWorker';
+import { bootstrapLocalStore } from './lib/standaloneLocalBootstrap';
 
 // Proactively verify & clean localStorage quota and kick off Local-First IndexedDB hydration before React mounts
 try {
@@ -162,19 +162,6 @@ console.warn = (...args) => {
   originalConsoleWarn(...args);
 };
 
-// Register Service Worker for PWA notifications and Static Asset Caching
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/firebase-messaging-sw.js')
-      .then(registration => {
-        console.log('SW registered: ', registration);
-        registration.update().catch(() => {});
-      })
-      .catch(registrationError => {
-        console.log('SW registration failed: ', registrationError);
-      });
-  });
-}
 
 // Request Persistent Storage for PWA (especially useful for iOS and Firestore IndexedDB)
 if (navigator.storage && navigator.storage.persist) {

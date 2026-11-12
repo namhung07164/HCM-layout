@@ -7,10 +7,18 @@ import {
   bulkPersistCosts,
   bulkPersistDelegations,
 } from './localDb';
-import { resolveLogicalCollection } from './autoDeltaQueue';
 import { useAppStore } from '../store/useAppStore';
 import { rollupParentTaskDatesAndStatus } from './taskRollupService';
-import type { Project, Task, Cost, DelegationGroup } from '../types';
+import type { Project, Task, Cost, DelegationGroup, TakaDeltaItem } from '../types';
+
+export function resolveLogicalCollection(docPath: string): TakaDeltaItem['collectionName'] | null {
+  if (!docPath) return null;
+  if (docPath.includes('taka_projects')) return 'taka_projects';
+  if (docPath.includes('taka_tasks')) return 'taka_tasks';
+  if (docPath.includes('taka_costs')) return 'taka_costs';
+  if (docPath.includes('taka_delegation')) return 'taka_delegations';
+  return null;
+}
 
 /**
  * Checks if a value or nested object contains a Firestore FieldValue sentinel

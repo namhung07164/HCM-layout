@@ -1,5 +1,10 @@
 import { safeGetItemLocal, safeSetItemLocal, safeRemoveItemLocal, safeGetItemSession, safeSetItemSession, safeRemoveItemSession } from "../lib/storage";
-import { User } from "firebase/auth";
+export interface User {
+  uid: string;
+  email?: string | null;
+  displayName?: string | null;
+  photoURL?: string | null;
+}
 import { Project, Task, Cost, AppUser, DelegationGroup, PermissionMatrix, TabId } from "../types";
 import { UndoAction } from "../lib/undoManager";
 

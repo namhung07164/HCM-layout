@@ -1,8 +1,3 @@
-import { setDoc } from "../lib/firebase";
-import { safeGetItemLocal } from "./storage";
-import { db, APP_ID } from "./firebase";
-import { collection, doc } from 'firebase/firestore';
-
 export interface UndoAction {
   description: string;
   revert: () => Promise<void>;
@@ -25,27 +20,7 @@ const IS_LOW_MEM =
     (typeof navigator !== "undefined" && typeof (navigator as any).deviceMemory === "number" && (navigator as any).deviceMemory <= 4));
 const MAX_UNDO_STACK = IS_LOW_MEM ? 20 : 50;
 
-export const logUserAction = async (description: string) => {
-  try {
-    const authData = safeGetItemLocal("taka_auth_v1");
-    if (!authData) return;
-    const user = JSON.parse(authData);
-    if (!user || !user.id || user.role === "guest") return;
-
-    const logRef = doc(
-      collection(db, "artifacts", APP_ID, "public", "data", "taka_action_logs"),
-    );
-    setDoc(logRef, {
-      userId: user.id,
-      username: user.username,
-      role: user.role,
-      description,
-      timestamp: new Date().toISOString(),
-    });
-  } catch (e) {
-    console.error("Failed to log action", e);
-  }
-};
+export const logUserAction = async (_description: string) => {};
 
 let isExecutingUndoRedo = false;
 

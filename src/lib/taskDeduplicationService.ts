@@ -1,7 +1,4 @@
 import { Task, Project } from '../types';
-import { doc, collection, getDocs } from 'firebase/firestore';
-import { writeBatch } from './firestoreWrites';
-import { db, APP_ID } from './firebase';
 
 /**
  * Normalizes a store code (e.g. "hn" -> "HN", "hcm" -> "HCM").
@@ -442,41 +439,11 @@ export function deduplicateTasks(tasks: Task[], projects: Project[] = EMPTY_PROJ
 }
 
 /**
- * Scans Firestore tasks collection and removes duplicate tasks in projects.
+ * Stub for scanning and removing duplicate tasks (Firestore eliminated in local-first mode).
  */
 export async function scanAndRemoveDuplicateTasksOnFirestore(projects: Project[] = []): Promise<{
   removedCount: number;
   mergedCount: number;
 }> {
-  try {
-    const tasksCol = collection(db, 'artifacts', APP_ID, 'public', 'data', 'taka_tasks');
-    const snap = await getDocs(tasksCol);
-    if (snap.empty) return { removedCount: 0, mergedCount: 0 };
-
-    const allTasks: Task[] = [];
-    snap.docs.forEach(d => {
-      allTasks.push({ id: d.id, ...d.data() } as Task);
-    });
-
-    const { duplicateCount, removedTaskIds } = deduplicateTasksInMemory(allTasks, projects);
-    if (duplicateCount === 0 || removedTaskIds.length === 0) {
-      return { removedCount: 0, mergedCount: 0 };
-    }
-
-    const BATCH_LIMIT = 400;
-    for (let i = 0; i < removedTaskIds.length; i += BATCH_LIMIT) {
-      const chunk = removedTaskIds.slice(i, i + BATCH_LIMIT);
-      const batch = writeBatch(db);
-      chunk.forEach(id => {
-        const ref = doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_tasks', id);
-        batch.delete(ref);
-      });
-      await batch.commit();
-    }
-
-    return { removedCount: removedTaskIds.length, mergedCount: duplicateCount };
-  } catch (e) {
-    console.error('Failed to clean duplicate tasks on Firestore:', e);
-    return { removedCount: 0, mergedCount: 0 };
-  }
+  return { removedCount: 0, mergedCount: 0 };
 }

@@ -1,8 +1,7 @@
-import { doc } from 'firebase/firestore';
-import { setDoc } from './firestoreWrites';
-import { setDoc as rawFirestoreSetDoc } from 'firebase/firestore';
-import { db, APP_ID } from './firebase';
+import { patchLocalRecord } from './localDb';
+import { useAppStore } from '../store/useAppStore';
 import { useDataStore } from '../components/PictureMapping/DataContext';
+import { saveLayoutConfigToDisk } from './layoutConfigCache';
 
 let _mappingCloudPersistTimer: ReturnType<typeof setTimeout> | null = null;
 const pendingProjectPatches = new Map<string, Record<string, any>>();
@@ -16,7 +15,8 @@ export function queueProjectPatch(docId: string, payload: Record<string, any>) {
     const entries = Array.from(pendingProjectPatches.entries());
     pendingProjectPatches.clear();
     entries.forEach(([id, patch]) => {
-      setDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_projects', id), patch, { merge: true }).catch(console.error);
+      patchLocalRecord('taka_projects', id, patch).catch(() => {});
+      useAppStore.getState().optimisticUpdateProjects([{ id, ...patch } as any]);
     });
   }, 400);
 }
@@ -33,8 +33,8 @@ export function sanitizeForFirestore(val: any): any {
 }
 
 /**
- * Debounced background persistence of Picture Mapping storeLocationData to Firestore
- * so unit size changes from either Project Modal or Picture Mapping EditTab are durable.
+ * Debounced persistence of Picture Mapping storeLocationData to local disk cache.
+ * Firestore network calls eliminated in standalone local-first mode.
  */
 export function schedulePersistMappingConfigToFirestore() {
   if (typeof window === 'undefined') return;
@@ -49,17 +49,9 @@ export function schedulePersistMappingConfigToFirestore() {
       if (!consolidated.storeLocationData || Object.keys(consolidated.storeLocationData).length === 0) {
         return;
       }
-      const sanitized = sanitizeForFirestore({
-        storeLocationData: consolidated.storeLocationData,
-        updatedAt: new Date().toISOString(),
-      });
-      await rawFirestoreSetDoc(
-        doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_config', 'picture_mapping_config'),
-        sanitized,
-        { merge: true }
-      );
+      saveLayoutConfigToDisk(consolidated).catch(() => {});
     } catch (err) {
-      console.warn('[unitProjectSizeSync] Failed to persist mapping config to Firestore:', err);
+      console.warn('[unitProjectSizeSync] Local disk save warning:', err);
     }
   }, 600);
 }

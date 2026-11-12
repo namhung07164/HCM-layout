@@ -1,8 +1,7 @@
 import { useDataStore } from '../components/PictureMapping/DataContext';
 import { MapVersion, UnitShape } from '../components/PictureMapping/components/DataMapping/types';
 import { extractAllProjectCodes, projectMatchesUnitCode } from './utilsParts/projectCodeAndScopeUtils';
-import { doc, getDoc } from 'firebase/firestore';
-import { db, APP_ID } from './firebase';
+
 
 let _hasAttemptedLocalRestore = false;
 let _hasAttemptedFirestoreRestore = false;
@@ -49,37 +48,6 @@ export function ensureMappingConfigHydrated(): void {
     } catch {
       // Ignore parse errors
     }
-  }
-
-  if (!_hasAttemptedFirestoreRestore) {
-    _hasAttemptedFirestoreRestore = true;
-    setTimeout(async () => {
-      try {
-        const current = useDataStore.getState();
-        if (current.storeLocationData && Object.keys(current.storeLocationData).length > 0) {
-          return;
-        }
-        const snap = await getDoc(
-          doc(db, 'artifacts', APP_ID, 'public', 'data', 'taka_config', 'picture_mapping_config')
-        );
-        if (snap.exists()) {
-          const fsData = snap.data() as any;
-          if (fsData?.storeLocationData && Object.keys(fsData.storeLocationData).length > 0) {
-            _cachedLocalBackup = fsData.storeLocationData;
-            useDataStore.getState().loadFullCloudData({
-              storeLocationData: fsData.storeLocationData,
-              store: fsData.store || current.store,
-              location: fsData.location || current.location,
-              activeMapVersionId: fsData.activeMapVersionId || current.activeMapVersionId,
-              reviewSelectedLabels: fsData.reviewSelectedLabels || current.reviewSelectedLabels,
-              reviewLabelColors: fsData.reviewLabelColors || current.reviewLabelColors,
-            });
-          }
-        }
-      } catch {
-        // Ignore background fallback error
-      }
-    }, 0);
   }
 }
 

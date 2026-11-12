@@ -35,6 +35,12 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, '.'),
+      'firebase/firestore': path.resolve(__dirname, 'src/lib/firebaseStubs.ts'),
+      'firebase/auth': path.resolve(__dirname, 'src/lib/firebaseStubs.ts'),
+      'firebase/storage': path.resolve(__dirname, 'src/lib/firebaseStubs.ts'),
+      'firebase/messaging': path.resolve(__dirname, 'src/lib/firebaseStubs.ts'),
+      'firebase/app': path.resolve(__dirname, 'src/lib/firebaseStubs.ts'),
+      'firebase': path.resolve(__dirname, 'src/lib/firebaseStubs.ts'),
     },
     dedupe: ['react', 'react-dom'],
   },
@@ -54,7 +60,6 @@ export default defineConfig({
             if (id.includes('jspdf')) return 'vendor-jspdf';
             if (id.includes('konva') || id.includes('react-konva') || id.includes('use-image')) return 'vendor-konva';
             if (id.includes('react-big-calendar')) return 'vendor-calendar';
-            if (id.includes('firebase')) return 'vendor-firebase';
             if (id.includes('recharts')) return 'vendor-recharts';
             if (id.includes('lucide-react')) return 'vendor-lucide';
             if (id.includes('@aws-sdk')) return 'vendor-aws';

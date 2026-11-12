@@ -1,14 +1,27 @@
-import {
-  setDoc as rawSetDoc,
-  updateDoc as rawUpdateDoc,
-  deleteDoc as rawDeleteDoc,
-  writeBatch as rawWriteBatch,
-  serverTimestamp,
-  type WriteBatch,
-} from 'firebase/firestore';
-import { queueAutoDelta, type SafeAutoDeltaPayload } from './autoDeltaQueue';
+export interface WriteBatch {
+  set(documentRef: any, data: any, options?: any): WriteBatch;
+  update(documentRef: any, data: any): WriteBatch;
+  delete(documentRef: any): WriteBatch;
+  commit(): Promise<void>;
+}
+
+export function serverTimestamp() {
+  return new Date().toISOString();
+}
+
+const rawSetDoc = async (_ref: any, _data: any, ..._rest: any[]) => {};
+const rawUpdateDoc = async (_ref: any, _data: any, ..._rest: any[]) => {};
+const rawDeleteDoc = async (_ref: any) => {};
+const rawWriteBatch = (_db?: any) => ({
+  set: () => {},
+  update: () => {},
+  delete: () => {},
+  commit: async () => {},
+});
 import { removeUndefinedDeep } from './firestoreSanitizer';
-import { recordAuditLog } from './auditLogService';
+type SafeAutoDeltaPayload = any;
+const queueAutoDelta = (_path?: string, _id?: string, _op?: string, _payload?: any) => {};
+const recordAuditLog = async (_entry?: any) => {};
 import {
   mirrorLocalWrite,
   buildCleanLocalPayload,
