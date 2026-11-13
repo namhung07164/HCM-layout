@@ -1,9 +1,17 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
-import { X, Search, Filter, Plus, Save, Download, FileSpreadsheet, TrendingUp, Tag, Building2, Layers } from 'lucide-react';
+import { X, Search, Plus, Save, Download, FileSpreadsheet, TrendingUp, Tag, Building2, Layers, Wand2, AlertTriangle } from 'lucide-react';
 import { ComparisonRowInput, getSavedComparisonRows, updateSavedComparisonRows, downloadComparisonTemplate } from '../../lib/standaloneComparisonService';
 import { useDataStore } from '../PictureMapping/DataContext';
 import { useAppStore } from '../../store/useAppStore';
 import { LayoutDataIndexTable } from './LayoutDataIndexTable';
+import {
+  computeCadUnitCodeSet,
+  computeActiveFloorCadUnits,
+  extractAvailableFloors,
+  extractAvailableStatuses,
+  filterComparisonRows,
+  createComparisonRow,
+} from './layoutDataIndexHelpers';
 
 interface LayoutDataIndexModalProps {
   isOpen: boolean;
@@ -33,32 +41,22 @@ export const LayoutDataIndexModal: React.FC<LayoutDataIndexModalProps> = React.m
   const setToast = useAppStore((s) => s.setToast);
   const projects = useAppStore((s) => s.projects);
   const storeLocationData = useDataStore((s) => s.storeLocationData);
+  const activeMapUnits = useDataStore((s) => s.mapUnits);
 
-  // Load current saved rows when modal opens
   useEffect(() => {
     if (isOpen) {
-      const saved = getSavedComparisonRows();
-      setRows(saved);
+      setRows(getSavedComparisonRows());
       setIsDirty(false);
     }
   }, [isOpen]);
 
-  // Extract all CAD Unit Codes available in the CAD drawings to calculate match status
-  const cadUnitCodeSet = useMemo(() => {
-    const set = new Set<string>();
-    if (!storeLocationData) return set;
-    Object.values(storeLocationData).forEach((part) => {
-      if (Array.isArray(part?.mapUnits)) {
-        part.mapUnits.forEach((u: any) => {
-          const code = (u.name || u.unitCode || u.unit || '').trim().toUpperCase();
-          if (code) set.add(code);
-        });
-      }
-    });
-    return set;
-  }, [storeLocationData]);
+  const cadUnitCodeSet = useMemo(() => computeCadUnitCodeSet(storeLocationData), [storeLocationData]);
 
-  // Existing Project Codes in project store
+  const activeFloorCadUnits = useMemo(
+    () => computeActiveFloorCadUnits(storeLocationData, activeStore, activeLocation, activeMapUnits),
+    [storeLocationData, activeStore, activeLocation, activeMapUnits]
+  );
+
   const existingProjectCodeSet = useMemo(() => {
     const set = new Set<string>();
     (projects || []).forEach((p) => {
@@ -68,127 +66,107 @@ export const LayoutDataIndexModal: React.FC<LayoutDataIndexModalProps> = React.m
     return set;
   }, [projects]);
 
-  // Available floors from rows for filter dropdown
-  const availableFloors = useMemo(() => {
-    const s = new Set<string>();
-    rows.forEach((r) => {
-      const f = String(r['Floor'] || r['floor'] || '').trim().toUpperCase();
-      if (f) s.add(f);
-    });
-    return Array.from(s).sort();
+  const availableFloors = useMemo(() => extractAvailableFloors(rows), [rows]);
+  const availableStatuses = useMemo(() => extractAvailableStatuses(rows), [rows]);
+  const filteredRows = useMemo(
+    () => filterComparisonRows(rows, storeFilter, floorFilter, statusFilter, searchTerm),
+    [rows, storeFilter, floorFilter, statusFilter, searchTerm]
+  );
+
+  const emptyUnitCodeCount = useMemo(() => {
+    return rows.filter((r) => !String(r['Unit Code'] || '').trim()).length;
   }, [rows]);
 
-  // Available project statuses
-  const availableStatuses = useMemo(() => {
-    const s = new Set<string>();
-    rows.forEach((r) => {
-      const st = String(r['Project Status'] || r['projectStatus'] || r['MD Status'] || '').trim();
-      if (st) s.add(st);
-    });
-    return Array.from(s).sort();
-  }, [rows]);
-
-  // Filtered rows
-  const filteredRows = useMemo(() => {
-    return rows.map((row, originalIndex) => ({ row, originalIndex })).filter(({ row }) => {
-      const rStore = String(row['Store'] || 'HCM').toUpperCase().trim();
-      const rFloor = String(row['Floor'] || 'L1').toUpperCase().trim();
-      const rUnit = String(row['Unit Code'] || '').trim();
-      const rBrand = String(row['Brand / Shop Name'] || '').trim();
-      const rBrandCode = String(row['Brand Code'] || '').trim();
-      const rVendorCode = String(row['Vendor Code'] || '').trim();
-      const rClassCode = String(row['Class Code'] || '').trim();
-      const rProjCode = String(row['Project Code'] || '').trim();
-      const rProjName = String(row['Project Name'] || '').trim();
-      const rProjStatus = String(row['Project Status'] || '').trim();
-      const rShopType = String(row['Shop Type'] || '').trim();
-
-      if (storeFilter !== 'all' && rStore !== storeFilter) return false;
-      if (floorFilter !== 'all' && rFloor !== floorFilter) return false;
-      if (statusFilter !== 'all' && rProjStatus !== statusFilter) return false;
-
-      if (searchTerm.trim()) {
-        const q = searchTerm.toLowerCase();
-        const matchesSearch =
-          rUnit.toLowerCase().includes(q) ||
-          rBrand.toLowerCase().includes(q) ||
-          rBrandCode.toLowerCase().includes(q) ||
-          rVendorCode.toLowerCase().includes(q) ||
-          rClassCode.toLowerCase().includes(q) ||
-          rProjCode.toLowerCase().includes(q) ||
-          rProjName.toLowerCase().includes(q) ||
-          rShopType.toLowerCase().includes(q) ||
-          rFloor.toLowerCase().includes(q);
-        if (!matchesSearch) return false;
-      }
-
-      return true;
-    });
-  }, [rows, storeFilter, floorFilter, statusFilter, searchTerm]);
-
-  // Row update handler
   const handleCellChange = useCallback((originalIndex: number, field: keyof ComparisonRowInput, val: any) => {
     setRows((prev) => {
       const next = [...prev];
-      next[originalIndex] = {
-        ...next[originalIndex],
-        [field]: val,
-      };
+      next[originalIndex] = { ...next[originalIndex], [field]: val };
       return next;
     });
     setIsDirty(true);
   }, []);
 
-  // Delete row
   const handleDeleteRow = useCallback((originalIndex: number) => {
     if (!confirm('Bạn có chắc muốn xóa dòng dữ liệu này?')) return;
     setRows((prev) => prev.filter((_, idx) => idx !== originalIndex));
     setIsDirty(true);
   }, []);
 
-  // Add new row with full fields
   const handleAddRow = useCallback(() => {
-    const timestamp = Date.now().toString().slice(-4);
-    const newRow: ComparisonRowInput = {
-      Store: (activeStore === 'HN' ? 'HN' : 'HCM'),
-      Floor: activeLocation || 'L1',
-      'Unit Code': `U-${timestamp}`,
-      'Brand / Shop Name': 'New Brand',
-      'Brand Code': `BR-${timestamp}`,
-      'Vendor Code': `VN-${timestamp}`,
-      'Class Code': 'FNB',
-      'Shop Type': 'General',
-      'Contract Size (m2)': 50,
-      'MD Status': 'Operating',
-      'MD Notes': 'Operational unit',
-      'Task': 'Opening',
-      'Project Code': `PROJ-${timestamp}`,
-      'Project Name': `Fitout U-${timestamp}`,
-      'Project Status': 'On process',
-      'Act Status': 'On Track',
-      'Start Date': `${activeYear || '2026'}-01-01`,
-      'Finish Date': `${activeYear || '2026'}-12-31`,
-      'Sales Amount': 150000000,
-      'Sales by CP': 120000000,
-      'Sales by HCMcate': 140000000,
-      'Profit Amount': 30000000,
-      'Profit by CP': 25000000,
-      'Profit by HCMcate': 28000000,
-      'Margin (%)': 20,
-      'Margin by CP (%)': 20.8,
-      'HCM Sales Effi': 3000000,
-      'HCM Margin (%)': 20,
-      'Budget': 50000000,
-      'Actual Cost': 45000000,
-      'Party / Contractor': 'TAKASHIMAYA VN',
-      'Notes / Detail': 'Mới khởi tạo từ Index',
-      Year: Number(activeYear) || 2026,
-    };
+    const newRow = createComparisonRow(activeStore, activeLocation, activeYear);
     setRows((prev) => [newRow, ...prev]);
     setIsDirty(true);
   }, [activeStore, activeLocation, activeYear]);
 
-  // Save changes
+  // 1-Click Auto-fill / populate CAD Unit Codes from the active floor layout
+  const handleAutoFillCadUnits = useCallback(() => {
+    if (activeFloorCadUnits.length === 0) {
+      setToast({
+        title: 'Chưa có dữ liệu CAD',
+        message: `Không tìm thấy gian hàng CAD nào tại Store ${activeStore}, Tầng ${activeLocation}.`,
+        type: 'warning',
+      });
+      return;
+    }
+
+    setRows((prev) => {
+      const next = [...prev];
+      const existingCodesOnFloor = new Set<string>();
+
+      // Track existing codes and fill empty Unit Code rows first
+      const blankRowIndices: number[] = [];
+      next.forEach((r, idx) => {
+        const rStore = String(r['Store'] || 'HCM').toUpperCase().trim();
+        const rFloor = String(r['Floor'] || 'L1').toUpperCase().trim();
+        const rUnit = String(r['Unit Code'] || '').trim().toUpperCase();
+
+        if (rStore === (activeStore || 'HCM').toUpperCase() && rFloor === (activeLocation || 'L1').toUpperCase()) {
+          if (rUnit) {
+            existingCodesOnFloor.add(rUnit);
+          } else {
+            blankRowIndices.push(idx);
+          }
+        }
+      });
+
+      let filledCount = 0;
+      let addedCount = 0;
+
+      // 1. Fill into rows that currently have blank Unit Codes
+      const remainingCadUnits = activeFloorCadUnits.filter((c) => !existingCodesOnFloor.has(c.code));
+      for (let i = 0; i < blankRowIndices.length && i < remainingCadUnits.length; i++) {
+        const rowIdx = blankRowIndices[i];
+        const cad = remainingCadUnits[i];
+        next[rowIdx] = {
+          ...next[rowIdx],
+          'Unit Code': cad.code,
+          'Contract Size (m2)': next[rowIdx]['Contract Size (m2)'] || cad.size || 50,
+          'Project Code': next[rowIdx]['Project Code'] || `PROJ-${cad.code.replace(/[^a-zA-Z0-9]/g, '_')}`,
+        };
+        existingCodesOnFloor.add(cad.code);
+        filledCount++;
+      }
+
+      // 2. For remaining CAD units without any row, append new rows
+      const stillUnmatchedCadUnits = activeFloorCadUnits.filter((c) => !existingCodesOnFloor.has(c.code));
+      stillUnmatchedCadUnits.forEach((cad) => {
+        const newRow = createComparisonRow(activeStore, activeLocation, activeYear, cad.code, cad.size);
+        next.push(newRow);
+        addedCount++;
+      });
+
+      setToast({
+        title: 'Đã nạp mã CAD thành công',
+        message: `Đã điền ${filledCount} dòng trống và thêm ${addedCount} gian hàng CAD từ tầng ${activeLocation} (${activeStore}).`,
+        type: 'success',
+      });
+
+      return next;
+    });
+
+    setIsDirty(true);
+  }, [activeFloorCadUnits, activeStore, activeLocation, activeYear, setToast]);
+
   const handleSaveAll = useCallback(() => {
     const res = updateSavedComparisonRows(rows);
     setIsDirty(false);
@@ -199,7 +177,6 @@ export const LayoutDataIndexModal: React.FC<LayoutDataIndexModalProps> = React.m
     });
   }, [rows, setToast]);
 
-  // Export current table to Excel
   const handleExportXLSX = useCallback(async () => {
     const XLSX = await import('xlsx');
     const ws = XLSX.utils.json_to_sheet(rows);
@@ -219,7 +196,7 @@ export const LayoutDataIndexModal: React.FC<LayoutDataIndexModalProps> = React.m
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl flex flex-col w-full max-w-[96vw] h-[92vh] max-h-[940px] overflow-hidden text-slate-800 dark:text-slate-100">
         
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-200 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-900/90">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-900/90">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-purple-600 flex items-center justify-center text-white shadow-md font-extrabold text-sm tracking-wider">
               INDEX
@@ -227,24 +204,40 @@ export const LayoutDataIndexModal: React.FC<LayoutDataIndexModalProps> = React.m
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-base sm:text-lg font-extrabold tracking-tight">
-                  Bảng Dữ Liệu Index & Match Dự Án (Layout Data Index)
+                  Bảng Dữ Liệu Index & Khớp Dự Án (Layout Data Index)
                 </h2>
                 <span className="text-xs px-2.5 py-0.5 rounded-full font-bold bg-indigo-100 text-indigo-700 dark:bg-indigo-950/80 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
-                  {rows.length} records
+                  {rows.length} dòng
                 </span>
                 {isDirty && (
                   <span className="text-xs px-2 py-0.5 rounded-full font-bold bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300 border border-amber-300 dark:border-amber-800 animate-pulse">
                     Chưa lưu
                   </span>
                 )}
+                {emptyUnitCodeCount > 0 && (
+                  <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-bold bg-red-100 text-red-700 dark:bg-red-950/80 dark:text-red-300 border border-red-300 dark:border-red-800">
+                    <AlertTriangle className="w-3 h-3 text-red-600" />
+                    <span>{emptyUnitCodeCount} dòng thiếu Unit Code</span>
+                  </span>
+                )}
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Toàn bộ dữ liệu import CSV/Excel • Đầy đủ 35 trường so sánh Dynamic (Thuộc tính, Tài chính, App Real-time) • Khớp CAD & Dự án tự động
+                Đầy đủ 35 trường so sánh Dynamic (Thuộc tính, Tài chính, App Real-time) • Khớp CAD & Dự án tự động
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleAutoFillCadUnits}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:hover:bg-emerald-900/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 transition-colors shadow-xs active:scale-95"
+              title={`Tự động nạp mã CAD của tầng ${activeLocation} (${activeStore}) vào bảng`}
+            >
+              <Wand2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+              <span>Nạp mã từ CAD mặt bằng ({activeFloorCadUnits.length})</span>
+            </button>
+
             <button
               type="button"
               onClick={downloadComparisonTemplate}
@@ -327,7 +320,7 @@ export const LayoutDataIndexModal: React.FC<LayoutDataIndexModalProps> = React.m
               }`}
             >
               <TrendingUp className="w-3.5 h-3.5 text-emerald-500" />
-              <span>2. Chỉ số tài chính (Metrics)</span>
+              <span>2. Tài chính (Metrics)</span>
             </button>
 
             <button
@@ -340,7 +333,7 @@ export const LayoutDataIndexModal: React.FC<LayoutDataIndexModalProps> = React.m
               }`}
             >
               <Building2 className="w-3.5 h-3.5 text-purple-500" />
-              <span>3. Dự án & Thi công (Project & Task)</span>
+              <span>3. Dự án & Thi công</span>
             </button>
           </div>
 
@@ -449,7 +442,7 @@ export const LayoutDataIndexModal: React.FC<LayoutDataIndexModalProps> = React.m
             </span>
             <span className="flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-amber-500 inline-block"></span>
-              Chưa có CAD: {filteredRows.filter((r) => !cadUnitCodeSet.has(String(r.row['Unit Code'] || '').trim().toUpperCase())).length}
+              Chưa khớp CAD: {filteredRows.filter((r) => !cadUnitCodeSet.has(String(r.row['Unit Code'] || '').trim().toUpperCase())).length}
             </span>
           </div>
 

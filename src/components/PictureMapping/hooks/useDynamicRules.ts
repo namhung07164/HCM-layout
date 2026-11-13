@@ -204,6 +204,7 @@ export function useDynamicRules(
         dataMap[key].brandCode = sumData.brandCode || '';
         dataMap[key].brandName = sumData.brandName || '';
         dataMap[key].classCode = sumData.classCode || '';
+        dataMap[key].shopType = (sumData as any).shopType || (sumData as any)?.['shop type'] || (sumData as any)?.['Shop Type'] || '';
         dataMap[key].floor = dataMap[key].floor || (sumData as any).floor || '';
       }
     });

@@ -34,8 +34,10 @@ export interface DynamicUnitSummaryItem {
   sizeM2?: number;
   sales: number;
   salesByCp: number;
+  salesByHcmcate?: number;
   profit: number;
   profitByCp: number;
+  profitByHcmcate?: number;
   margin: number;
   marginByCp: number;
   hcmSalesEffi: number;
@@ -59,66 +61,146 @@ export interface DynamicUnitSummaryItem {
 }
 
 /**
+ * Robustly resolves rule field value from either DynamicUnitSummaryItem or generic data dictionary.
+ * Supports case-insensitivity, spaces, Vietnamese aliases, and seamless fallback between
+ * App Real-time projects and Excel/Master records (e.g. Shop Type <-> App: Shop Type).
+ */
+export function resolveRuleValue(field: string, data: DynamicUnitSummaryItem | Record<string, any>): any {
+  if (!field || !data) return '';
+
+  const rawVal = (data as any)[field];
+  if (rawVal !== undefined && rawVal !== null && String(rawVal).trim() !== '') {
+    return rawVal;
+  }
+
+  const f = String(field).toLowerCase().trim().replace(/[\s_\-:]+/g, '');
+
+  // 1. Metric / Financial Fields
+  if (f === 'sales' || f === 'salesamount' || f === 'salesvnd' || f === 'doanhthu') {
+    return (data as any).sales ?? (data as any).salesAmount ?? 0;
+  }
+  if (f === 'salesbycp' || f === 'salescp') {
+    return (data as any).salesByCp ?? 0;
+  }
+  if (f === 'salesbyhcmcate' || f === 'saleshcmcate') {
+    return (data as any).salesByHcmcate ?? 0;
+  }
+  if (f === 'profit' || f === 'profitamount' || f === 'profitvnd' || f === 'loinhuan') {
+    return (data as any).profit ?? (data as any).profitAmount ?? 0;
+  }
+  if (f === 'profitbycp' || f === 'profitcp') {
+    return (data as any).profitByCp ?? 0;
+  }
+  if (f === 'profitbyhcmcate' || f === 'profithcmcate') {
+    return (data as any).profitByHcmcate ?? 0;
+  }
+  if (f === 'margin' || f === 'marginvnd' || f === 'marginpercent' || f === 'margin%') {
+    return (data as any).margin ?? 0;
+  }
+  if (f === 'marginbycp' || f === 'margincp' || f === 'margincp%') {
+    return (data as any).marginByCp ?? 0;
+  }
+  if (f === 'hcmsaleseffi' || f === 'saleseffi') {
+    return (data as any).hcmSalesEffi ?? 0;
+  }
+  if (f === 'hcmmargin' || f === 'hcmmargin%') {
+    return (data as any).hcmMargin ?? 0;
+  }
+
+  // 2. Floor / Location / Year
+  if (f === 'floor' || f === 'location' || f === 'tang' || f === 'appfloor' || f === 'appprojectfloor') {
+    return (data as any).location || (data as any).floor || '';
+  }
+  if (f === 'year' || f === 'appprojectyear' || f === 'appyear' || f === 'nam') {
+    return (data as any).appProjectYear || (data as any).year || '';
+  }
+
+  // 3. Shop Type (Bi-directional lookup between Real-time App & Master Data)
+  if (f === 'shoptype' || f === 'appprojectshoptype' || f === 'appshoptype' || f === 'category' || f === 'loaigianhang') {
+    return (data as any).appProjectShopType || (data as any).shopType || (data as any).category || '';
+  }
+
+  // 4. Project Code & Name
+  if (f === 'projectcode' || f === 'appprojectcode' || f === 'appcode' || f === 'projcode' || f === 'code' || f === 'maproject') {
+    return (data as any).appProjectCode || (data as any).projectCode || (data as any).unitName || (data as any).unit || '';
+  }
+  if (f === 'projectname' || f === 'appprojectname' || f === 'appname' || f === 'name' || f === 'tenduan') {
+    return (data as any).appProjectName || (data as any).projectName || '';
+  }
+
+  // 5. Unit / Brand / Class / Vendor
+  if (f === 'unit' || f === 'unitcode' || f === 'unitname' || f === 'magianhang') {
+    return (data as any).unitName || (data as any).unit || (data as any).unitId || '';
+  }
+  if (f === 'brandname' || f === 'brand' || f === 'shopname' || f === 'tenhang') {
+    return (data as any).brandName || '';
+  }
+  if (f === 'brandcode' || f === 'mabrand') {
+    return (data as any).brandCode || '';
+  }
+  if (f === 'vendorcode' || f === 'mavendor' || f === 'vendor') {
+    return (data as any).vendorCode || '';
+  }
+  if (f === 'classcode' || f === 'class' || f === 'nganhhang') {
+    return (data as any).classCode || '';
+  }
+
+  // 6. Statuses & Tasks
+  if (f === 'mdstatus' || f === 'appprojectmdstatus' || f === 'appmdstatus') {
+    return (data as any).appProjectMdStatus || (data as any).mdStatus || '';
+  }
+  if (f === 'actstatus' || f === 'appprojectactstatus' || f === 'appactstatus' || f === 'actualstatus') {
+    return (data as any).appProjectActStatus || (data as any).actStatus || '';
+  }
+  if (f === 'status' || f === 'projectstatus' || f === 'appprojectstatus' || f === 'appstatus') {
+    return (data as any).appProjectStatus || (data as any).excelProjectStatus || (data as any).status || '';
+  }
+  if (f === 'task' || f === 'tasks' || f === 'apptask' || f === 'tasksummarize' || f === 'tasksummaries' || f === 'taskname') {
+    return (data as any).task || '';
+  }
+  if (f === 'mdnotes' || f === 'notes') {
+    return (data as any).mdNotes || (data as any).notes || '';
+  }
+
+  // 7. Area & Project Details
+  if (f === 'size' || f === 'sizem2' || f === 'area' || f === 'dientich' || f === 'appprojectsizem2' || f === 'appsizem2') {
+    return (data as any).sizeM2 ?? (data as any).appProjectSizeM2 ?? (data as any).size ?? 0;
+  }
+  if (f === 'budget' || f === 'appbudget' || f === 'appprojectbudget') {
+    return (data as any).appProjectBudget ?? 0;
+  }
+  if (f === 'actual' || f === 'actualcost' || f === 'appactual' || f === 'appprojectactual') {
+    return (data as any).appProjectActual ?? 0;
+  }
+  if (f === 'party' || f === 'contractor' || f === 'appparty' || f === 'appprojectparty') {
+    return (data as any).appProjectParty || (data as any).party || '';
+  }
+  if (f === 'detail' || f === 'appdetail' || f === 'appprojectdetail') {
+    return (data as any).appProjectDetail || (data as any).detail || '';
+  }
+  if (f === 'description' || f === 'appdescription' || f === 'appprojectdescription') {
+    return (data as any).appProjectDescription || (data as any).description || '';
+  }
+
+  return (data as any)[field] ?? '';
+}
+
+/**
  * Pure function to evaluate if a rule matches a unit's aggregated data
  */
 export function matchSingleRule(rule: GroupRule, data: DynamicUnitSummaryItem): boolean {
-  let val: any = (data as any)[rule.field];
+  let val: any = resolveRuleValue(rule.field, data);
 
-  if (val === undefined || val === null || String(val).trim() === '') {
-    const f = String(rule.field || '').toLowerCase().trim();
-    if (f === 'floor' || f === 'location') {
-      val = data.location || '';
-    } else if (f === 'app: floor' || f === 'appfloor' || f === 'appprojectfloor') {
-      val = data.hasAppProject ? (data.location || '') : '';
-    } else if (f === 'year') {
-      val = data.year || '';
-    } else if (f === 'appprojectyear' || f === 'app: year' || f === 'appyear') {
-      val = data.hasAppProject ? (data.appProjectYear || '') : '';
-    } else if (f === 'status' || f === 'projectstatus' || f === 'appprojectstatus' || f === 'app: status' || f === 'appstatus') {
-      val = (data.hasAppProject && data.appProjectStatus) ? data.appProjectStatus : '';
-    } else if (f === 'unit' || f === 'code') {
-      val = data.unitName || '';
-    } else if (f === 'appprojectcode' || f === 'app: project code' || f === 'appcode') {
-      val = data.hasAppProject ? (data.appProjectCode || '') : '';
-    } else if (f === 'appprojectname' || f === 'appname' || f === 'app: project name' || f === 'app: name' || f === 'projectname' || f === 'project name') {
-      val = data.hasAppProject ? (data.appProjectName || data.projectName || '') : '';
-    } else if (f === 'mdstatus') {
-      val = data.hasAppProject ? (data.appProjectMdStatus || '') : (data.mdStatus || '');
-    } else if (f === 'appprojectmdstatus' || f === 'appmdstatus' || f === 'app: md status' || f === 'app:md status') {
-      val = data.hasAppProject ? (data.appProjectMdStatus || '') : '';
-    } else if (f === 'actstatus' || f === 'appprojectactstatus' || f === 'appactstatus' || f === 'app: act status' || f === 'app:act status') {
-      val = data.hasAppProject ? (data.appProjectActStatus || '') : '';
-    } else if (f === 'detail' || f === 'appprojectdetail' || f === 'appdetail' || f === 'app: detail (project)') {
-      val = data.hasAppProject ? (data.appProjectDetail || '') : '';
-    } else if (f === 'description (project)' || f === 'appprojectdescription' || f === 'appdescription' || f === 'app: description (project)') {
-      val = data.hasAppProject ? (data.appProjectDescription || '') : '';
-    } else if (f === 'party' || f === 'appprojectparty' || f === 'appparty' || f === 'app: party') {
-      val = data.hasAppProject ? (data.appProjectParty || '') : '';
-    } else if (f === 'budget' || f === 'appbudget' || f === 'appprojectbudget' || f === 'app: budget') {
-      val = data.hasAppProject ? (data.appProjectBudget ?? 0) : 0;
-    } else if (f === 'actual' || f === 'appactual' || f === 'appprojectactual' || f === 'app: actual') {
-      val = data.hasAppProject ? (data.appProjectActual ?? 0) : 0;
-    } else if (f === 'apptask' || f === 'app: task' || f === 'app: task summarize' || f === 'app: task summaries' || f === 'app: tasks' || f === 'task' || f === 'tasks' || f === 'tasksummaries' || f === 'task summarize' || f === 'task summary' || f === 'task name') {
-      val = (data.hasAppProject && data.task) ? data.task : '';
-    } else if (f === 'actprogress' || f === 'act progress') {
-      val = data.hasAppProject ? (data.actProgress ?? 0) : 0;
-    } else if (f === 'planprogress' || f === 'plan progress') {
-      val = data.hasAppProject ? (data.planProgress ?? 0) : 0;
-    } else if (f === 'appprojectsizem2' || f === 'appsizem2' || f === 'app: size (m²)' || f === 'app: size m2' || f === 'app: sizem2') {
-      val = data.hasAppProject ? (data.appProjectSizeM2 ?? data.sizeM2 ?? 0) : 0;
-    } else if (f === 'sizem2' || f === 'size m2' || f === 'size' || f === 'area' || f === 'area (m2)' || f === 'm2') {
-      val = data.sizeM2 ?? data.appProjectSizeM2 ?? data.size ?? 0;
-    } else if (f === 'appprojectshoptype' || f === 'appshoptype' || f === 'app: shop type' || f === 'app: shoptype' || f === 'shoptype' || f === 'shop_type' || f === 'shop type') {
-      val = data.hasAppProject ? ((data as any).appProjectShopType || (data as any).shopType || '') : ((data as any).shopType || '');
-    }
+  const f = String(rule.field || '').toLowerCase().trim();
+  if (f.includes('margin') && typeof val === 'number' && val <= 1 && val > 0) {
+    val = val * 100;
   }
 
-  if (rule.field === 'margin' || rule.field === 'marginByCp' || rule.field === 'hcmMargin') {
-    val = Number(val || 0) * 100;
-  }
+  const numVal = Number(String(rule.value ?? '').replace(/,/g, '').trim());
+  const isNum = !isNaN(numVal) && String(rule.value ?? '').trim() !== '';
 
-  const numVal = Number(rule.value);
-  const isNum = !isNaN(numVal) && String(rule.value || '').trim() !== '';
+  const parsedValNum = Number(String(val ?? '').replace(/,/g, '').trim());
+  const valIsNum = !isNaN(parsedValNum) && String(val ?? '').trim() !== '';
 
   let compareValStr = String(val ?? '').toLowerCase().trim();
   let compareRuleStr = String(rule.value ?? '').toLowerCase().trim();
@@ -129,14 +211,17 @@ export function matchSingleRule(rule: GroupRule, data: DynamicUnitSummaryItem): 
 
   switch (rule.operator) {
     case '>':
-      return isNum ? Number(val) > numVal : false;
+      return isNum && valIsNum ? parsedValNum > numVal : false;
     case '<':
-      return isNum ? Number(val) < numVal : false;
+      return isNum && valIsNum ? parsedValNum < numVal : false;
     case '>=':
-      return isNum ? Number(val) >= numVal : false;
+      return isNum && valIsNum ? parsedValNum >= numVal : false;
     case '<=':
-      return isNum ? Number(val) <= numVal : false;
+      return isNum && valIsNum ? parsedValNum <= numVal : false;
     case '=':
+      if (isNum && valIsNum) {
+        return parsedValNum === numVal;
+      }
       return compareValStr === compareRuleStr;
     case 'contains': {
       const searchTerms = compareRuleStr.split(/\s+/).filter(Boolean);
@@ -159,7 +244,7 @@ export function matchSingleRule(rule: GroupRule, data: DynamicUnitSummaryItem): 
       return orTerms.some((term) => {
         if (compareValStr === term) return true;
         if (compareValStr.includes(term)) return true;
-        if (isNum && !isNaN(Number(term)) && Number(val) === Number(term)) return true;
+        if (isNum && valIsNum && !isNaN(Number(term)) && parsedValNum === Number(term)) return true;
         return false;
       });
     }
