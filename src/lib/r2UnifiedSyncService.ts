@@ -26,9 +26,17 @@ import {
   applyUnifiedWorkspacePayload,
   isApplyingRemoteWorkspacePayload,
   mergeRemoteAndLocalPayloads,
+  fastHashLayoutPayload,
+  getOrCreateS3Client,
+  uploadImportedFileToR2,
 } from './r2WorkspacePayloadService';
 
-export { buildUnifiedWorkspacePayload, applyUnifiedWorkspacePayload };
+export {
+  buildUnifiedWorkspacePayload,
+  applyUnifiedWorkspacePayload,
+  getOrCreateS3Client,
+  uploadImportedFileToR2,
+};
 
 export type R2SyncStatusType = 'synced' | 'syncing' | 'pending' | 'offline' | 'error';
 
@@ -47,6 +55,7 @@ let pendingAutoSave = false;
 let isPullingFromCloud = false;
 let lastCloudPullTime = 0;
 let _lastKnownRemotePayload: any = null;
+let _lastSyncedFingerprint = '';
 
 // Live sync status observable for Header UI
 let _syncStatusState: R2SyncStatusState = {
@@ -76,92 +85,49 @@ export function subscribeR2SyncStatus(cb: (state: R2SyncStatusState) => void): (
   };
 }
 
-// Pre-warmed S3 client cache for fast zero-latency exit saves
-let _prewarmedS3Client: any = null;
-let _prewarmedCredsKey = '';
-
 // Dirty tracker for debounced auto-save
 let _autoSaveDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 let _hasUnsavedEdits = false;
 let _isLifecycleBound = false;
 let _realtimeChannel: BroadcastChannel | null = null;
 
-/**
- * Gets or creates a singleton S3 Client instance to eliminate SDK re-initialization overhead.
- */
-export async function getOrCreateS3Client(): Promise<{ s3: any; creds: R2Credentials } | null> {
-  const creds = await getStoredR2CredentialsAsync();
-  if (!creds) return null;
-  const credsKey = `${creds.accountId}:${creds.accessKeyId}:${creds.bucketName}`;
-  if (_prewarmedS3Client && _prewarmedCredsKey === credsKey) {
-    return { s3: _prewarmedS3Client, creds };
-  }
-  try {
-    const { S3Client } = await getS3Sdk();
-    _prewarmedS3Client = new S3Client({
-      region: 'auto',
-      endpoint: `https://${creds.accountId.trim()}.r2.cloudflarestorage.com`,
-      credentials: {
-        accessKeyId: creds.accessKeyId.trim(),
-        secretAccessKey: creds.secretAccessKey.trim(),
-      },
-    });
-    _prewarmedCredsKey = credsKey;
-    return { s3: _prewarmedS3Client, creds };
-  } catch (e) {
-    console.warn('[R2 S3Client] Failed to initialize S3 SDK client:', e);
-    return null;
-  }
+export function hasUnsavedLayoutEdits(): boolean {
+  return _hasUnsavedEdits;
 }
 
 /**
- * Marks workspace as modified and schedules a debounced real-time auto-save to Cloudflare R2.
+ * Marks workspace as modified and schedules an idle auto-save to Cloudflare R2 (45s).
+ * Instant local cache + cross-tab BroadcastChannel persists immediately with 0ms latency.
+ * Does NOT hammer R2 continuously while typing or navigating.
  */
-export function markWorkspaceDirty(delayMs = 1500): void {
+export function markWorkspaceDirty(delayMs = 45000): void {
   if (isApplyingRemoteWorkspacePayload()) return;
+  const currentHash = fastHashLayoutPayload();
+  if (_lastSyncedFingerprint && currentHash === _lastSyncedFingerprint) {
+    return;
+  }
   _hasUnsavedEdits = true;
-  updateSyncStatus({ status: 'pending', detail: 'Chờ lưu thay đổi...' });
+  updateSyncStatus({ status: 'pending', detail: 'Chờ lưu R2 (Có thay đổi)' });
+
+  try {
+    const rawLocalPayload = buildUnifiedWorkspacePayload();
+    saveLayoutConfigToDisk(rawLocalPayload).catch(() => {});
+    localStorage.setItem('taka_mapping_config_backup', JSON.stringify(rawLocalPayload));
+    _realtimeChannel?.postMessage({
+      type: 'WORKSPACE_UPDATED',
+      timestamp: rawLocalPayload.timestamp,
+    });
+  } catch {}
+
   if (_autoSaveDebounceTimer) {
     clearTimeout(_autoSaveDebounceTimer);
   }
   _autoSaveDebounceTimer = setTimeout(() => {
     _autoSaveDebounceTimer = null;
     if (_hasUnsavedEdits) {
-      _hasUnsavedEdits = false;
       syncAllDataToCloudR2({ silent: true }).catch(() => {});
     }
   }, delayMs);
-}
-
-/**
- * Uploads imported CSV or Excel file directly to R2 under root & layout/ folder.
- */
-export async function uploadImportedFileToR2(
-  file: File,
-  folder: 'root' | 'layout' = 'layout'
-): Promise<{ success: boolean; key?: string; error?: string }> {
-  try {
-    const clientBundle = await getOrCreateS3Client();
-    if (!clientBundle) {
-      return { success: false, error: 'Chưa cấu hình R2 credentials' };
-    }
-    const { s3, creds } = clientBundle;
-
-    const cleanName = file.name.replace(/[^a-zA-Z0-9_.-]/g, '_');
-    const key = folder === 'layout' ? `layout/${cleanName}` : cleanName;
-
-    const res = await uploadSingleR2File({ name: key, blob: file }, creds, s3);
-
-    const ext = cleanName.endsWith('.xlsx') ? 'xlsx' : 'csv';
-    const latestKey =
-      folder === 'layout' ? `layout/comparison_latest.${ext}` : `dynamic_rules_latest.${ext}`;
-    await uploadSingleR2File({ name: latestKey, blob: file }, creds, s3).catch(() => {});
-
-    return { success: res.success, key, error: res.error };
-  } catch (err: any) {
-    console.warn('[R2 Upload] Upload imported file error:', err);
-    return { success: false, error: err?.message || String(err) };
-  }
 }
 
 /**
@@ -169,17 +135,26 @@ export async function uploadImportedFileToR2(
  */
 export async function syncAllDataToCloudR2(options?: {
   silent?: boolean;
+  force?: boolean;
 }): Promise<{ success: boolean; message: string }> {
   if (isAutoSaving) {
     pendingAutoSave = true;
     return { success: true, message: 'Đang xếp hàng đồng bộ R2...' };
   }
 
+  const rawLocalPayload = buildUnifiedWorkspacePayload();
+  const currentHash = fastHashLayoutPayload(rawLocalPayload);
+
+  // If not forced and fingerprint matches last saved R2 state, no need to upload!
+  if (!options?.force && _lastSyncedFingerprint && currentHash === _lastSyncedFingerprint && !_hasUnsavedEdits) {
+    updateSyncStatus({ status: 'synced', detail: 'Dữ liệu không đổi' });
+    return { success: true, message: 'Dữ liệu không thay đổi, không cần lưu R2.' };
+  }
+
   isAutoSaving = true;
   updateSyncStatus({ status: 'syncing', detail: 'Đang lưu R2...' });
   try {
     const clientBundle = await getOrCreateS3Client();
-    const rawLocalPayload = buildUnifiedWorkspacePayload();
     const payload = _lastKnownRemotePayload
       ? mergeRemoteAndLocalPayloads(_lastKnownRemotePayload, rawLocalPayload)
       : rawLocalPayload;
@@ -224,6 +199,12 @@ export async function syncAllDataToCloudR2(options?: {
 
     if (resLayout.success) {
       _lastKnownRemotePayload = payload;
+      _lastSyncedFingerprint = currentHash;
+      _hasUnsavedEdits = false;
+      if (_autoSaveDebounceTimer) {
+        clearTimeout(_autoSaveDebounceTimer);
+        _autoSaveDebounceTimer = null;
+      }
       updateSyncStatus({
         status: 'synced',
         lastSyncedAt: Date.now(),
@@ -337,6 +318,9 @@ export async function loadUnifiedDataFromCloudR2(options?: {
       return { success: false, message: 'Chưa có cấu hình trên Cloudflare R2.' };
     }
 
+    _lastSyncedFingerprint = fastHashLayoutPayload(data);
+    _hasUnsavedEdits = false;
+
     if (source.includes('Cloud R2')) {
       _lastKnownRemotePayload = data;
       updateSyncStatus({
@@ -378,7 +362,8 @@ export async function loadUnifiedDataFromCloudR2(options?: {
 }
 
 /**
- * Initializes real-time sync subscriptions and auto-save on browser unload / tab close / visibility hidden / mobile exit.
+ * Initializes safe change subscriptions and auto-save on app close / tab exit.
+ * Only saves to R2 when actual layout data was modified.
  */
 export function initAutoSaveOnAppClose(): void {
   if (typeof window === 'undefined' || _isLifecycleBound) return;
@@ -386,7 +371,7 @@ export function initAutoSaveOnAppClose(): void {
 
   getOrCreateS3Client().catch(() => {});
 
-  // 1. Cross-tab BroadcastChannel for real-time multi-tab synchronization
+  // 1. Cross-tab BroadcastChannel for real-time multi-tab synchronization (0 HTTP calls)
   try {
     if (typeof BroadcastChannel !== 'undefined') {
       _realtimeChannel = new BroadcastChannel(REALTIME_CHANNEL_NAME);
@@ -404,7 +389,7 @@ export function initAutoSaveOnAppClose(): void {
     }
   } catch {}
 
-  // 2. Subscribe to DataStore mutations for real-time debounced R2 sync
+  // 2. Subscribe to DataStore layout mutations
   try {
     useDataStore.subscribe((state, prevState) => {
       if (isApplyingRemoteWorkspacePayload()) return;
@@ -427,58 +412,44 @@ export function initAutoSaveOnAppClose(): void {
         state.reviewLabelColors !== prevState.reviewLabelColors ||
         state.activeMapVersionId !== prevState.activeMapVersionId
       ) {
-        markWorkspaceDirty(1500);
+        markWorkspaceDirty();
       }
     });
   } catch {}
 
-  // 3. Subscribe to AppStore (projects & tasks) mutations for real-time R2 sync
+  // 3. Subscribe to AppStore (projects & tasks) mutations
   try {
     useAppStore.subscribe((state, prevState) => {
       if (isApplyingRemoteWorkspacePayload()) return;
       if (state.projects !== prevState.projects || state.tasks !== prevState.tasks) {
-        markWorkspaceDirty(1500);
+        markWorkspaceDirty();
       }
     });
   } catch {}
 
   // 4. Listen for comparison, paint category, layout URL, and unit image updates
-  const handleCustomRealtimeMutation = () => markWorkspaceDirty(1200);
+  const handleCustomRealtimeMutation = () => markWorkspaceDirty();
   window.addEventListener('taka_comparison_data_saved', handleCustomRealtimeMutation);
   window.addEventListener('taka_paint_categories_updated', handleCustomRealtimeMutation);
   window.addEventListener('taka_unit_images_changed', handleCustomRealtimeMutation);
   window.addEventListener('taka_layout_settings_updated', handleCustomRealtimeMutation);
 
-  // 5. Real-time Cloud R2 revalidation when returning to the tab/window
-  const handleWindowFocusOrVisible = () => {
-    if (document.visibilityState === 'visible' && !_hasUnsavedEdits && !isAutoSaving) {
-      if (Date.now() - lastCloudPullTime > 20000) {
-        loadUnifiedDataFromCloudR2({ silent: true }).catch(() => {});
-      }
-    }
-  };
-  window.addEventListener('focus', handleWindowFocusOrVisible);
-
-  // 6. Trigger immediate save on app close / exit / backgrounding
+  // 5. Trigger save on app close / exit ONLY IF there are actual unsaved layout edits
   const triggerSaveOnExit = (e?: BeforeUnloadEvent) => {
     try {
-      const hadUnsavedOrInFlight = _hasUnsavedEdits || isAutoSaving;
+      if (!_hasUnsavedEdits) return;
       if (_autoSaveDebounceTimer) {
         clearTimeout(_autoSaveDebounceTimer);
         _autoSaveDebounceTimer = null;
       }
-      _hasUnsavedEdits = false;
-
       const payload = buildUnifiedWorkspacePayload();
       try {
         localStorage.setItem('taka_mapping_config_backup', JSON.stringify(payload));
       } catch {}
       saveLayoutConfigToDisk(payload).catch(() => {});
-      syncAllDataToCloudR2({ silent: true }).catch(() => {});
+      syncAllDataToCloudR2({ silent: true, force: true }).catch(() => {});
 
-      // If an upload to R2 was actively in progress or unsaved edits were just flushed on tab close,
-      // signal the browser so in-flight network sockets have time to complete.
-      if (e && hadUnsavedOrInFlight) {
+      if (e) {
         e.preventDefault();
         e.returnValue = '';
       }
@@ -489,10 +460,9 @@ export function initAutoSaveOnAppClose(): void {
   window.addEventListener('pagehide', () => triggerSaveOnExit());
   window.addEventListener('freeze', () => triggerSaveOnExit());
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') {
-      triggerSaveOnExit();
-    } else if (document.visibilityState === 'visible') {
-      handleWindowFocusOrVisible();
+    if (document.visibilityState === 'hidden' && _hasUnsavedEdits) {
+      const payload = buildUnifiedWorkspacePayload();
+      saveLayoutConfigToDisk(payload).catch(() => {});
     }
   });
 }

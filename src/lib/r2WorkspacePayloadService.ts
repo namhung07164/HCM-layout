@@ -15,8 +15,77 @@ import {
 } from '../components/LayoutTabParts/layoutPaintCategoriesService';
 import { localDb } from './localDb';
 
+import {
+  getStoredR2CredentialsAsync,
+  getS3Sdk,
+  uploadSingleR2File,
+  R2Credentials,
+} from '../components/PictureMapping/lib/r2Upload';
+
 const LOCAL_COMPARISON_STORAGE_KEY = 'taka_standalone_comparison_rows_v1';
 const LAYOUT_SETTINGS_CACHE_KEY = 'hcm_layout_settings_v1';
+
+let _prewarmedS3Client: any = null;
+let _prewarmedCredsKey = '';
+
+/**
+ * Gets or creates a singleton S3 Client instance to eliminate SDK re-initialization overhead.
+ */
+export async function getOrCreateS3Client(): Promise<{ s3: any; creds: R2Credentials } | null> {
+  const creds = await getStoredR2CredentialsAsync();
+  if (!creds) return null;
+  const credsKey = `${creds.accountId}:${creds.accessKeyId}:${creds.bucketName}`;
+  if (_prewarmedS3Client && _prewarmedCredsKey === credsKey) {
+    return { s3: _prewarmedS3Client, creds };
+  }
+  try {
+    const { S3Client } = await getS3Sdk();
+    _prewarmedS3Client = new S3Client({
+      region: 'auto',
+      endpoint: `https://${creds.accountId.trim()}.r2.cloudflarestorage.com`,
+      credentials: {
+        accessKeyId: creds.accessKeyId.trim(),
+        secretAccessKey: creds.secretAccessKey.trim(),
+      },
+    });
+    _prewarmedCredsKey = credsKey;
+    return { s3: _prewarmedS3Client, creds };
+  } catch (e) {
+    console.warn('[R2 S3Client] Failed to initialize S3 SDK client:', e);
+    return null;
+  }
+}
+
+/**
+ * Uploads imported CSV or Excel file directly to R2 under root & layout/ folder.
+ */
+export async function uploadImportedFileToR2(
+  file: File,
+  folder: 'root' | 'layout' = 'layout'
+): Promise<{ success: boolean; key?: string; error?: string }> {
+  try {
+    const clientBundle = await getOrCreateS3Client();
+    if (!clientBundle) {
+      return { success: false, error: 'Chưa cấu hình R2 credentials' };
+    }
+    const { s3, creds } = clientBundle;
+
+    const cleanName = file.name.replace(/[^a-zA-Z0-9_.-]/g, '_');
+    const key = folder === 'layout' ? `layout/${cleanName}` : cleanName;
+
+    const res = await uploadSingleR2File({ name: key, blob: file }, creds, s3);
+
+    const ext = cleanName.endsWith('.xlsx') ? 'xlsx' : 'csv';
+    const latestKey =
+      folder === 'layout' ? `layout/comparison_latest.${ext}` : `dynamic_rules_latest.${ext}`;
+    await uploadSingleR2File({ name: latestKey, blob: file }, creds, s3).catch(() => {});
+
+    return { success: res.success, key, error: res.error };
+  } catch (err: any) {
+    console.warn('[R2 Upload] Upload imported file error:', err);
+    return { success: false, error: err?.message || String(err) };
+  }
+}
 
 let _isApplyingRemotePayload = false;
 
@@ -272,4 +341,73 @@ export function mergeRemoteAndLocalPayloads(remote: any, local: any): any {
       },
     },
   };
+}
+
+/**
+ * Computes a deterministic JSON fingerprint of all layout & workspace business data.
+ * Transient timestamps (timestamp, updatedAt) are excluded so only actual data changes trigger dirty state.
+ */
+export function computeLayoutDataFingerprint(payload?: any): string {
+  const p = payload || buildUnifiedWorkspacePayload();
+  if (!p) return '';
+  const core = {
+    storeLocationData: p.storeLocationData || {},
+    comparisonRows: p.comparisonRows || [],
+    projects: (p.projects || []).map((proj: any) => ({
+      id: proj.id,
+      code: proj.code,
+      name: proj.name,
+      status: proj.status,
+      actStatus: proj.actStatus,
+      store: proj.store,
+      location: proj.location,
+      year: proj.year,
+      budget: proj.budget,
+      actualCost: proj.actualCost,
+      party: proj.party,
+      notes: proj.notes,
+      unitCode: proj.unitCode,
+    })),
+    tasks: (p.tasks || []).map((t: any) => ({
+      id: t.id,
+      projectId: t.projectId,
+      taskCodePhu: t.taskCodePhu,
+      name: t.name,
+      start: t.start,
+      finish: t.finish,
+      status: t.status,
+      predecessor: t.predecessor,
+    })),
+    layoutSettings: p.layoutSettings || {},
+    paintCategories: p.paintCategoriesConfig?.categories || [],
+    paintGroupMappings: p.paintCategoriesConfig?.groupMappings || {},
+    paintActiveFilter: p.paintCategoriesConfig?.activePaintFilter || '',
+    unitImagesMap: p.unitImagesMap || {},
+    mapUnits: p.mapUnits || [],
+    unitInfo: p.unitInfo || [],
+    classInfo: p.classInfo || [],
+    actualClassInfo: p.actualClassInfo || [],
+    sales: p.sales || [],
+    profits: p.profits || [],
+    subFees: p.subFees || [],
+    mdStatus: p.mdStatus || [],
+    projectStatus: p.projectStatus || [],
+    projectLink: p.projectLink || [],
+    basePlan: p.basePlan || [],
+    units: p.units || [],
+  };
+  return JSON.stringify(core);
+}
+
+/**
+ * Fast 32-bit hash for instant layout payload dirty checking without memory overhead.
+ */
+export function fastHashLayoutPayload(payload?: any): string {
+  const str = computeLayoutDataFingerprint(payload);
+  let hash = 5381;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) + hash) + str.charCodeAt(i);
+    hash |= 0;
+  }
+  return `${str.length}_${hash}`;
 }

@@ -223,21 +223,21 @@ export const StandaloneHeader: React.FC<StandaloneHeaderProps> = React.memo(({
         {/* Cloudflare R2 Live Sync Status Badge */}
         <button
           type="button"
-          onClick={() => syncAllDataToCloudR2()}
+          onClick={() => syncAllDataToCloudR2({ force: true })}
           title={
             r2Status.status === 'synced'
-              ? `Tự động đồng bộ Cloudflare R2 (Lần cuối: ${formattedSyncTime || 'vừa xong'}). Nhấn để lưu ngay.`
+              ? `Dữ liệu R2 đã cập nhật (Lần cuối: ${formattedSyncTime || 'vừa xong'}). Nhấn để lưu ngay.`
               : r2Status.status === 'syncing'
               ? 'Đang đồng bộ dữ liệu với Cloudflare R2...'
               : r2Status.status === 'pending'
-              ? 'Đang chờ tự động lưu thay đổi lên Cloudflare R2 (nhấn để lưu ngay)'
+              ? 'Có thay đổi trên Layout Tab chưa lưu lên R2 (nhấn để lưu ngay)'
               : 'Đang dùng bộ nhớ đệm cục bộ (Local Cache)'
           }
           className={`hidden xl:flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-all cursor-pointer select-none ${
             r2Status.status === 'syncing'
               ? 'bg-sky-50/90 dark:bg-sky-950/50 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-800/60'
               : r2Status.status === 'pending'
-              ? 'bg-amber-50/90 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/60'
+              ? 'bg-amber-50/90 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-700 shadow-xs'
               : r2Status.status === 'offline' || r2Status.status === 'error'
               ? 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-700'
               : 'bg-emerald-50/80 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200/80 dark:border-emerald-800/50'
@@ -260,7 +260,7 @@ export const StandaloneHeader: React.FC<StandaloneHeaderProps> = React.memo(({
             {r2Status.status === 'syncing'
               ? r2Status.detail || 'Đang đồng bộ R2...'
               : r2Status.status === 'pending'
-              ? 'Chờ lưu R2...'
+              ? 'Chờ lưu R2 (Có thay đổi)'
               : r2Status.status === 'offline'
               ? 'Local Cache'
               : r2Status.status === 'error'
@@ -274,13 +274,21 @@ export const StandaloneHeader: React.FC<StandaloneHeaderProps> = React.memo(({
         <button
           type="button"
           onClick={async () => {
-            await syncAllDataToCloudR2();
+            await syncAllDataToCloudR2({ force: true });
           }}
-          title="Lưu đồng bộ toàn bộ app vào thư mục layout/ trên Cloudflare R2"
-          className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-bold bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800/70 hover:bg-sky-100 dark:hover:bg-sky-900/60 transition-all active:scale-95"
+          title={
+            r2Status.status === 'pending'
+              ? 'Có thay đổi mới - Nhấn để lưu ngay lên Cloudflare R2'
+              : 'Lưu đồng bộ toàn bộ app vào thư mục layout/ trên Cloudflare R2'
+          }
+          className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold border transition-all active:scale-95 ${
+            r2Status.status === 'pending'
+              ? 'bg-amber-500 hover:bg-amber-600 text-white border-amber-600 shadow-sm animate-pulse'
+              : 'bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-800/70 hover:bg-sky-100 dark:hover:bg-sky-900/60'
+          }`}
         >
-          <CloudUpload className="w-3.5 h-3.5 text-sky-500" />
-          <span className="hidden md:inline">Save R2</span>
+          <CloudUpload className={`w-3.5 h-3.5 ${r2Status.status === 'pending' ? 'text-white' : 'text-sky-500'}`} />
+          <span className="hidden md:inline">{r2Status.status === 'pending' ? 'Lưu R2 *' : 'Save R2'}</span>
         </button>
 
         <button

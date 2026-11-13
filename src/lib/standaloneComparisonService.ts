@@ -363,9 +363,9 @@ export function updateSavedComparisonRows(rows: ComparisonRowInput[]): {
 } {
   const result = applyComparisonRowsToStores(rows);
 
-  // Trigger background R2 sync and local disk cache update
-  import('./r2UnifiedSyncService').then(({ syncAllDataToCloudR2 }) => {
-    syncAllDataToCloudR2({ silent: true }).catch(() => {});
+  // Mark dirty and persist to local cache without hammering R2 on every cell edit
+  import('./r2UnifiedSyncService').then(({ markWorkspaceDirty }) => {
+    markWorkspaceDirty();
   }).catch(() => {});
 
   return result;
