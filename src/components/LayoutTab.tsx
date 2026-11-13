@@ -6,6 +6,7 @@ import { LayoutTabFilterToolbar } from './LayoutTabParts/LayoutTabFilterToolbar'
 import { LayoutTabFullscreenView } from './LayoutTabParts/LayoutTabFullscreenView';
 import { LayoutTabStaticViewer } from './LayoutTabParts/LayoutTabStaticViewer';
 import { LayoutDataIndexModal } from './LayoutTabParts/LayoutDataIndexModal';
+import { LayoutFloorKpiBar } from './LayoutTabParts/LayoutFloorKpiBar';
 
 export interface LayoutTabProps {
   initialStore?: string;
@@ -126,6 +127,13 @@ export function LayoutTab({
           onSelectSearchUnit={handleSelectSearchUnit}
           onClearSearchAndFocus={handleClearSearchAndFocus}
           onOpenIndexModal={() => setIsIndexModalOpen(true)}
+        />
+
+        {/* Real-time Floor KPI Scorecard & Dual-Metric Label Controls */}
+        <LayoutFloorKpiBar
+          activeStore={activeStore}
+          activeLocation={locFilterStr}
+          activeYear={effectiveYear}
         />
 
         {/* Modal Index Data Table */}

@@ -1,6 +1,7 @@
-import React, { FC, Fragment, memo } from 'react';
+import React, { FC, Fragment, memo, useEffect, useState } from 'react';
 import { FastLayer, Layer, Image as KonvaImage, Rect, Circle, Path, Line, Text, Group } from 'react-konva';
 import { getHatchPatternCanvas } from './layoutPatternUtils';
+import { getSavedSecondaryLabelMode, SecondaryLabelMode } from './LayoutFloorKpiBar';
 
 export interface LayoutKonvaLayersProps {
   bgImage: HTMLImageElement | null;
@@ -43,6 +44,18 @@ export const LayoutKonvaLayers: React.FC<LayoutKonvaLayersProps> = React.memo(({
   hasStoredUnitImages,
   storeFilter,
 }) => {
+  const [secondaryLabelMode, setSecondaryLabelMode] = useState<SecondaryLabelMode>(() =>
+    getSavedSecondaryLabelMode()
+  );
+
+  useEffect(() => {
+    const handleSecondaryChange = () => {
+      setSecondaryLabelMode(getSavedSecondaryLabelMode());
+    };
+    window.addEventListener('taka_secondary_label_changed', handleSecondaryChange);
+    return () => window.removeEventListener('taka_secondary_label_changed', handleSecondaryChange);
+  }, []);
+
   const isDarkMode = typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
   const isLegendColorOn = layoutTooltipVisibility?.legendColor !== false;
   // Quantize zoom into discrete 0.5x LOD buckets so minor zoom changes do not trigger Canvas2D text re-measurement across all units
@@ -249,27 +262,53 @@ export const LayoutKonvaLayers: React.FC<LayoutKonvaLayersProps> = React.memo(({
                 )
               )}
 
-              {hasColor && unit.name && showTextAndBadge && (
-                <Text 
-                  text={unit.targetSymbol ? `${unit.targetSymbol} ${unit.name}` : unit.name}
-                  x={unit.textX}
-                  y={unit.textY}
-                  width={unit.textWidth}
-                  height={unit.textHeight}
-                  rotation={unit.rotation || 0}
-                  align="center"
-                  verticalAlign="middle"
-                  fontSize={dynamicFontSize}
-                  fontStyle="bold"
-                  fontFamily="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
-                  fill={contrast.text}
-                  strokeScaleEnabled={false}
-                  perfectDrawEnabled={false}
-                  wrap="none"
-                  ellipsis={true}
-                  listening={false}
-                />
-              )}
+              {hasColor && unit.name && showTextAndBadge && (() => {
+                const primaryLabel = unit.targetSymbol ? `${unit.targetSymbol} ${unit.name}` : unit.name;
+                let secondaryLine = '';
+                if (secondaryLabelMode !== 'none' && unitData) {
+                  if (secondaryLabelMode === 'brand') {
+                    secondaryLine = String(unitData.brandName || unitData.brand || unitData.matchedProject?.name || '').trim();
+                  } else if (secondaryLabelMode === 'area' && areaVal > 0) {
+                    secondaryLine = `${areaVal}m²`;
+                  } else if (secondaryLabelMode === 'sales') {
+                    const sVal = Number(unitData.salesAmount ?? unitData.sales ?? 0);
+                    if (sVal > 0) {
+                      secondaryLine = sVal >= 1_000_000_000
+                        ? `${(sVal / 1_000_000_000).toFixed(1)}B`
+                        : sVal >= 1_000_000
+                        ? `${Math.round(sVal / 1_000_000)}M`
+                        : String(sVal);
+                    }
+                  } else if (secondaryLabelMode === 'margin') {
+                    const mVal = Number(unitData.margin ?? 0);
+                    if (mVal > 0) secondaryLine = `${mVal.toFixed(1)}%`;
+                  } else if (secondaryLabelMode === 'status') {
+                    secondaryLine = String(unitData.actStatus || unitData.projectStatus || unitData.mdStatus || '').trim();
+                  }
+                }
+                const fullText = secondaryLine ? `${primaryLabel}\n${secondaryLine}` : primaryLabel;
+                return (
+                  <Text 
+                    text={fullText}
+                    x={unit.textX}
+                    y={unit.textY}
+                    width={unit.textWidth}
+                    height={unit.textHeight}
+                    rotation={unit.rotation || 0}
+                    align="center"
+                    verticalAlign="middle"
+                    fontSize={secondaryLine ? Math.max(8, dynamicFontSize - 1.5) : dynamicFontSize}
+                    fontStyle="bold"
+                    fontFamily="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+                    fill={contrast.text}
+                    strokeScaleEnabled={false}
+                    perfectDrawEnabled={false}
+                    wrap={secondaryLine ? 'word' : 'none'}
+                    ellipsis={true}
+                    listening={false}
+                  />
+                );
+              })()}
 
               {/* Group Symbol Marker Badge */}
               {hasColor && unit.targetSymbol && showTextAndBadge && (

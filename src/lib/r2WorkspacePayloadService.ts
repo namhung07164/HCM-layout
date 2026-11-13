@@ -208,3 +208,68 @@ export async function applyUnifiedWorkspacePayload(
     _isApplyingRemotePayload = false;
   }
 }
+
+/**
+ * Smart Partition Merge: Combines remote R2 payload and local payload so edits on different floors/stores
+ * or unit attachments across multiple devices never overwrite each other.
+ */
+export function mergeRemoteAndLocalPayloads(remote: any, local: any): any {
+  if (!remote || typeof remote !== 'object') return local;
+  if (!local || typeof local !== 'object') return remote;
+
+  const activePartitionKey = `${local.store || 'HCM'}_${local.location || 'L1'}`;
+  const mergedStoreLocationData: Record<string, any> = {
+    ...(remote.storeLocationData || {}),
+    ...(local.storeLocationData || {}),
+  };
+
+  // Ensure remote partitions that were updated more recently than non-active local partitions are preserved
+  if (remote.storeLocationData && typeof remote.storeLocationData === 'object') {
+    for (const [pKey, remotePart] of Object.entries<any>(remote.storeLocationData)) {
+      if (pKey === activePartitionKey && local.storeLocationData?.[pKey]) {
+        mergedStoreLocationData[pKey] = local.storeLocationData[pKey];
+      } else if (!local.storeLocationData?.[pKey]) {
+        mergedStoreLocationData[pKey] = remotePart;
+      }
+    }
+  }
+
+  const mergedUnitImagesMap: Record<string, any[]> = {
+    ...(remote.unitImagesMap || {}),
+    ...(local.unitImagesMap || {}),
+  };
+
+  const mergedLayoutSettings: Record<string, any> = {
+    ...(remote.layoutSettings || {}),
+    ...(local.layoutSettings || {}),
+  };
+
+  const mergedCategories = Array.from(
+    new Set([
+      ...(remote.paintCategoriesConfig?.categories || []),
+      ...(local.paintCategoriesConfig?.categories || []),
+    ])
+  );
+
+  return {
+    ...remote,
+    ...local,
+    timestamp: Date.now(),
+    updatedAt: new Date().toISOString(),
+    storeLocationData: mergedStoreLocationData,
+    unitImagesMap: mergedUnitImagesMap,
+    layoutSettings: mergedLayoutSettings,
+    paintCategoriesConfig: {
+      ...(remote.paintCategoriesConfig || {}),
+      ...(local.paintCategoriesConfig || {}),
+      categories:
+        mergedCategories.length > 0
+          ? mergedCategories
+          : local.paintCategoriesConfig?.categories || [],
+      groupMappings: {
+        ...(remote.paintCategoriesConfig?.groupMappings || {}),
+        ...(local.paintCategoriesConfig?.groupMappings || {}),
+      },
+    },
+  };
+}

@@ -1,4 +1,3 @@
-import * as XLSX from 'xlsx';
 import { useDataStore } from '../components/PictureMapping/DataContext';
 import { useAppStore } from '../store/useAppStore';
 import { saveLayoutConfigToDisk } from './layoutConfigCache';
@@ -14,7 +13,8 @@ export { SAMPLE_COMPARISON_DATA };
 
 const LOCAL_COMPARISON_STORAGE_KEY = 'taka_standalone_comparison_rows_v1';
 
-export function downloadComparisonTemplate(): void {
+export async function downloadComparisonTemplate(): Promise<void> {
+  const XLSX = await import('xlsx');
   const ws = XLSX.utils.json_to_sheet(SAMPLE_COMPARISON_DATA);
   ws['!cols'] = COMPARISON_TEMPLATE_COL_WIDTHS;
   const wb = XLSX.utils.book_new();
@@ -276,7 +276,7 @@ export async function importComparisonExcelOrCsvFile(file: File): Promise<{
   matchedUnits: number;
   projectsCount: number;
 }> {
-  const buffer = await file.arrayBuffer();
+  const [XLSX, buffer] = await Promise.all([import('xlsx'), file.arrayBuffer()]);
   const wb = XLSX.read(buffer, { type: 'array' });
   const firstSheetName = wb.SheetNames[0];
   const sheet = wb.Sheets[firstSheetName];

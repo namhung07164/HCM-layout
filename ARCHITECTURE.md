@@ -13,8 +13,9 @@
 ### 2.1. Unified R2 Cloud Sync & Standalone Comparison (Option A)
 | File | Key Exports | Purpose |
 | :--- | :--- | :--- |
-| `src/lib/r2UnifiedSyncService.ts` | `loadUnifiedDataFromCloudR2`, `syncAllDataToCloudR2`, `initAutoSaveOnAppClose`, `markWorkspaceDirty`, `buildUnifiedWorkspacePayload`, `applyUnifiedWorkspacePayload` | **SSoT for R2 Cloud Sync**: Auto-loads full workspace from `layout/layout_config.json` on app open, syncs mutations in real time across tabs (`BroadcastChannel`) and R2, and auto-saves on app exit (`beforeunload`/`pagehide`/`visibilitychange`). |
-| `src/lib/standaloneComparisonService.ts` | `downloadComparisonTemplate`, `importComparisonExcelOrCsvFile`, `hydrateSavedComparisonRows`, `exportFullStandaloneWorkspaceJson`, `importFullStandaloneWorkspaceJson`, `updateSavedComparisonRows` | **SSoT for Option A**: Parses Excel/CSV imports, matches unit codes with CAD shapes, persists to `localStorage` + R2 Cloud, and provides full workspace JSON backup & restore. |
+| `src/lib/r2UnifiedSyncService.ts` | `loadUnifiedDataFromCloudR2`, `syncAllDataToCloudR2`, `initAutoSaveOnAppClose`, `markWorkspaceDirty`, `subscribeR2SyncStatus`, `getR2SyncStatus` | **SSoT for R2 Cloud Sync**: Auto-loads full workspace from `layout/layout_config.json` on app open, merges floor partitions safely, syncs mutations in real time (`BroadcastChannel` + R2), and guards exit (`beforeunload`/`pagehide`/`visibilitychange`). |
+| `src/lib/r2WorkspacePayloadService.ts` | `buildUnifiedWorkspacePayload`, `applyUnifiedWorkspacePayload`, `mergeRemoteAndLocalPayloads` | Serializes, hydrates, and smart-merges 100% workspace state (`storeLocationData`, `comparisonRows`, `projects`, `tasks`, `layoutSettings`, `paintCategoriesConfig`, `unitImagesMap`). |
+| `src/lib/standaloneComparisonService.ts` | `downloadComparisonTemplate`, `importComparisonExcelOrCsvFile`, `hydrateSavedComparisonRows`, `exportFullStandaloneWorkspaceJson`, `importFullStandaloneWorkspaceJson`, `updateSavedComparisonRows` | **SSoT for Option A**: Lazy-loads `xlsx` on demand, parses Excel/CSV imports, matches unit codes with CAD shapes, persists to `localStorage` + R2 Cloud, and provides full workspace JSON backup & restore. |
 | `src/lib/comparisonTemplateSpec.ts` | `ComparisonRowInput`, `SAMPLE_COMPARISON_DATA`, `COMPARISON_TEMPLATE_COL_WIDTHS` | Defines standard 35-column comparison template schema, sample rows, and Excel column widths. |
 | `src/lib/layoutConfigCache.ts` | `getCachedLayoutConfigFromDisk`, `saveLayoutConfigToDisk`, `isValidLayoutConfig` | Multi-tier persistent local disk cache (`CacheStorage` + `IndexedDB` + `localStorage`) for 0ms instant boot. |
 | `src/lib/unitSizeResolver.ts` | `getUnitEffectiveSizeM2`, `projectMatchesUnitCode` | Calculates effective area ($m^2$) from CAD/PDF drawn polygons (`UnitShape`) and normalizes unit codes for matching. |
@@ -47,8 +48,8 @@
 
 | TabId | Primary Container | Key Submodules & Components | Modals & Overlays |
 | :--- | :--- | :--- | :--- |
-| **Header & App Shell** | `src/App.tsx` | `src/components/StandaloneHeader.tsx` (2-tab navigation + Option A Excel/JSON action bar + Auto Cloud R2 status) | `AppPrintStyles` |
-| `layout` | `src/components/LayoutTab.tsx` | `LayoutTabParts/LiveCanvas.tsx`<br>`LayoutTabParts/LayoutPaintCategoriesSection.tsx`<br>`LayoutTabParts/layoutPaintCategoriesService.ts` | `LayoutEditModeModal.tsx`<br>`LayoutDataIndexModal.tsx`<br>`LayoutUnitLightboxModal.tsx` |
+| **Header & App Shell** | `src/App.tsx` | `src/components/StandaloneHeader.tsx` (2-tab navigation + Option A Excel/JSON action bar + Live R2 Sync Status Badge) | `AppPrintStyles` |
+| `layout` | `src/components/LayoutTab.tsx` | `LayoutTabParts/LayoutFloorKpiBar.tsx` (Floor KPI Scorecard + Dual-Metric Label + Fit `F` + PNG Snapshot)<br>`LayoutTabParts/LayoutKonvaLayers.tsx`<br>`LayoutTabParts/LayoutPaintCategoriesSection.tsx` | `LayoutEditModeModal.tsx`<br>`LayoutDataIndexModal.tsx` (`LayoutDataIndexTable.tsx`)<br>`LayoutUnitLightboxModal.tsx` |
 | `picture_mapping` | `src/components/PictureMappingTab.tsx` | `PictureMapping/components/DataMapping/EditTab.tsx`<br>`PictureMapping/components/DataMapping/DynamicHierarchyTab.tsx`<br>`PictureMapping/components/DataMapping/ReviewTab.tsx`<br>`PictureMapping/components/CloudSync/CloudSyncModal.tsx` | `DynamicCsvGuideModal.tsx`<br>`EditTabInspector.tsx` |
 
 ---

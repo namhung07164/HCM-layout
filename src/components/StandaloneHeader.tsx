@@ -27,6 +27,9 @@ import {
 import {
   syncAllDataToCloudR2,
   loadUnifiedDataFromCloudR2,
+  subscribeR2SyncStatus,
+  getR2SyncStatus,
+  R2SyncStatusState,
 } from '../lib/r2UnifiedSyncService';
 
 interface StandaloneHeaderProps {
@@ -50,6 +53,19 @@ export const StandaloneHeader: React.FC<StandaloneHeaderProps> = React.memo(({
   const workspaceInputRef = useRef<HTMLInputElement>(null);
   const setToast = useAppStore((s) => s.setToast);
   const [importing, setImporting] = useState(false);
+  const [r2Status, setR2Status] = useState<R2SyncStatusState>(() => getR2SyncStatus());
+
+  React.useEffect(() => {
+    return subscribeR2SyncStatus((next) => setR2Status(next));
+  }, []);
+
+  const formattedSyncTime = r2Status.lastSyncedAt
+    ? new Date(r2Status.lastSyncedAt).toLocaleTimeString('vi-VN', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      })
+    : null;
 
   const handleExcelFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -204,14 +220,56 @@ export const StandaloneHeader: React.FC<StandaloneHeaderProps> = React.memo(({
 
         <div className="h-4 w-px bg-slate-200 dark:bg-slate-700 mx-0.5 hidden sm:block" />
 
-        {/* Cloudflare R2 Sync (layout/ folder) */}
-        <div
-          title="Tự động nạp Cloud R2 khi mở app và tự động lưu Cloud R2 khi chỉnh sửa hoặc tắt app"
-          className="hidden xl:flex items-center gap-1.5 px-2 py-1 rounded-lg text-[11px] font-semibold bg-emerald-50/80 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200/80 dark:border-emerald-800/50 cursor-default select-none"
+        {/* Cloudflare R2 Live Sync Status Badge */}
+        <button
+          type="button"
+          onClick={() => syncAllDataToCloudR2()}
+          title={
+            r2Status.status === 'synced'
+              ? `Tự động đồng bộ Cloudflare R2 (Lần cuối: ${formattedSyncTime || 'vừa xong'}). Nhấn để lưu ngay.`
+              : r2Status.status === 'syncing'
+              ? 'Đang đồng bộ dữ liệu với Cloudflare R2...'
+              : r2Status.status === 'pending'
+              ? 'Đang chờ tự động lưu thay đổi lên Cloudflare R2 (nhấn để lưu ngay)'
+              : 'Đang dùng bộ nhớ đệm cục bộ (Local Cache)'
+          }
+          className={`hidden xl:flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-all cursor-pointer select-none ${
+            r2Status.status === 'syncing'
+              ? 'bg-sky-50/90 dark:bg-sky-950/50 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-800/60'
+              : r2Status.status === 'pending'
+              ? 'bg-amber-50/90 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/60'
+              : r2Status.status === 'offline' || r2Status.status === 'error'
+              ? 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-700'
+              : 'bg-emerald-50/80 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200/80 dark:border-emerald-800/50'
+          }`}
         >
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-          <span>Auto Cloud R2</span>
-        </div>
+          {r2Status.status === 'syncing' ? (
+            <RefreshCw className="w-3 h-3 text-sky-500 animate-spin" />
+          ) : (
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${
+                r2Status.status === 'pending'
+                  ? 'bg-amber-500 animate-ping'
+                  : r2Status.status === 'offline' || r2Status.status === 'error'
+                  ? 'bg-slate-400'
+                  : 'bg-emerald-500 animate-pulse'
+              }`}
+            />
+          )}
+          <span>
+            {r2Status.status === 'syncing'
+              ? r2Status.detail || 'Đang đồng bộ R2...'
+              : r2Status.status === 'pending'
+              ? 'Chờ lưu R2...'
+              : r2Status.status === 'offline'
+              ? 'Local Cache'
+              : r2Status.status === 'error'
+              ? 'Lỗi R2 (Đã lưu Cache)'
+              : formattedSyncTime
+              ? `R2 Synced (${formattedSyncTime})`
+              : 'Auto Cloud R2'}
+          </span>
+        </button>
 
         <button
           type="button"

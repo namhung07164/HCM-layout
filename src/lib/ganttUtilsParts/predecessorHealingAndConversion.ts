@@ -408,31 +408,18 @@ export function healAllTasksPredecessors(
       if (newPhu !== origPhu) updatePayload.taskCodePhu = newPhu;
 
       updatesToSave.push(updatePayload);
-      return {
-        ...t,
-        taskCodePhu: newPhu,
-        predecessor: newPred,
-        updatedAt,
-      };
+      return { ...t, taskCodePhu: newPhu, predecessor: newPred, updatedAt };
     }
     return t;
   });
 
-  return {
-    updatedTasks,
-    changedCount,
-    updatesToSave
-  };
+  return { updatedTasks, changedCount, updatesToSave };
 }
 
 export function convertAllSubtaskCodesAndPredecessorsToHash(
   allTasks: Task[],
   allProjects: Project[]
-): {
-  updatedTasks: Task[];
-  changedCount: number;
-  updatesToSave: Array<{ id: string; predecessor?: string; taskCodePhu?: string; updatedAt: string }>;
-} {
+): { updatedTasks: Task[]; changedCount: number; updatesToSave: Array<{ id: string; predecessor?: string; taskCodePhu?: string; updatedAt: string }> } {
   const canonicalTaskCodes = computeAllTaskCodes(allProjects, allTasks);
   const taskOldToNewCodeMap = new Map<string, string>();
   const buildScopedOldKey = (t: Task, codeLower: string) =>

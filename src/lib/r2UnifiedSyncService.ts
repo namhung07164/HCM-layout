@@ -4,7 +4,7 @@
  * 1. Synchronizing 100% of workspace state under folder `layout/` (`layout/layout_config.json`, `mapping_config.json`)
  * 2. Automatic cloud pull when opening the app (with 0ms local-disk hydration fallback)
  * 3. Real-time debounced auto-sync to Cloud R2 & cross-tab BroadcastChannel sync during edits
- * 4. Automatic cloud save on app close / exit (beforeunload / pagehide / visibilitychange hidden / freeze)
+ * 4. Automatic cloud save on app close / exit + Live R2 Sync Status observable + Smart Partition Merge
  */
 
 import {
@@ -25,9 +25,18 @@ import {
   buildUnifiedWorkspacePayload,
   applyUnifiedWorkspacePayload,
   isApplyingRemoteWorkspacePayload,
+  mergeRemoteAndLocalPayloads,
 } from './r2WorkspacePayloadService';
 
 export { buildUnifiedWorkspacePayload, applyUnifiedWorkspacePayload };
+
+export type R2SyncStatusType = 'synced' | 'syncing' | 'pending' | 'offline' | 'error';
+
+export interface R2SyncStatusState {
+  status: R2SyncStatusType;
+  lastSyncedAt: number | null;
+  detail?: string;
+}
 
 const LAYOUT_R2_CONFIG_KEY = 'layout/layout_config.json';
 const ROOT_MAPPING_CONFIG_KEY = 'mapping_config.json';
@@ -37,6 +46,35 @@ let isAutoSaving = false;
 let pendingAutoSave = false;
 let isPullingFromCloud = false;
 let lastCloudPullTime = 0;
+let _lastKnownRemotePayload: any = null;
+
+// Live sync status observable for Header UI
+let _syncStatusState: R2SyncStatusState = {
+  status: 'synced',
+  lastSyncedAt: null,
+};
+const _statusListeners = new Set<(state: R2SyncStatusState) => void>();
+
+function updateSyncStatus(patch: Partial<R2SyncStatusState>): void {
+  _syncStatusState = { ..._syncStatusState, ...patch };
+  _statusListeners.forEach((cb) => {
+    try {
+      cb(_syncStatusState);
+    } catch {}
+  });
+}
+
+export function getR2SyncStatus(): R2SyncStatusState {
+  return _syncStatusState;
+}
+
+export function subscribeR2SyncStatus(cb: (state: R2SyncStatusState) => void): () => void {
+  _statusListeners.add(cb);
+  cb(_syncStatusState);
+  return () => {
+    _statusListeners.delete(cb);
+  };
+}
 
 // Pre-warmed S3 client cache for fast zero-latency exit saves
 let _prewarmedS3Client: any = null;
@@ -79,9 +117,10 @@ export async function getOrCreateS3Client(): Promise<{ s3: any; creds: R2Credent
 /**
  * Marks workspace as modified and schedules a debounced real-time auto-save to Cloudflare R2.
  */
-export function markWorkspaceDirty(delayMs = 2000): void {
+export function markWorkspaceDirty(delayMs = 1500): void {
   if (isApplyingRemoteWorkspacePayload()) return;
   _hasUnsavedEdits = true;
+  updateSyncStatus({ status: 'pending', detail: 'Chờ lưu thay đổi...' });
   if (_autoSaveDebounceTimer) {
     clearTimeout(_autoSaveDebounceTimer);
   }
@@ -137,9 +176,13 @@ export async function syncAllDataToCloudR2(options?: {
   }
 
   isAutoSaving = true;
+  updateSyncStatus({ status: 'syncing', detail: 'Đang lưu R2...' });
   try {
     const clientBundle = await getOrCreateS3Client();
-    const payload = buildUnifiedWorkspacePayload();
+    const rawLocalPayload = buildUnifiedWorkspacePayload();
+    const payload = _lastKnownRemotePayload
+      ? mergeRemoteAndLocalPayloads(_lastKnownRemotePayload, rawLocalPayload)
+      : rawLocalPayload;
 
     // 1. Immediately persist to local disk cache (IndexedDB + CacheStorage + localStorage)
     await saveLayoutConfigToDisk(payload);
@@ -156,6 +199,7 @@ export async function syncAllDataToCloudR2(options?: {
     } catch {}
 
     if (!clientBundle) {
+      updateSyncStatus({ status: 'offline', detail: 'Local Cache' });
       return {
         success: false,
         message: 'Chưa cấu hình R2 Cloudflare (đã lưu bộ nhớ đệm cục bộ).',
@@ -177,6 +221,20 @@ export async function syncAllDataToCloudR2(options?: {
     await uploadSingleR2File({ name: ROOT_MAPPING_CONFIG_KEY, blob: rootBlob }, creds, s3).catch(
       () => {}
     );
+
+    if (resLayout.success) {
+      _lastKnownRemotePayload = payload;
+      updateSyncStatus({
+        status: 'synced',
+        lastSyncedAt: Date.now(),
+        detail: 'Đã lưu R2',
+      });
+    } else {
+      updateSyncStatus({
+        status: 'error',
+        detail: resLayout.error || 'Lỗi lưu R2',
+      });
+    }
 
     if (typeof window !== 'undefined') {
       window.dispatchEvent(
@@ -208,6 +266,7 @@ export async function syncAllDataToCloudR2(options?: {
     };
   } catch (err: any) {
     console.warn('[SyncAllDataToCloudR2] Error:', err);
+    updateSyncStatus({ status: 'error', detail: 'Lỗi kết nối R2' });
     return { success: false, message: err?.message || String(err) };
   } finally {
     isAutoSaving = false;
@@ -232,6 +291,7 @@ export async function loadUnifiedDataFromCloudR2(options?: {
 
   isPullingFromCloud = true;
   lastCloudPullTime = Date.now();
+  updateSyncStatus({ status: 'syncing', detail: 'Đang tải R2...' });
   try {
     const clientBundle = await getOrCreateS3Client();
     let data: any = null;
@@ -262,6 +322,10 @@ export async function loadUnifiedDataFromCloudR2(options?: {
     }
 
     if (!data) {
+      updateSyncStatus({
+        status: clientBundle ? 'synced' : 'offline',
+        detail: clientBundle ? 'Sẵn sàng' : 'Local Cache',
+      });
       if (options?.initialBoot && !clientBundle) {
         useAppStore.getState().setToast({
           title: 'Chế độ Local Cache',
@@ -271,6 +335,20 @@ export async function loadUnifiedDataFromCloudR2(options?: {
         });
       }
       return { success: false, message: 'Chưa có cấu hình trên Cloudflare R2.' };
+    }
+
+    if (source.includes('Cloud R2')) {
+      _lastKnownRemotePayload = data;
+      updateSyncStatus({
+        status: 'synced',
+        lastSyncedAt: Date.now(),
+        detail: 'Đã đồng bộ R2',
+      });
+    } else {
+      updateSyncStatus({
+        status: clientBundle ? 'synced' : 'offline',
+        detail: 'Local Cache',
+      });
     }
 
     await applyUnifiedWorkspacePayload(data, { persistToDisk: true });
@@ -292,6 +370,7 @@ export async function loadUnifiedDataFromCloudR2(options?: {
     };
   } catch (err: any) {
     console.warn('[LoadUnifiedDataFromCloudR2] Error:', err);
+    updateSyncStatus({ status: 'error', detail: 'Lỗi tải R2' });
     return { success: false, message: err?.message || String(err) };
   } finally {
     isPullingFromCloud = false;
@@ -348,7 +427,7 @@ export function initAutoSaveOnAppClose(): void {
         state.reviewLabelColors !== prevState.reviewLabelColors ||
         state.activeMapVersionId !== prevState.activeMapVersionId
       ) {
-        markWorkspaceDirty(2000);
+        markWorkspaceDirty(1500);
       }
     });
   } catch {}
@@ -358,13 +437,13 @@ export function initAutoSaveOnAppClose(): void {
     useAppStore.subscribe((state, prevState) => {
       if (isApplyingRemoteWorkspacePayload()) return;
       if (state.projects !== prevState.projects || state.tasks !== prevState.tasks) {
-        markWorkspaceDirty(2000);
+        markWorkspaceDirty(1500);
       }
     });
   } catch {}
 
   // 4. Listen for comparison, paint category, layout URL, and unit image updates
-  const handleCustomRealtimeMutation = () => markWorkspaceDirty(1500);
+  const handleCustomRealtimeMutation = () => markWorkspaceDirty(1200);
   window.addEventListener('taka_comparison_data_saved', handleCustomRealtimeMutation);
   window.addEventListener('taka_paint_categories_updated', handleCustomRealtimeMutation);
   window.addEventListener('taka_unit_images_changed', handleCustomRealtimeMutation);
@@ -381,8 +460,9 @@ export function initAutoSaveOnAppClose(): void {
   window.addEventListener('focus', handleWindowFocusOrVisible);
 
   // 6. Trigger immediate save on app close / exit / backgrounding
-  const triggerSaveOnExit = () => {
+  const triggerSaveOnExit = (e?: BeforeUnloadEvent) => {
     try {
+      const hadUnsavedOrInFlight = _hasUnsavedEdits || isAutoSaving;
       if (_autoSaveDebounceTimer) {
         clearTimeout(_autoSaveDebounceTimer);
         _autoSaveDebounceTimer = null;
@@ -395,12 +475,19 @@ export function initAutoSaveOnAppClose(): void {
       } catch {}
       saveLayoutConfigToDisk(payload).catch(() => {});
       syncAllDataToCloudR2({ silent: true }).catch(() => {});
+
+      // If an upload to R2 was actively in progress or unsaved edits were just flushed on tab close,
+      // signal the browser so in-flight network sockets have time to complete.
+      if (e && hadUnsavedOrInFlight) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
     } catch (_e) {}
   };
 
   window.addEventListener('beforeunload', triggerSaveOnExit);
-  window.addEventListener('pagehide', triggerSaveOnExit);
-  window.addEventListener('freeze', triggerSaveOnExit);
+  window.addEventListener('pagehide', () => triggerSaveOnExit());
+  window.addEventListener('freeze', () => triggerSaveOnExit());
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') {
       triggerSaveOnExit();

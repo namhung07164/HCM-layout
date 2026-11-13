@@ -102,15 +102,31 @@ export function useLayoutWindowListeners({
     }
   }, [isPrintPreview, fitToScreen]);
 
-  // Handle browser native print & custom export events
+  // Handle browser native print, custom export events, and keyboard shortcut (F = Fit to Screen)
   useEffect(() => {
     const handleBeforePrint = () => fitToScreenRef.current(false);
     const handleExportPngEvent = () => handleExport();
+    const handleFitScreenEvent = () => fitToScreenRef.current(true);
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (e.target as HTMLElement)?.isContentEditable) {
+        return;
+      }
+      if (e.key === 'f' || e.key === 'F') {
+        e.preventDefault();
+        fitToScreenRef.current(true);
+      }
+    };
     window.addEventListener('beforeprint', handleBeforePrint);
     window.addEventListener('export-png', handleExportPngEvent);
+    window.addEventListener('taka-fit-screen', handleFitScreenEvent);
+    window.addEventListener('keydown', handleKeyDown);
     return () => {
       window.removeEventListener('beforeprint', handleBeforePrint);
       window.removeEventListener('export-png', handleExportPngEvent);
+      window.removeEventListener('taka-fit-screen', handleFitScreenEvent);
+      window.removeEventListener('keydown', handleKeyDown);
     };
   }, [handleExport, fitToScreenRef]);
 
